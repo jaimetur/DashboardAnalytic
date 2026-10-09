@@ -7211,6 +7211,61 @@ function selectTransferDestination() {
   });
 }
 
+// A workspace not opened since an update keeps the database of an earlier
+// version. Before exporting or transferring it, ask whether to convert it to
+// the current version (its database is updated in place) or to leave it out.
+async function resolveOutdatedExportWorkspaces(formData, operation) {
+  const targets = formData.getAll('export_target').map((value) => String(value));
+  const workspaceIds = [
+    ...(targets.includes('full-environment') ? formData.getAll('workspace_ids').map((value) => String(value)) : []),
+    ...targets.filter((target) => target.startsWith('workspace:')).map((target) => target.slice('workspace:'.length)),
+  ];
+  if (!workspaceIds.length) return true;
+  const query = new URLSearchParams(workspaceIds.map((workspaceId) => ['workspace_id', workspaceId]));
+  showLoadingOverlay('Checking workspaces', 'Checking whether the selected workspaces come from an earlier version.');
+  let outdated = [];
+  try {
+    const response = await fetch(`/admin/import-export/workspaces/outdated?${query}`, {credentials: 'same-origin', headers: {Accept: 'application/json'}, cache: 'no-store'});
+    const payload = await response.json().catch(() => ({}));
+    outdated = response.ok && Array.isArray(payload.outdated) ? payload.outdated : [];
+  } catch (_error) {
+    // Without an answer the server still converts them before reading them.
+    outdated = [];
+  } finally {
+    hideLoadingOverlay();
+  }
+  if (!outdated.length) return true;
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[character]));
+  const names = outdated.map((workspace) => workspace.name);
+  const choice = await showConfirmDialog(
+    `These workspaces come from an earlier version: ${names.join(', ')}. Convert them to the current version or exclude them from this ${operation.toLowerCase()}?`,
+    {
+      title: 'Workspaces from an earlier version',
+      confirmLabel: 'Convert and include',
+      secondaryLabel: 'Exclude them',
+      cancelLabel: 'Cancel',
+      copyHtml: `<p>These workspaces have not been opened since the application was updated, so their database still has the layout of an earlier version:</p>`
+        + `<ul class="incoming-transfer-contents">${names.map((name) => `<li>${escapeHtml(name)}</li>`).join('')}</ul>`
+        + `<p><strong>Convert and include</strong> updates their database to the current version before the ${operation.toLowerCase()} (large workspaces can take several minutes), as opening them would. <strong>Exclude them</strong> leaves them out of this ${operation.toLowerCase()}.</p>`,
+    },
+  );
+  if (choice === 'confirm') return true;
+  if (choice !== 'secondary') return false;
+  const excluded = new Set(outdated.map((workspace) => String(workspace.id)));
+  const remainingWorkspaceIds = formData.getAll('workspace_ids').map((value) => String(value)).filter((workspaceId) => !excluded.has(workspaceId));
+  formData.delete('workspace_ids');
+  remainingWorkspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
+  const remainingTargets = targets.filter((target) => !(target.startsWith('workspace:') && excluded.has(target.slice('workspace:'.length))));
+  formData.delete('export_target');
+  remainingTargets.forEach((target) => formData.append('export_target', target));
+  const emptyEnvironment = remainingTargets.includes('full-environment') && !remainingWorkspaceIds.length;
+  if (!remainingTargets.length || emptyEnvironment) {
+    showInfoDialog(`Nothing is left to ${operation.toLowerCase()} once those workspaces are excluded.`, {title: `${operation} cancelled`, tone: 'info'});
+    return false;
+  }
+  return true;
+}
+
 const ACTIVE_SERVER_TRANSFER_KEY = 'drivetest-analyzer:active-transfer';
 
 function readActiveServerTransfer() {
@@ -7387,6 +7442,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       formData.set('include_generated_outputs', String(selection.includeGeneratedOutputs));
     }
     if (!await confirmGeneratedOutputs(formData, 'Transfer')) return;
+    if (!await resolveOutdatedExportWorkspaces(formData, 'Transfer')) return;
     const destination = await selectTransferDestination();
     if (!destination) return;
     formData.set('destination_url', destination.destinationUrl);
@@ -7427,6 +7483,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       formData.set('include_generated_outputs', String(selection.includeGeneratedOutputs));
     }
     if (!await confirmGeneratedOutputs(formData, 'Export')) return;
+    if (!await resolveOutdatedExportWorkspaces(formData, 'Export')) return;
     showLoadingOverlay(form.dataset.loadingLabel, form.dataset.loadingCopy);
     try {
       const response = await fetch(form.action, {
@@ -7627,8 +7684,12 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         setLoadingProgress(offer.progress);
         if (loadingCopy) {
           const progress = offer.progress ? ` — ${offer.progress}%` : '';
+          const sourcePhases = {
+            'source creating package': 'The source server is creating the package',
+            'source sending package': 'The source server is sending the package',
+          };
           const copies = {
-            accepted: 'Waiting for the source server to start sending the package',
+            accepted: sourcePhases[offer.phase] || 'Waiting for the source server to start sending the package',
             receiving: 'Receiving the package from the source server',
             received: 'Package received. Starting the import',
             importing: `Importing the received package${offer.phase ? `: ${offer.phase}` : ''}`,

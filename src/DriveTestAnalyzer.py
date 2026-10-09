@@ -200,6 +200,7 @@ MANUAL_RESTORE_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 TRANSFER_OFFER_TTL = timedelta(minutes=15)
 TRANSFER_PROGRESS_SAVE_SECONDS = 10.0
+TRANSFER_SOURCE_PROGRESS_SECONDS = 5.0
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
 application_data_dir = settings.data_dir
@@ -7661,6 +7662,70 @@ def _restore_workspace_nq_call_tracking(workspace: Workspace, payload: bytes) ->
         raise ValueError(f'NQ Call Tracking for "{workspace.name}" is invalid: {exc}') from exc
 
 
+_CURRENT_WORKSPACE_SCHEMA: dict[str, set[str]] | None = None
+_CURRENT_WORKSPACE_SCHEMA_LOCK = Lock()
+
+
+def _workspace_database_initialized_by_this_process(workspace: Workspace) -> bool:
+    database_path = workspace.database_path.resolve()
+    try:
+        database_inode = database_path.stat().st_ino
+    except OSError:
+        database_inode = None
+    return (str(database_path), database_inode) in INITIALIZED_WORKSPACE_DATABASES
+
+
+def _database_tables_and_columns(database_path: Path) -> dict[str, set[str]]:
+    with closing(sqlite3.connect(f'file:{database_path}?mode=ro', uri=True)) as connection:
+        tables = [
+            str(row[0]) for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        ]
+        return {
+            table: {str(row[1]) for row in connection.execute(f'PRAGMA table_info("{table}")').fetchall()}
+            for table in tables
+        }
+
+
+def _current_workspace_schema() -> dict[str, set[str]]:
+    """Tables and columns of a workspace database created by this version."""
+    global _CURRENT_WORKSPACE_SCHEMA
+    with _CURRENT_WORKSPACE_SCHEMA_LOCK:
+        if _CURRENT_WORKSPACE_SCHEMA is None:
+            with tempfile.TemporaryDirectory(prefix='drivetest-analyzer-schema-') as temporary_dir:
+                database_path = Path(temporary_dir) / 'workspace.db'
+                Repository(database_path, global_db_path=Path(temporary_dir) / 'application.db').initialize()
+                _CURRENT_WORKSPACE_SCHEMA = _database_tables_and_columns(database_path)
+        return _CURRENT_WORKSPACE_SCHEMA
+
+
+def workspace_database_is_outdated(workspace: Workspace) -> bool:
+    """Return whether a workspace database lacks tables or columns of this version.
+
+    A workspace not opened since an update keeps the layout of the version that
+    last opened it until it is opened again or converted before an export.
+    """
+    if _workspace_database_initialized_by_this_process(workspace) or not workspace.database_path.is_file():
+        return False
+    try:
+        existing = _database_tables_and_columns(workspace.database_path)
+    except sqlite3.Error:
+        return True
+    return any(not columns <= existing.get(table, set()) for table, columns in _current_workspace_schema().items())
+
+
+def _upgrade_workspace_database_for_export(workspace: Workspace, task_repository: Repository) -> None:
+    """Bring a workspace not opened since an update to the current database layout.
+
+    Its definitions are read with the current queries, which fail on columns
+    that only exist once the workspace has been opened by this version. The
+    export dialogs ask before converting such a workspace or leave it out.
+    """
+    if not _workspace_database_initialized_by_this_process(workspace):
+        task_repository.initialize()
+
+
 def _archive_workspace(
     archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, scratch_dir: Path | None = None,
     progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
@@ -7671,6 +7736,7 @@ def _archive_workspace(
         global_db_path=repository.global_db_path,
         workspace_registry_db_path=workspace_registry.registry_path,
     )
+    _upgrade_workspace_database_for_export(workspace, task_repository)
     _archive_database(
         archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback,
         exclude_tables=() if include_generated_outputs else ('generated_jobs', 'report_task_runs'),
@@ -9409,11 +9475,14 @@ def transfer_connection_error(destination: str) -> str:
     )
 
 
-def _cancel_remote_transfer_offer(destination: str, offer_id: str, headers: dict[str, str]) -> None:
+def _cancel_remote_transfer_offer(destination: str, offer_id: str, headers: dict[str, str], reason: str = '') -> None:
+    """Close the destination offer, telling the destination why when the source failed."""
     with httpx.Client(timeout=5.0, trust_env=transfer_uses_environment_proxy(destination)) as client:
-        client.delete(
+        client.request(
+            'DELETE',
             _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'),
             headers=headers,
+            json={'reason': reason} if reason else None,
         )
 
 
@@ -9630,6 +9699,39 @@ def _import_received_transfer(offer_id: str) -> None:
         package_path.unlink(missing_ok=True)
 
 
+# Destination phases of an accepted transfer while the source creates and sends its package.
+SOURCE_TRANSFER_PHASES = {'exporting': 'source creating package', 'transferring': 'source sending package'}
+
+
+def _report_source_transfer_progress(
+    job: dict[str, Any], destination: str, offer_id: str, headers: dict[str, str], stop: Event,
+) -> None:
+    """Tell the destination how far the source got while it creates and sends the package.
+
+    The destination receives nothing while the package is created, and a reverse
+    proxy that buffers the upload hides its reception too, so without these
+    reports its task would not move until the package arrives.
+    """
+    url = _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}/source-progress')
+    try:
+        with httpx.Client(
+            timeout=httpx.Timeout(5.0), follow_redirects=False, trust_env=transfer_uses_environment_proxy(destination),
+        ) as client:
+            while not stop.wait(TRANSFER_SOURCE_PROGRESS_SECONDS):
+                with TRANSFER_LOCK:
+                    status_value = str(job.get('status') or '')
+                    progress = float(job.get('progress') or 0)
+                if status_value not in SOURCE_TRANSFER_PHASES:
+                    return
+                try:
+                    client.post(url, headers=headers, json={'status': status_value, 'progress': progress})
+                except httpx.HTTPError:
+                    # A report is informative only; the next one is sent anyway.
+                    continue
+    except httpx.HTTPError:
+        return
+
+
 def _raise_for_destination_response(response: Any, fallback: str) -> None:
     """Raise the destination server's own explanation of a rejected request."""
     status_code = int(getattr(response, 'status_code', 200) or 200)
@@ -9656,6 +9758,7 @@ def _run_transfer_job(job_id: str) -> None:
         package_path = Path(str(job['path']))
     offer_secret = secrets.token_urlsafe(32)
     offer_id = ''
+    progress_reports_stop = Event()
     headers = {'X-Dashboard-Transfer-Secret': offer_secret, 'Accept': 'application/json'}
     def cancellation_requested() -> bool:
         with TRANSFER_LOCK:
@@ -9757,6 +9860,12 @@ def _run_transfer_job(job_id: str) -> None:
                     'exported_bytes': 0,
                     'progress': 0.0,
                 })
+            Thread(
+                target=_report_source_transfer_progress,
+                args=(job, destination, offer_id, headers, progress_reports_stop),
+                name=f'server-transfer-progress-{job_id[:8]}',
+                daemon=True,
+            ).start()
             stop_if_cancelled()
 
             def update_export_progress(written: int) -> None:
@@ -9846,18 +9955,19 @@ def _run_transfer_job(job_id: str) -> None:
         # Do not strand an accepted or pending destination offer when the
         # source has definitively abandoned the job. The remote DELETE is
         # idempotent and deliberately leaves an already completed offer alone.
-        if offer_id:
-            try:
-                _cancel_remote_transfer_offer(destination, offer_id, headers)
-            except (httpx.HTTPError, OSError):
-                pass
         if isinstance(exc, httpx.ConnectError):
             error = transfer_connection_error(destination)
         else:
             error = str(exc)
+        if offer_id:
+            try:
+                _cancel_remote_transfer_offer(destination, offer_id, headers, reason=error)
+            except (httpx.HTTPError, OSError):
+                pass
         with TRANSFER_LOCK:
             job.update({'status': 'failed', 'error': error, 'finished_at': datetime.now(timezone.utc).timestamp()})
     finally:
+        progress_reports_stop.set()
         package_path.unlink(missing_ok=True)
 
 
@@ -19021,8 +19131,15 @@ def get_transfer_offer_status(offer_id: str, request: Request) -> JSONResponse:
 
 
 @app.delete('/api/import-export/transfers/offers/{offer_id}')
-def cancel_transfer_offer(offer_id: str, request: Request) -> JSONResponse:
+async def cancel_transfer_offer(offer_id: str, request: Request) -> JSONResponse:
     secret = request.headers.get('X-Dashboard-Transfer-Secret', '')
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    # A source that failed sends its reason; without one, the source user cancelled.
+    reason = str(body.get('reason') or '').strip()[:2000] if isinstance(body, dict) else ''
+    error = f'The source server could not complete the transfer: {reason}' if reason else 'The source server cancelled the transfer.'
     with TRANSFER_LOCK:
         _refresh_persisted_transfer_offers()
         offer = TRANSFER_OFFERS.get(offer_id)
@@ -19038,10 +19155,36 @@ def cancel_transfer_offer(offer_id: str, request: Request) -> JSONResponse:
             raise HTTPException(status_code=409, detail='The destination has started importing data and cannot be stopped safely.')
         if offer.get('status') not in {'ready', 'failed', 'rejected', 'expired', 'cancelled'}:
             # A package still being received stops at its next chunk.
-            offer.update({'status': 'cancelled', 'phase': 'cancelled by source', 'error': 'The source server cancelled the transfer.',
+            offer.update({'status': 'failed' if reason else 'cancelled', 'phase': 'stopped by source', 'error': error,
                           'cancel_requested': True, 'finished_at': datetime.now(timezone.utc).timestamp()})
             _save_transfer_offer(offer)
     return JSONResponse({'cancelled': True})
+
+
+@app.post('/api/import-export/transfers/offers/{offer_id}/source-progress')
+async def receive_source_transfer_progress(offer_id: str, request: Request) -> JSONResponse:
+    """Record how far the source got while this server waits for the package."""
+    secret = request.headers.get('X-Dashboard-Transfer-Secret', '')
+    try:
+        payload = await request.json()
+    except ValueError:
+        payload = {}
+    phase = SOURCE_TRANSFER_PHASES.get(str(payload.get('status') or '') if isinstance(payload, dict) else '')
+    try:
+        progress = round(min(100.0, max(0.0, float(payload.get('progress') or 0))), 1) if phase else 0.0
+    except (TypeError, ValueError):
+        progress = 0.0
+    with TRANSFER_LOCK:
+        _refresh_persisted_transfer_offers()
+        offer = TRANSFER_OFFERS.get(offer_id)
+        if not offer or not _transfer_offer_secret_matches(offer, secret):
+            raise HTTPException(status_code=404, detail='The transfer offer does not exist.')
+        # Only an offer still waiting for its package shows the source's progress;
+        # once the package arrives, its own reception progress replaces it.
+        if phase and offer.get('status') == 'accepted' and offer_id not in ACTIVE_TRANSFER_RECEIVES:
+            offer.update({'phase': phase, 'progress': progress})
+            _save_transfer_offer(offer)
+    return JSONResponse({'status': offer.get('status')})
 
 
 @app.put('/api/import-export/transfers/offers/{offer_id}/package')
@@ -19336,6 +19479,20 @@ def create_admin_transfer_job(
         'status_url': f"/admin/import-export/transfers/jobs/{job['id']}",
         'cancel_url': f"/admin/import-export/transfers/jobs/{job['id']}/cancel",
     })
+
+
+@app.get('/admin/import-export/workspaces/outdated')
+def list_outdated_export_workspaces(
+    workspace_id: list[str] = Query(default=[]), user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    """List the selected workspaces whose database comes from an earlier version."""
+    requested = set(workspace_id)
+    outdated = [
+        {'id': workspace.id, 'name': workspace.name}
+        for workspace in accessible_workspaces(user)
+        if workspace.id in requested and workspace_database_is_outdated(workspace)
+    ]
+    return JSONResponse({'outdated': outdated})
 
 
 @app.get('/admin/import-export/transfers/jobs/{job_id}')

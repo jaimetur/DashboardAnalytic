@@ -280,7 +280,7 @@ Server transfers use a persisted offer and resumable package reception:
 
 1. Source requests approval from the destination.
 2. A destination super-admin accepts or rejects it from any page.
-3. Source builds the package with progress.
+3. Source builds the package with progress, reporting it to the destination every few seconds while it builds and sends it.
 4. Destination receives chunks with progress, each transmission attempt into its own file.
 5. Completed reception starts import with progress, which the destination stores as each phase begins.
 6. Reloading either browser restores the active transfer state; the dialogs can be hidden while the transfer continues as a background task, except on the destination while the package is imported.

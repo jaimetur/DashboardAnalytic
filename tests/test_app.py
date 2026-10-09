@@ -3677,7 +3677,7 @@ def test_transfer_status_keeps_live_progress_and_closes_abandoned_imports(client
 def test_outgoing_transfer_reports_the_destination_reason_and_can_cancel_during_remote_import(client, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
-    state = {'reject_package': True, 'deleted': 0, 'job_id': ''}
+    state = {'reject_package': True, 'deleted': 0, 'delete_reasons': [], 'job_id': ''}
 
     class FakeResponse:
         def __init__(self, payload, status_code=200):
@@ -3718,8 +3718,10 @@ def test_outgoing_transfer_reports_the_destination_reason_and_can_cancel_during_
             state['uploaded'] = True
             return FakeResponse({'status': 'importing'})
 
-        def delete(self, *args, **kwargs):
+        def request(self, method, *args, **kwargs):
+            assert method == 'DELETE'
             state['deleted'] += 1
+            state['delete_reasons'].append((kwargs.get('json') or {}).get('reason', ''))
             return FakeResponse({'cancelled': True})
 
     def fake_export(target, destination, workspace_ids=None, progress_callback=None, include_generated_outputs=True, include_input_files=True):
@@ -3744,15 +3746,103 @@ def test_outgoing_transfer_reports_the_destination_reason_and_can_cancel_during_
     payload = finished_payload(rejected['id'])
     assert payload['status'] == 'failed'
     assert payload['error'] == 'The destination server could not receive the package: disk full'
+    # The destination learns why the source stopped.
+    assert state['delete_reasons'] == ['The destination server could not receive the package: disk full']
 
     state['reject_package'] = False
     cancelled = app_module.start_transfer_job('http://destination.example', 8080, 'config', None, user)
     state['job_id'] = cancelled['id']
     payload = finished_payload(cancelled['id'])
     assert payload['status'] == 'cancelled'
-    assert state['deleted'] >= 1
+    assert state['deleted'] >= 2
+    assert state['delete_reasons'][-1] == ''
     for job_id in (rejected['id'], cancelled['id']):
         app_module.TRANSFER_JOBS.pop(job_id, None)
+
+
+def test_full_environment_export_upgrades_workspaces_not_opened_since_an_update(client, monkeypatch, tmp_path) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    login_super(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    # This server process has not opened it: a workspace of the current version is not outdated.
+    monkeypatch.setattr(app_module, 'INITIALIZED_WORKSPACE_DATABASES', set())
+    assert app_module.workspace_database_is_outdated(workspace) is False
+    # A workspace last opened before the CDR Type existed has no cdr_stage column.
+    with sqlite3.connect(workspace.database_path) as connection:
+        connection.execute('ALTER TABLE dataset_profiles DROP COLUMN cdr_stage')
+    # The export dialogs learn which selected workspaces come from an earlier version.
+    outdated = client.get('/admin/import-export/workspaces/outdated', params={'workspace_id': [workspace.id, 'missing']})
+    assert outdated.status_code == 200
+    assert outdated.json()['outdated'] == [{'id': workspace.id, 'name': workspace.name}]
+    destination = tmp_path / 'full-environment.zip'
+    app_module.build_export_archive_file(['full-environment'], destination, [workspace.id])
+    assert zipfile.is_zipfile(destination)
+    # Converting it for the export leaves it at the current version.
+    assert app_module.workspace_database_is_outdated(workspace) is False
+
+
+def test_source_reports_its_progress_while_it_creates_and_sends_the_package(monkeypatch) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    job = {'status': 'exporting', 'progress': 12.5}
+    stop = app_module.Event()
+    reports = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def post(self, url, headers=None, json=None):
+            reports.append((url, json))
+            if len(reports) == 1:
+                job.update({'status': 'transferring', 'progress': 80.0})
+            else:
+                job['status'] = 'remote_importing'
+
+    monkeypatch.setattr(app_module.httpx, 'Client', FakeClient)
+    monkeypatch.setattr(app_module, 'TRANSFER_SOURCE_PROGRESS_SECONDS', 0.001)
+    app_module._report_source_transfer_progress(job, 'http://destination.example:7278', 'remote-offer', {}, stop)
+    assert reports == [
+        ('http://destination.example:7278/api/import-export/transfers/offers/remote-offer/source-progress', {'status': 'exporting', 'progress': 12.5}),
+        ('http://destination.example:7278/api/import-export/transfers/offers/remote-offer/source-progress', {'status': 'transferring', 'progress': 80.0}),
+    ]
+
+
+def test_destination_shows_why_the_source_stopped_the_transfer(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    headers = {'X-Dashboard-Transfer-Secret': 'source-failure-reason-test-secret-long'}
+    offer_ids = []
+    for reason in ('no such column: p.cdr_stage', ''):
+        offer_id = client.post(
+            '/api/import-export/transfers/offers',
+            headers=headers,
+            json={'source': f'Test source {len(offer_ids)}', 'archive_version': 1, 'kind': 'config', 'content': 'config', 'workspaces': []},
+        ).json()['offer_id']
+        offer_ids.append(offer_id)
+        response = client.request(
+            'DELETE', f'/api/import-export/transfers/offers/{offer_id}', headers=headers,
+            json={'reason': reason} if reason else None,
+        )
+        assert response.status_code == 200
+    login_super(client)
+    failed = client.get(f'/admin/import-export/transfers/offers/{offer_ids[0]}').json()
+    assert failed['status'] == 'failed'
+    assert failed['error'] == 'The source server could not complete the transfer: no such column: p.cdr_stage'
+    cancelled = client.get(f'/admin/import-export/transfers/offers/{offer_ids[1]}').json()
+    assert cancelled['status'] == 'cancelled'
+    assert cancelled['error'] == 'The source server cancelled the transfer.'
+    for offer_id in offer_ids:
+        app_module.TRANSFER_OFFERS.pop(offer_id, None)
+        app_module.repository.delete_transfer_offer(offer_id)
 
 
 def test_accepted_incoming_transfer_runs_as_a_stoppable_background_task(client, monkeypatch) -> None:
@@ -3771,6 +3861,21 @@ def test_accepted_incoming_transfer_runs_as_a_stoppable_background_task(client, 
     task = next(task for group in groups for task in group['tasks'] if task['id'] == f'incoming-transfer:{offer_id}')
     assert task['label'] == 'Receiving server transfer: config'
     assert task['stop_url'] == '/api/server-background-tasks/stop'
+
+    # The task follows the source while it creates and sends the package.
+    reported = client.post(
+        f'/api/import-export/transfers/offers/{offer_id}/source-progress',
+        headers=headers, json={'status': 'exporting', 'progress': 41.7},
+    )
+    assert reported.status_code == 200
+    groups = client.get('/api/background-tasks').json()['groups']
+    task = next(task for group in groups for task in group['tasks'] if task['id'] == f'incoming-transfer:{offer_id}')
+    assert task['detail'] == 'Source Creating Package'
+    assert task['progress'] == 41.7
+    assert client.post(
+        f'/api/import-export/transfers/offers/{offer_id}/source-progress',
+        headers={'X-Dashboard-Transfer-Secret': 'a-different-secret-that-is-long-enough'}, json={'status': 'exporting', 'progress': 50},
+    ).status_code == 404
     assert client.post('/api/server-background-tasks/stop', data={'task_id': f'incoming-transfer:{offer_id}'}).status_code == 200
     refused = client.put(
         f'/api/import-export/transfers/offers/{offer_id}/package',
@@ -3794,6 +3899,8 @@ def test_transfer_dialogs_can_be_hidden_and_block_the_destination_during_import(
     assert 'const followIncomingTransfer = (offerId, options = {}) => {' in script
     assert 'if (importing && state.block) {' in script
     assert "if (activeImport) followIncomingTransfer(String(activeImport.id), {block: true});" in script
+    assert "if (!await resolveOutdatedExportWorkspaces(formData, 'Transfer')) return;" in script
+    assert "if (!await resolveOutdatedExportWorkspaces(formData, 'Export')) return;" in script
 
 
 def test_transfer_url_explicit_port_overrides_prefilled_default_port() -> None:
