@@ -2745,6 +2745,59 @@ class Repository:
                 [(source, canonical) for source in desired_sources.values()],
             )
 
+    @_invalidates_chart_mappings
+    def assign_chart_mapping_sources(self, mapping_type: str, assignments: Iterable[tuple[str, str]]) -> int:
+        """Assign source values to labels: an existing group, or a new one at the end; returns how many changed.
+
+        A value leaves the group it belonged to. The canonical label of a group stays in it (rename the
+        group to change it), and a label that is a source value of another group cannot become a group.
+        """
+        table = self._chart_mapping_table(mapping_type)
+        title = mapping_type.title()
+        changed = 0
+        with self.connection() as conn:
+            for raw_source, raw_label in assignments:
+                source, label = str(raw_source or '').strip(), str(raw_label or '').strip()
+                if not source or not label:
+                    continue
+                current = conn.execute(f'SELECT canonical_value FROM {table} WHERE source_value = ? COLLATE NOCASE',
+                                       (source,)).fetchone()
+                current_label = str(current['canonical_value']).strip() if current else ''
+                if current_label.casefold() == label.casefold():
+                    continue
+                if current_label.casefold() == source.casefold():
+                    raise ValueError(f'{source} is also one of the {title} labels: rename that label to change it.')
+                group = conn.execute('SELECT canonical_value FROM chart_mapping_groups WHERE mapping_type = ? '
+                                     'AND canonical_value = ? COLLATE NOCASE', (mapping_type, label)).fetchone()
+                if group is None:
+                    owner = conn.execute(f'SELECT canonical_value FROM {table} WHERE source_value = ? COLLATE NOCASE',
+                                         (label,)).fetchone()
+                    if owner is not None and label.casefold() != source.casefold():
+                        raise ValueError(f'{label} is a name of the CDRs shown as {owner["canonical_value"]}: '
+                                         f'give {source} the label {owner["canonical_value"]} or another one.')
+                conn.execute(f'DELETE FROM {table} WHERE source_value = ? COLLATE NOCASE', (source,))
+                if group is None:
+                    position = int(conn.execute('SELECT COALESCE(MAX(position), -1) + 1 FROM chart_mapping_groups '
+                                                'WHERE mapping_type = ?', (mapping_type,)).fetchone()[0])
+                    conn.execute('INSERT INTO chart_mapping_groups (mapping_type, canonical_value, position, color) '
+                                 'VALUES (?, ?, ?, ?)', (mapping_type, label, position, '#6F42C1'))
+                    conn.execute(f'INSERT OR IGNORE INTO {table} (source_value, canonical_value) VALUES (?, ?)', (label, label))
+                    canonical = label
+                else:
+                    canonical = str(group['canonical_value'])
+                conn.execute(f'INSERT OR REPLACE INTO {table} (source_value, canonical_value) VALUES (?, ?)', (source, canonical))
+                changed += 1
+        return changed
+
+    def ready_cdr_dataset_names(self) -> dict[int, str]:
+        """The file names of the ready CDRs (CDR-DATA, CDR-VOICE and CDR-SPEECH) of the workspace."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT d.id, d.file_name FROM datasets d JOIN dataset_profiles p ON p.dataset_id = d.id "
+                "WHERE p.status = 'ready' AND LOWER(COALESCE(p.dataset_kind, '')) IN ('data', 'voice', 'speech')"
+            ).fetchall()
+        return {int(row['id']): str(row['file_name'] or '') for row in rows}
+
     def delete_operator_mapping_group(self, canonical_value: str) -> None:
         self._delete_chart_mapping_group('operator', canonical_value)
 

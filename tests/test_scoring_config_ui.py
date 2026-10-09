@@ -610,8 +610,8 @@ def test_methodology_import_export_controls_use_requested_colors():
         r'\.scoring-config-panel\s+\[data-scoring-config-export\]\s*\{([^}]*)\}', template,
     ))
     assert import_rules and export_rules
-    assert 'background: #f5d6d6' in import_rules[-1].group(1)
-    assert 'color: #783737' in import_rules[-1].group(1)
+    assert 'background: #fff' in import_rules[-1].group(1)
+    assert 'color: #1f6967' in import_rules[-1].group(1)
     assert 'background: #267c79' in export_rules[-1].group(1)
     assert 'color: #fff' in export_rules[-1].group(1)
 

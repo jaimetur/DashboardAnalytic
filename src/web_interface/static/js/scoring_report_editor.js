@@ -527,12 +527,10 @@
       // The Default configuration is always listed after the placeholder and before the saved ones.
       const DEFAULT_NAME = 'Default';
       const DEFAULT_VALUE = '__default__';
-      // The configuration chosen in the selector (the placeholder until one is chosen) and the
-      // scenarios as it was loaded or saved, to tell unsaved changes.
+      // The selector shows the saved configuration (or Default) whose scenarios are the ones shown, or
+      // <Not saved configuration> when none is; lastChosen is the one last loaded or saved (Save as… proposes it).
       let current = '';
-      let baseline = JSON.stringify(state.scenarios);
-      let openedValue = openedName.toLocaleLowerCase() === DEFAULT_NAME.toLocaleLowerCase() ? DEFAULT_VALUE : openedName;
-      const markSaved = () => { baseline = JSON.stringify(state.scenarios); };
+      let lastChosen = openedName.toLocaleLowerCase() === DEFAULT_NAME.toLocaleLowerCase() ? '' : openedName;
       // Key order does not matter when comparing configurations.
       const canonical = (value) => JSON.stringify(value, (_key, item) => (item && typeof item === 'object' && !Array.isArray(item)
         ? Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right))) : item));
@@ -544,10 +542,15 @@
         return canonical(operators.configuration(defaultConfiguration(context.defaults), knownOperators).scenarios) === opened
           ? DEFAULT_VALUE : '';
       };
-      const hasUnsavedChanges = () => JSON.stringify(state.scenarios) !== baseline;
+      // Scenarios that no saved configuration (nor Default) has are unsaved changes.
+      const hasUnsavedChanges = () => !matchingConfiguration();
+      const syncSelector = () => {
+        current = matchingConfiguration();
+        saved.value = current;
+      };
       const refreshSaved = (payload) => {
         savedConfigurations = payload?.configurations || [];
-        saved.replaceChildren(el('option', '', savedConfigurations.length ? 'Saved configurations…' : 'No saved configurations'));
+        saved.replaceChildren(el('option', '', '<Not saved configuration>'));
         saved.firstChild.value = '';
         const defaultOption = el('option', '', DEFAULT_NAME);
         defaultOption.value = DEFAULT_VALUE;
@@ -557,11 +560,7 @@
           option.value = item.name;
           saved.append(option);
         }
-        const listed = (value) => value && [...saved.options].some((option) => option.value === value);
-        current = listed(current) ? current : listed(openedValue) && !current ? openedValue : '';
-        // Reports saved without the name of their configuration: the configuration with the same content.
-        if (!current && !openedName && !hasUnsavedChanges()) current = matchingConfiguration();
-        saved.value = current;
+        syncSelector();
       };
       const button = (text, handler, kind, titleText = '') => {
         const node = el('button', `ghost-link scoring-report-tool is-${kind}`);
@@ -586,12 +585,11 @@
           setStatus(`Loaded “${item.name}”.`, 'success');
         }
         render();
-        markSaved();
-        current = value;
-        saved.value = value;
+        lastChosen = value === DEFAULT_VALUE ? '' : value;
+        syncSelector();
       };
       const saveAs = async () => {
-        const proposed = (current !== DEFAULT_VALUE && current) || state.scenarios[0]?.name || '';
+        const proposed = (current !== DEFAULT_VALUE && current) || lastChosen || state.scenarios[0]?.name || '';
         const name = await ask(dialog, {
           title: 'Save report configuration', value: proposed,
           copy: 'Name of the configuration in this workspace. Saving with the name of a saved configuration replaces it.',
@@ -606,9 +604,8 @@
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({name: name.trim(), configuration: {scenarios: state.scenarios}}),
           });
-          current = name.trim();
+          lastChosen = name.trim();
           refreshSaved(payload);
-          markSaved();
           setStatus(`Saved “${name.trim()}”.`, 'success');
           return true;
         } catch (error) {
@@ -687,7 +684,8 @@
           }
           state.scenarios.forEach((scenario, index) => { scenario.name = scenario.name.trim() || `Scenario ${index + 1}`; });
           // The chosen configuration's name is kept while its scenarios have no unsaved changes.
-          const chosenName = current && !hasUnsavedChanges() ? (current === DEFAULT_VALUE ? DEFAULT_NAME : current) : '';
+          const match = matchingConfiguration();
+          const chosenName = match === DEFAULT_VALUE ? DEFAULT_NAME : match;
           close({configuration: {...clone(state), ...(chosenName ? {name: chosenName} : {})}, action});
         });
         footer.append(node);
@@ -696,18 +694,21 @@
         list.replaceChildren(...state.scenarios.map((_scenario, index) => scenarioCard(state, index, context, render)));
         add.disabled = state.scenarios.length >= 20;
         markDifferences(list, state.scenarios);
+        syncSelector();
       }
-      // Settings change without rendering again (checkboxes, selects, Select All / None): refresh the highlights.
-      const refreshDifferences = () => queueMicrotask(() => markDifferences(list, state.scenarios));
+      // Settings change without rendering again (checkboxes, selects, names, Select All / None): refresh the
+      // highlights and the configuration the selector shows.
+      const refreshDifferences = () => queueMicrotask(() => { markDifferences(list, state.scenarios); syncSelector(); });
       list.addEventListener('change', refreshDifferences);
       list.addEventListener('click', refreshDifferences);
+      list.addEventListener('input', refreshDifferences);
       render();
       dialog.append(header, list, add, footer);
       dialog.addEventListener('cancel', (event) => { event.preventDefault(); close(null); });
       document.body.append(dialog);
       dialog.showModal();
       refreshSaved(null);
-      api('/api/scoring/report-configurations').then((payload) => { refreshSaved(payload); openedValue = ''; }).catch(() => {});
+      api('/api/scoring/report-configurations').then(refreshSaved).catch(() => {});
     });
   }
 

@@ -249,3 +249,21 @@ def test_report_configurations_remember_the_configuration_they_were_chosen_from(
     scenario = {'name': 'National', 'scorings': {'best_network': {'enabled': True}}}
     assert normalize_report_configuration({'scenarios': [scenario], 'name': ' Weekly '})['name'] == 'Weekly'
     assert 'name' not in normalize_report_configuration({'scenarios': [scenario]})
+
+
+def test_report_api_remembers_the_configuration_when_the_document_is_requested(scoring_api, monkeypatch):
+    import src.DriveTestAnalyzer as core
+
+    def failing_build(*_args, **_kwargs):
+        raise ValueError('The scoring of the scenario could not be calculated.')
+
+    monkeypatch.setattr(core, 'build_scoring_report_document', failing_build)
+    client = scoring_api['client']
+    configuration = {'name': 'Weekly', 'scenarios': [default_scenario(name='London', context_filters={'City': ['London']})]}
+    response = client.post('/api/scoring/report/ppt', json={
+        'configuration': configuration, 'dataset_ids': scoring_api['complete_dataset_ids'], 'nr_mode': 'NSA',
+    })
+    assert response.status_code == 400
+    # Remembered before the document is built, so also when it is not ready (or never is).
+    last = client.get('/api/scoring/report-configurations').json()['last']
+    assert last['name'] == 'Weekly' and last['scenarios'][0]['name'] == 'London'

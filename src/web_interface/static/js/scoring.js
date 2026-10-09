@@ -126,13 +126,18 @@
   const restoredScoringViewState = readScoringViewState();
   let scoringViewScrollRestorePending = Number.isFinite(restoredScoringViewState.scrollY);
   let scoringViewScrollRestoreStarted = false;
+  let scoringViewScrollRestoring = false;
+  // The page restores its own position, once its results are drawn.
+  if (scoringViewScrollRestorePending && 'scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
   let scoringViewSaveTimer = null;
   function persistScoringViewState() {
     try {
       window.sessionStorage.setItem(scoringViewStorageKey, JSON.stringify({
         job_id: selectedJobId,
         result_tab: activeResultTab,
-        scroll_y: window.scrollY,
+        // While the saved position is restored, the page is still growing: keep the saved one.
+        scroll_y: typeof scoringViewScrollRestoring !== 'undefined' && (scoringViewScrollRestorePending || scoringViewScrollRestoring)
+          ? restoredScoringViewState.scrollY : window.scrollY,
         environment: selectedEnvironment,
         scoring: typeof selectedScoring === 'undefined' ? 'best_network' : selectedScoring,
         show_kpi_values: Boolean(showKpiValuesToggle?.checked),
@@ -152,11 +157,38 @@
     scoringViewScrollRestoreStarted = true;
     scoringViewScrollRestorePending = false;
     const target = restoredScoringViewState.scrollY;
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-      const maximum = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-      window.scrollTo({left: window.scrollX, top: Math.min(target, maximum), behavior: 'auto'});
+    scoringViewScrollRestoring = true;
+    // The maps are drawn a moment after the results: follow the page as it grows, until the saved
+    // position is reached, the user scrolls or ten seconds pass.
+    let interacted = false;
+    const stop = () => { interacted = true; };
+    const interactions = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
+    interactions.forEach(type => window.addEventListener(type, stop, {passive: true}));
+    const deadline = window.performance.now() + 10000;
+    // The browser would keep the content in view as the page grows above it; the saved position
+    // already refers to the complete page, so it is kept until the page stops growing.
+    document.documentElement.style.overflowAnchor = 'none';
+    let height = -1;
+    let stableSince = window.performance.now();
+    const step = () => {
+      const now = window.performance.now();
+      const pageHeight = document.documentElement.scrollHeight;
+      if (pageHeight !== height) {
+        height = pageHeight;
+        stableSince = now;
+      }
+      const maximum = Math.max(0, pageHeight - window.innerHeight);
+      if (!interacted) window.scrollTo({left: window.scrollX, top: Math.min(target, maximum), behavior: 'auto'});
+      if (!interacted && now < deadline && (maximum < target || now - stableSince < 1200)) {
+        window.setTimeout(step, 120);
+        return;
+      }
+      interactions.forEach(type => window.removeEventListener(type, stop));
+      document.documentElement.style.overflowAnchor = '';
+      scoringViewScrollRestoring = false;
       persistScoringViewState();
-    }));
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(step));
   }
   window.addEventListener('scroll', () => {
     if (scoringViewSaveTimer !== null) window.clearTimeout(scoringViewSaveTimer);
@@ -412,7 +444,15 @@
     for (const {key, catalogueKey} of contextFilterDefinitions) {
       const select = contextFilterSelects.get(key);
       if (!select) continue;
-      const selectedValues = new Set([...select.selectedOptions].map(option => key === 'Vendor' ? scoringVendorName(option.value) : option.value).filter(Boolean));
+      const identity = value => key === 'Vendor' ? scoringVendorName(value) : value;
+      const selectedValues = new Set([...select.selectedOptions].map(option => identity(option.value)).filter(Boolean));
+      // Values chosen while they were in the CDRs (another NR Mode or CDR choice) come back with them.
+      let remembered = [];
+      try { remembered = JSON.parse(select.dataset.scoringRememberedValues || '[]'); } catch (_error) { remembered = []; }
+      remembered.forEach(value => selectedValues.add(value));
+      // Every value checked (All values) keeps every value checked, also the values the new CDRs add.
+      const enabledBefore = [...select.options].filter(option => !option.disabled && option.value);
+      const allSelected = enabledBefore.length > 0 && enabledBefore.every(option => option.selected);
       const rawValues = [];
       for (const datasetId of selectedIds) {
         const values = datasetCatalogues.get(String(datasetId))?.[catalogueKey];
@@ -443,7 +483,7 @@
           const option = document.createElement('option');
           option.value = entry.value;
           option.textContent = entry.label;
-          option.selected = selectedValues.has(key === 'Vendor' ? scoringVendorName(entry.value) : entry.value);
+          option.selected = allSelected || selectedValues.has(identity(entry.value));
           if (entry.color) {
             option.dataset.operatorColor = entry.color;
             option.style.color = entry.color;
@@ -451,6 +491,8 @@
           select.append(option);
         }
       }
+      const available = new Set(nextOptions.map(entry => identity(entry.value)));
+      select.dataset.scoringRememberedValues = JSON.stringify(allSelected ? [] : [...selectedValues].filter(value => !available.has(value)));
       select.dispatchEvent(new Event('multiselect:options-updated'));
       if (key === 'Operator') decorateOperatorOptions(select);
     }
@@ -683,6 +725,7 @@
         if (unavailable.length) unavailableFilters.push(`${key}: ${unavailable.join(', ')}`);
         const selected = new Set(requestedValues.map(value => value.toLocaleLowerCase()));
         for (const option of select.options) option.selected = !option.disabled && selected.has(option.value.toLocaleLowerCase());
+        select.removeAttribute?.('data-scoring-remembered-values');
         select.dispatchEvent(new Event('change', {bubbles: true}));
       }
       updateSelection();
@@ -4901,7 +4944,7 @@
     group.className = 'scoring-environment-filter scoring-loss-operators';
     group.setAttribute('role', 'group');
     group.setAttribute('aria-label', 'Operators');
-    group.append(document.createTextNode('Operators'));
+    group.append(document.createTextNode('Operators: '));
     for (const item of operators) {
       const chip = document.createElement('button');
       chip.type = 'button';
@@ -4910,6 +4953,9 @@
       chip.dataset.gapInsightOperators = JSON.stringify(chosen);
       chip.setAttribute('aria-pressed', String(chosen.includes(item.operator)));
       chip.textContent = item.label;
+      // Clicking an operator disables or enables it; one operator always stays enabled.
+      chip.title = !chosen.includes(item.operator) ? `Click to enable ${item.label}`
+        : chosen.length > 1 ? `Click to disable ${item.label}` : `${item.label} is the only enabled operator: click another one to enable it too`;
       const color = safeHexColor(item.color);
       if (color) chip.style.setProperty('--operator-color', color);
       group.append(chip);
@@ -4923,7 +4969,7 @@
     const profiles = insightItems(payload, 'kpi_gap_profiles', environment).filter(profile => profile.operator !== profile.reference);
     if (!profiles.length) return;
     const section = document.createElement('section');
-    section.className = 'scoring-insight-section';
+    section.className = 'scoring-insight-section scoring-result-card scoring-gap-profile-card';
     const heading = document.createElement('h4');
     heading.className = 'scoring-table-section-title';
     heading.textContent = 'KPI GAP Profile';
@@ -5073,7 +5119,7 @@
     }
     if (!entries.length) return;
     const section = document.createElement('section');
-    section.className = 'scoring-insight-section';
+    section.className = 'scoring-insight-section scoring-result-card scoring-loss-maps-card';
     const heading = document.createElement('h4');
     heading.className = 'scoring-table-section-title';
     heading.textContent = 'Points Lost Map';
@@ -5081,7 +5127,7 @@
     const {controls, inScope, chosen} = gapInsightControls(pane, entries.map(entry => ({...entry.ranking, entry})));
     const allViews = ['City', 'Region', 'Cluster'];
     const views = allViews.filter(view => inScope.some(item => item.entry.title === view));
-    const {wrapper: viewControl, value: storedView} = insightSelect('points-loss-view', allViews.map(item => [item, `Per ${item}`]), 'Analysis');
+    const {wrapper: viewControl, value: storedView} = insightSelect('points-loss-view', allViews.map(item => [item, item]), 'Maps per');
     const view = views.includes(storedView) ? storedView : views[0];
     const viewSelect = viewControl.querySelector('select');
     viewSelect.value = view;
@@ -5186,8 +5232,9 @@
     mapBox.className = 'scoring-loss-map-figure';
     mapBox.textContent = 'Loading map…';
     const peak = Math.max(0, ...bars.map(area => area.points));
-    // All environments: beside each area, the environments where it loses points (most first).
-    const withEnvironments = bars.some(area => area.environments?.length);
+    // All environments: beside each city or route, the environments where it loses points (most first).
+    // Regions and Clusters hold tests of every environment, so they leave the column out.
+    const withEnvironments = entry.title === 'City' && bars.some(area => area.environments?.length);
     const table = insightTable(['Area', ...(withEnvironments ? ['Environment'] : []), 'Points lost', 'Share'], bars.map(area => [area.name,
       ...(withEnvironments ? [{text: (area.environments || []).map(name => environmentLabel(name)).join(', '),
         className: 'scoring-loss-environment'}] : []),
@@ -5208,7 +5255,7 @@
       row.dataset.area = bars[index]?.name || '';
       row.dataset.points = String(bars[index]?.points || 0);
     });
-    (layer ? lossBoundaries(jobId, layer.field) : Promise.resolve({boundaries: {}, outlines: []})).then(({boundaries, outlines}) => {
+    renderLoads.push((layer ? lossBoundaries(jobId, layer.field) : Promise.resolve({boundaries: {}, outlines: []})).then(({boundaries, outlines}) => {
       // Each colouring: each city or route with its map areas (the share of its tests in each, or the points it
       // loses in each one) and the colour of every area.
       const colourings = {};
@@ -5237,7 +5284,7 @@
         writeNote(colourings[colourMode] ? colourMode : 'top');
         select.recolour(next.values, next.describe, next.links);
       };
-    });
+    }));
     return card;
   }
 
@@ -5835,7 +5882,58 @@
     });
   }
 
+  // The content a render draws a moment later (the polygons of the Points Lost Maps).
+  let renderLoads = [];
+
+  // Drawing the results again (another operator, environment or option) keeps the card being looked at
+  // where it was on the screen: each pane keeps its height until its maps are drawn, and the page
+  // scrolls by what the cards above that card grew or shrank.
   function renderResult(savedPayload, job, panesToRender = [activeResultTab]) {
+    const held = panesToRender.map(name => root.querySelector(`[data-result-pane="${name}"]`))
+      .filter(pane => pane && pane.childElementCount && pane.offsetHeight).map(pane => [pane, pane.offsetHeight]);
+    // The card of the panes that fills most of the window, by its pane, position and class.
+    let anchor = null;
+    let visible = 0;
+    for (const [pane] of held) {
+      [...pane.children].forEach((node, index) => {
+        const box = node.getBoundingClientRect();
+        const shown = Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0);
+        if (shown > visible) {
+          visible = shown;
+          anchor = {pane, index, className: node.className, top: box.top + window.scrollY};
+        }
+      });
+    }
+    // Scrolling by hand (or the position restored after a reload) wins over the card kept in place.
+    let interacted = false;
+    const stop = () => { interacted = true; };
+    const interactions = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
+    const keepAnchor = () => {
+      const node = anchor && anchor.pane.children[anchor.index];
+      if (interacted || scoringViewScrollRestorePending || scoringViewScrollRestoring || !node || node.className !== anchor.className) return;
+      // What the content above the card grew or shrank (its place in the page, not on the screen).
+      const top = node.getBoundingClientRect().top + window.scrollY;
+      window.scrollBy({left: 0, top: top - anchor.top, behavior: 'auto'});
+      anchor.top = top;
+    };
+    held.forEach(([pane, height]) => { pane.style.minHeight = `${height}px`; });
+    renderLoads = [];
+    try {
+      renderResultContent(savedPayload, job, panesToRender);
+    } finally {
+      if (held.length) {
+        keepAnchor();
+        interactions.forEach(type => window.addEventListener(type, stop, {passive: true}));
+        Promise.allSettled(renderLoads).then(() => window.requestAnimationFrame(() => {
+          held.forEach(([pane]) => { pane.style.minHeight = ''; });
+          keepAnchor();
+          interactions.forEach(type => window.removeEventListener(type, stop));
+        }));
+      }
+    }
+  }
+
+  function renderResultContent(savedPayload, job, panesToRender) {
     currentResults = savedPayload;
     currentResultsJobId = jobIdOf(job || savedPayload.job || {}) || null;
     syncResultScoring(savedPayload);
@@ -5932,6 +6030,11 @@
       } else {
         renderTable(gapPane, gapRows, 'No GAP rows are available for the selected baseline operator.');
       }
+      // The GAP tables, the KPI GAP Profile and the Points Lost Map are each in their own card.
+      const gapTablesCard = document.createElement('section');
+      gapTablesCard.className = 'scoring-result-card scoring-gap-tables-card';
+      gapTablesCard.append(...gapPane.childNodes);
+      if (gapTablesCard.childNodes.length) gapPane.append(gapTablesCard);
       renderKpiGapProfiles(gapPane, payload, effectiveEnvironment);
       renderPointsLossMaps(gapPane, payload, effectiveEnvironment, jobIdOf(job || payload.job || {}));
       if (tableExports.gap) gapPane.prepend(tableExports.gap);

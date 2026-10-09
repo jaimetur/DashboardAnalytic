@@ -109,7 +109,7 @@ from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_quer
 from src.runtime_logs import execution_log_entries
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.branding import BACKUP_FILE_PATTERNS, BACKUP_SCRATCH_PATTERNS, canonical_format
-from src.modules.mapping_renames import rename_saved_filters
+from src.modules.mapping_renames import count_saved_filters, rename_saved_filters
 from src.modules.module_labels import (
     ICONS as MODULE_LABEL_ICONS, MAIN_MODULES, MAX_LABEL_LENGTH as MAX_MODULE_LABEL_LENGTH, MAX_SHORT_TITLE_LENGTH,
     MAX_TITLE_LENGTH, MODULE_LABELS_STATE_KEY, MODULE_TABS, TAB_ICONS, load_module_labels, module_label_badges, module_tabs,
@@ -5430,6 +5430,10 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'workspace_materializing': bool(active_workspace) and isinstance(template_user, SessionUser) and not embedded_template_editor
         and repository.get_workspace_state('calculated_dimensions_need_materialization') == 'processing',
         'administrative_icons': ADMINISTRATIVE_ICONS,
+        # Values of the CDRs that no Operator, Vendor or Campaign Map assigns: a warning card on every page.
+        'unassigned_mapping_values': unassigned_mapping_values() if isinstance(template_user, SessionUser) and not embedded_template_editor
+        and not context.get('embedded_preview') else {},
+        'can_edit_workspace_config': isinstance(template_user, SessionUser) and template_user.role in WORKSPACE_EDITOR_ROLES,
         'module_label_settings': {
             'modules': [(module, dict(MAIN_MODULES)[module]) for module in module_settings],
             'labels': module_settings, 'icons': MODULE_LABEL_ICONS, 'tab_icons': TAB_ICONS,
@@ -10135,6 +10139,7 @@ def render_admin_template(
             'main_cities_notice': request.query_params.get('main_cities_notice') or None,
             'main_cities_error': request.query_params.get('main_cities_error') or None,
             'vendor_mapping_groups': repository.list_vendor_mapping_groups() if active_workspace else [],
+            'mapping_assignments': mapping_assignment_rows() if active_workspace else {},
             'vendor_mapping_notice': request.query_params.get('vendor_mapping_notice') or None,
             'workspace_campaigns': workspace_campaign_values() if active_workspace else [],
             'vendor_mapping_error': request.query_params.get('vendor_mapping_error') or None,
@@ -16307,10 +16312,11 @@ def scoring_report(export_kind: str, payload: ScoringReportRequest, user: Sessio
             'baseline_operator': payload.baseline_operator.strip() or 'EE',
             'scoring_profile_id': payload.scoring_profile_id or None}
     try:
+        # The configuration in use is remembered when the document is requested, not when it is ready.
+        remember_last_configuration(task_repository, payload.configuration)
         content, filename, _first = build_scoring_report_document(
             task_repository, base, payload.configuration, user.username, split_charts=payload.split_charts,
         )
-        remember_last_configuration(task_repository, payload.configuration)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     media_type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
@@ -19540,6 +19546,102 @@ def save_admin_operator_mapping_group(
         f'/workspace-config?{urlencode({"operator_mapping_notice": notice})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+def mapping_assignment_rows() -> dict[str, list[dict[str, Any]]]:
+    """The Operators, Vendors and Campaigns of the ready CDRs with the label the workspace maps give them."""
+    from src.modules.campaign_maps import load_campaign_map
+    from src.modules.mapping_assignments import assignment_rows, detected_values
+
+    names = repository.ready_cdr_dataset_names()
+    catalogues = repository.cdr_catalogues_by_dataset(names) if names else {}
+    operator_mappings = repository.list_operator_mappings()
+    detected = detected_values(catalogues, names, operator_mappings)
+    return {
+        'operator': assignment_rows('operator', detected['operator'], operator_mappings),
+        'vendor': assignment_rows('vendor', detected['vendor'], repository.list_vendor_mappings()),
+        'campaign': assignment_rows('campaign', detected['campaign'], {}, load_campaign_map(repository)),
+    }
+
+
+def unassigned_mapping_values() -> dict[str, list[str]]:
+    """The values of the ready CDRs that no Operator, Vendor or Campaign Map assigns (none without a workspace)."""
+    from src.modules.mapping_assignments import unassigned_values
+
+    if not active_workspace:
+        return {}
+    try:
+        return unassigned_values(mapping_assignment_rows())
+    except Exception:  # noqa: BLE001 - the warning never prevents a page from opening.
+        return {}
+
+
+@app.get('/api/mapping-assignments/unassigned')
+def get_unassigned_mapping_values(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    """The values of the CDRs waiting for an assignment, for the warning card of every page."""
+    return {'unassigned': unassigned_mapping_values(), 'can_edit': user.role in WORKSPACE_EDITOR_ROLES}
+
+
+class MappingAssignmentPreviewPayload(BaseModel):
+    assignments: list[dict[str, Any]] = []
+    rename: dict[str, str] | None = None
+
+
+@app.post('/api/workspace-config/{mapping_type}-mappings/preview')
+def preview_mapping_assignments(
+    mapping_type: str, payload: MappingAssignmentPreviewPayload, user: SessionUser = Depends(config_editor_user),
+) -> dict[str, Any]:
+    """What saving some Operator or Vendor assignments does: merges, values leaving a label and its saved filters."""
+    from src.modules.mapping_assignments import assignment_effects
+
+    if mapping_type not in {'operator', 'vendor'}:
+        raise HTTPException(status_code=404, detail='Unknown mapping type.')
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before editing its maps.')
+    settings = repository.chart_mapping_settings()
+    rows = mapping_assignment_rows()[mapping_type]
+    rename = payload.rename or {}
+    old_name, new_name = str(rename.get('from') or '').strip(), str(rename.get('to') or '').strip()
+    assignments = [(str(item.get('value') or ''), None if item.get('label') is None else str(item.get('label')))
+                   for item in payload.assignments if isinstance(item, dict)]
+    return assignment_effects(
+        mapping_type, assignments, [row['value'] for row in rows], settings[f'{mapping_type}_mappings'],
+        [group['canonical'] for group in settings[f'{mapping_type}_mapping_groups']],
+        rename=(old_name, new_name) if old_name and new_name and old_name != new_name else None,
+        saved_filters=lambda label: count_saved_filters(repository, mapping_type, label, settings),
+    )
+
+
+@app.post('/workspace-config/{mapping_type}-mappings/assign')
+def assign_admin_mapping_values(
+    mapping_type: str,
+    source: list[str] = Form(default=[]),
+    label: list[str] = Form(default=[]),
+    user: SessionUser = Depends(config_editor_user),
+) -> Response:
+    """Assign the values detected in the CDRs to Operator or Vendor labels (an empty label leaves one as it is)."""
+    if mapping_type not in {'operator', 'vendor'}:
+        raise HTTPException(status_code=404, detail='Unknown mapping type.')
+    error_parameter, notice_parameter = f'{mapping_type}_mapping_error', f'{mapping_type}_mapping_notice'
+    if not active_workspace:
+        return RedirectResponse(f'/workspace-config?{urlencode({error_parameter: "Open a workspace before editing its maps."})}',
+                                status_code=status.HTTP_303_SEE_OTHER)
+    assignments = [(value.strip(), name.strip()) for value, name in zip(source, label) if value.strip() and name.strip()]
+    try:
+        changed = repository.assign_chart_mapping_sources(mapping_type, assignments)
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        return RedirectResponse(f'/workspace-config?{urlencode({error_parameter: str(exc)})}',
+                                status_code=status.HTTP_303_SEE_OTHER)
+    if changed:
+        ANALYSIS_CACHE.clear()
+        PREPARED_ANALYSIS_FRAME_CACHE.clear()
+        DATAFRAME_CACHE.clear()
+        _clear_chart_preview_caches()
+        repository.add_log(user.username, f'{mapping_type}_mapping_assign', json.dumps(
+            [{'value': value, 'label': name} for value, name in assignments], ensure_ascii=False))
+    notice = f'{changed} {"name" if changed == 1 else "names"} assigned.' if changed else 'No assignment changed.'
+    return RedirectResponse(f'/workspace-config?{urlencode({notice_parameter: notice})}',
+                            status_code=status.HTTP_303_SEE_OTHER)
 
 
 def workspace_campaign_values() -> list[str]:

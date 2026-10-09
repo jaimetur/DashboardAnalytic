@@ -138,7 +138,7 @@ For super-admins, complete unimported packages appear in **Recovered transfer pa
 
 ## Interface Settings
 
-**Interface Settings**, visible only to super-admins after Import / Export / Transfer, applies to every user. Its table has one row per main module, in the order of the main tabs; drag a row by its handle (⠿) or use the arrows to move it. The Modules menu, the Help navigation and Features Activation follow the same order. For each tab choose:
+**Interface Settings**, visible only to super-admins below Features Activation, applies to every user. Its table has one row per main module, in the order of the main tabs; drag a row by its handle (⠿) or use the arrows to move it. The Modules menu, the Help navigation and Features Activation follow the same order. For each tab choose:
 
 - **Module Title** and **Short title**, the name shown on the tab and the one used on narrow windows (empty uses the title). The Modules menu and the Help use the Module Title too: the chapter of a renamed module takes its new title in the Help navigation and as its heading, and the Help text names the module with it (section headings keep their name so their links keep working; Workspace, Reporting and Builders, also ordinary words of the Help, change where the Help names the module as a link to its chapter or in bold).
 - **Icon**, shown before the title, and **Colour**, the accent of the tab: its top line and icon when not selected and its gradient when selected. The default colour keeps the palette of the module.
@@ -218,9 +218,9 @@ Select either mapping table in Database Viewer to inspect its rows, paginate 100
 
 In **Chart mapping groups**, `mapping_type` and `canonical_value` identify the group, while `position` and `color` hold its order and colour. Direct edits to these related tables are individual row operations and can leave a group's aliases, identity or order inconsistent.
 
-Use [Workspace Config → Operator Maps](workspace-config.md#operator-maps) or [Vendor Maps](workspace-config.md#vendor-maps) for group operations: add a canonical identity, edit its aliases or colour, Save, Move up/down, and confirm Delete. A canonical rename also updates exact references in Report Templates and saved Dashboards, and group changes clear chart caches.
+Use [Workspace Config → Operator Maps](workspace-config.md#operator-maps) or [Vendor Maps](workspace-config.md#vendor-maps) to give each name of the CDRs its label and to add, rename, colour, move or delete labels. Renaming a label also updates exact references in Report Templates and saved Dashboards, and label changes clear chart caches.
 
-Database Viewer supports inspection, filtering and individual row edits or deletion, but a row-level change there does not perform the group-level rename and ordering workflow. Use the Workspace Config controls when changing a mapping group so aliases, order and colour stay consistent. Admin's export, transfer and backup workflows carry both mapping types together as **Mappings & Reference Data**.
+Database Viewer supports inspection, filtering and individual row edits or deletion, but a row-level change there does not perform the rename and ordering workflow of a label. Use the Workspace Config controls when changing a label so its names, order and colour stay consistent. Admin's export, transfer and backup workflows carry both mapping types together as **Mappings & Reference Data**.
 
 Capabilities:
 

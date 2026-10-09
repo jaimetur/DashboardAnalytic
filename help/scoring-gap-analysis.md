@@ -50,7 +50,7 @@ On first use, the module selects the latest ready CDR of each type for the chose
 
 ### 3. Set filters, aggregation and reference
 
-1. Restrict **Operators**, **Vendors**, **Regions**, **Cities** or **Campaigns** if needed.
+1. Restrict **Operators**, **Vendors**, **Regions**, **Cities** or **Campaigns** if needed. The values offered are those of the selected CDRs; when the NR Mode or the CDRs change, a filter with every value checked keeps every new value checked, and a partial choice keeps its values for when CDRs that have them are selected again.
 2. Choose the aggregation levels (Operator, Vendor, Region, **Cluster**, City and Campaign, in the order of the aggregation hierarchy). **Operator** is always included; additional levels split the results into separate combinations. Cluster needs CDRs with a `Cluster` column, filled by the source CDR or by a Cluster mapping.
 3. In **GAP reference operator**, select the operator to compare against. The initial reference is **EE**.
 4. Choose the saved **Scoring Methodology** beside Calculate and Recalculate.
@@ -136,6 +136,8 @@ The **Scoring** selector, beside Environment, switches the tables, charts, GAP a
 
 The **Environment** selector applies to all result tabs and exports. An individual environment shows its own contribution; **All Environments** combines the configured environments.
 
+Each block of results is a card whose top bar has the colours of its tab: in **Scoring Tables** the Summary and the Breakdown, in **Scoring Charts** each chart with the table beside it (and the location cards and trends), and in **GAP Analysis** the GAP tables, the KPI GAP Profile and the Points Lost Map. Changing a result option (an operator, the environment, the scoring or the maps) keeps the card being looked at in its place on the screen, and reloading the page returns to the same place once the results, maps included, are drawn.
+
 For the initial NetCheck 2026 allocation:
 
 | Environment | Configured maximum |
@@ -206,14 +208,14 @@ The columns are the environments of the selected environment (each environment o
 
 #### Points Lost Map
 
-Below the KPI GAP Profile of All Environments and of each environment, **Points Lost Map** shows where each operator loses its scoring points, like the NetCheck points-loss slides. It uses the location and **Operators** of the KPI GAP Profile (choosing them in either section chooses them in both; several operators show their maps side by side), and adds the **Analysis**: **Per City**, **Per Region** or **Per Cluster** (an option without data in the results, such as Per Cluster without Clusters, is shown disabled). Each map is headed by its operator, large and in its colour. Drag a rectangle over a map to zoom into it, or use the zoom buttons (zoom in, zoom out, whole map) shown while the pointer is over the map.
+Below the KPI GAP Profile of All Environments and of each environment, **Points Lost Map** shows where each operator loses its scoring points, like the NetCheck points-loss slides. It uses the location and **Operators** of the KPI GAP Profile (choosing them in either section chooses them in both; clicking an operator enables or disables it, as its tooltip says, and one always stays enabled; several operators show their maps side by side), and adds **Maps per** **City**, **Region** or **Cluster** (an option without data in the results, such as Cluster without Clusters, is shown disabled). Each map is headed by its operator, large and in its colour. Drag a rectangle over a map to zoom into it, or use the zoom buttons (zoom in, zoom out, whole map) shown while the pointer is over the map.
 
-Per City, **Colour areas by** (one choice above every map) chooses how the map areas are coloured:
+With **Maps per** City, **Colour areas by** (one choice above every map) chooses how the map areas are coloured:
 
 - **Points of the city or route that loses most in each area** (the default): each area takes the whole points of the city or Connecting Roads route that loses most among those measured in it (a city or route belongs to every area holding at least 2% of its tests), so a whole route takes its colour and London colours every London area.
 - **Points lost in each area by the city or route that loses most there**: each area takes the points really lost in it by the city or route that loses most there, so a route shows where along its way it loses its points, and a city spread over many small areas, such as London, colours each one with what it loses there.
 
-Each area keeps its colour while rows or areas are chosen (the others are only dimmed), and changing **Colour areas by** keeps them chosen, so both colourings can be compared.
+In All Environments, the ranking under each City map names the environments where each city or route loses points; per Region or Cluster it does not, since they hold tests of every environment. Each area keeps its colour while rows or areas are chosen (the others are only dimmed), and changing **Colour areas by** keeps them chosen, so both colourings can be compared.
 
 Click a row of the ranking to show its areas alone on the map, which centres and zooms on them; Ctrl/⌘-click adds or removes single rows and Shift+click chooses every row from the last one clicked. Click an area of the map, or hold Shift and drag a rectangle to choose several, to leave lit the rows measured there and dim the others. Clicking the same choice again, clicking outside every area or pressing Esc shows everything again. In All Environments the ranking names, beside each area, the environments where it loses points (most first).
 
@@ -621,7 +623,7 @@ With several scenarios, every setting whose value is not the same in all of them
 
 The document starts with a cover listing the scenarios; each scenario then has a cover per scoring (for example *London — Best Network Scoring*) with its filters, and its slide subtitles name the scenario and the scoring. With All Environments only, the subtitles omit *All Environments*; each environment block names its environment. Show KPI values adds a **Value** column before each Score of the Breakdown tables.
 
-The selector shows the configuration the report was chosen from when the editor opens (while its scenarios are unchanged). The editor's toolbar saves (**Save as…**) and deletes **named configurations** of the workspace, and exports or imports them as JSON. Choosing a configuration in its selector loads it at once, **Default** included (one scenario with the job's filters and aggregation plus **Campaign**, which is left out when there is a single campaign; *Default* is always listed, cannot be deleted and is not available as a saved name). When the scenarios have unsaved changes, choosing another configuration asks first: **Cancel** keeps them, **Discard changes** loads the chosen configuration and **Save as…** saves them before loading it. The last configuration used to generate a document opens again in any later session. Saved configurations and the last one used travel with the **Scoring & GAP Analysis Configuration** in Import / Export, transfers and backups.
+The editor opens with the scenarios of the last report, remembered as soon as **Generate PowerPoint** or **Generate Word** is pressed. Its selector always tells the saved configuration (or **Default**) whose scenarios are the ones shown, and **<Not saved configuration>** when no saved configuration has them; it follows every change of the scenarios. The editor's toolbar saves (**Save as…**) and deletes **named configurations** of the workspace, and exports or imports them as JSON. Choosing a configuration in its selector loads it at once, **Default** included (one scenario with the job's filters and aggregation plus **Campaign**, which is left out when there is a single campaign; *Default* is always listed, cannot be deleted and is not available as a saved name). When the scenarios have unsaved changes, choosing another configuration asks first: **Cancel** keeps them, **Discard changes** loads the chosen configuration and **Save as…** saves them before loading it. The last configuration used to generate a document opens again in any later session. Saved configurations and the last one used travel with the **Scoring & GAP Analysis Configuration** in Import / Export, transfers and backups.
 
 Exports use saved job results; they do not recalculate KPIs of existing jobs. Both **Export to CSV** buttons export the selected job.
 

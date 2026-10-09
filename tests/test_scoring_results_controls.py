@@ -1607,8 +1607,8 @@ def test_kpi_gap_profile_and_points_lost_map_share_location_and_operators():
     maps = script[script.index('  function renderPointsLossMaps('):script.index("  // One operator's map with the note")]
     # The map adds the analysis per City, Region or Cluster; several operators show their maps side by side.
     assert 'gapInsightControls(pane, entries.map(' in maps
-    # Per City, Per Region and Per Cluster are always listed; those without results are disabled.
-    assert "insightSelect('points-loss-view', allViews.map(item => [item, `Per ${item}`]), 'Analysis')" in maps
+    # City, Region and Cluster are always listed; those without results are disabled.
+    assert "insightSelect('points-loss-view', allViews.map(item => [item, item]), 'Maps per')" in maps
     assert "option.disabled = !views.includes(option.value);" in maps
     assert ".map(entry => pointsLossMapCard(entry, payload, jobId, chosen.length > 1, mode));" in maps
     # Every operator is chosen by default.

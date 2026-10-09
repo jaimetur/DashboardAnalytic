@@ -53,8 +53,19 @@ def save_campaign_map(repository: Any, config: Any, username: str = '') -> dict:
     return load_campaign_map(repository)
 
 
-def campaign_map_preview(campaigns: list[str], config: dict) -> list[dict[str, str]]:
-    """The workspace campaigns with their label, in the order of the map."""
+def campaign_map_preview(campaigns: list[str], config: dict) -> list[dict[str, Any]]:
+    """The workspace campaigns with their label, in the order of the map.
+
+    ``assigned`` is False for a campaign without a year and quarter and without an exception, and
+    ``merged`` counts the campaigns that share its label.
+    """
+    from src.modules.mapping_assignments import campaign_assignment
+
     values = list(dict.fromkeys(str(value).strip() for value in campaigns if str(value).strip()))
-    return [{'campaign': value, 'label': format_campaign(value, config)}
-            for value in sorted(values, key=lambda value: campaign_sort_key(value, config))]
+    items = []
+    for value in sorted(values, key=lambda value: campaign_sort_key(value, config)):
+        label, assigned = campaign_assignment(value, config)
+        items.append({'campaign': value, 'label': label, 'assigned': assigned})
+    for item in items:
+        item['merged'] = sum(other['label'].casefold() == item['label'].casefold() for other in items) if item['assigned'] else 1
+    return items

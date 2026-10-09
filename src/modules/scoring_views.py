@@ -194,6 +194,13 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
                    for record in _records(result.get(name))]
             for name in ('scoring', 'score_rows', 'totals', 'charts', 'global_kpis') if name in result
         }}
+        # The points-lost shares are matched to the score rows by the same fields: hide them there too.
+        points_loss = result.get('points_loss')
+        if isinstance(points_loss, dict) and isinstance(points_loss.get('shares'), list):
+            result['points_loss'] = {**points_loss, 'shares': [
+                {key: (None if _key(key) in hidden else value) for key, value in share.items()}
+                for share in points_loss['shares'] if isinstance(share, dict)
+            ]}
     include_dataset_type = any(_level_identity(level) == 'datasettype' for level in levels)
     requested_baseline = str(job.get('baseline_operator') or job.get('baseline') or 'EE').strip() or 'EE'
     baseline_aliases = job.get('baseline_aliases') or result.get('baseline_aliases') or _mapping_aliases(

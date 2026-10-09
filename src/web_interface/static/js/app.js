@@ -5199,8 +5199,11 @@ function setupPersistentControls() {
   });
 }
 
-function setupPersistentPanelState() {
-  document.querySelectorAll('details[data-panel-state-key]').forEach((panel) => {
+function setupPersistentPanelState(root = document) {
+  root.querySelectorAll('details[data-panel-state-key]').forEach((panel) => {
+    // A panel refreshed in place (such as a map table after a save) is set up again, once.
+    if (panel.dataset.panelStateReady === '1') return;
+    panel.dataset.panelStateReady = '1';
     const sessionScoped = panel.dataset.panelStateStorage === 'session';
     const sessionMarker = document.body.dataset.authenticatedSession || 'anonymous';
     const stateKey = `drivetest-analyzer:panel:${panel.dataset.panelStateKey}${sessionScoped ? `:${sessionMarker}` : ''}`;
@@ -8014,7 +8017,7 @@ document.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
 
 function isChartMappingForm(form) {
   try {
-    return /^\/(?:admin|workspace-config)\/(?:operator|vendor)-mappings\/(?:save|delete|move)$/.test(new URL(form.action, window.location.href).pathname);
+    return /^\/(?:admin|workspace-config)\/(?:operator|vendor)-mappings\/(?:save|delete|move|assign)$/.test(new URL(form.action, window.location.href).pathname);
   } catch (_error) {
     return false;
   }
@@ -8023,6 +8026,10 @@ function isChartMappingForm(form) {
 // Colour inputs report lowercase values and text may differ only in line endings
 // or surrounding spaces, none of which is an edit.
 function chartMappingFieldChanged(field) {
+  if (field instanceof HTMLSelectElement) {
+    const initial = Array.from(field.options).find((option) => option.defaultSelected) || field.options[0];
+    return field.value !== (initial?.value ?? '');
+  }
   const normalise = (value) => (field.type === 'color' ? String(value).toLowerCase() : String(value).replace(/\r\n/g, '\n').trim());
   return normalise(field.value) !== normalise(field.defaultValue);
 }
@@ -8030,7 +8037,10 @@ function chartMappingFieldChanged(field) {
 // Unsaved edits of the other rows (and of the new-group form) survive the refresh
 // of a mapping table after one row is saved, moved or deleted.
 function unsavedChartMappingEdits(body, submittedForm = null) {
-  const edits = {rows: {}, create: null};
+  const edits = {rows: {}, create: null, assignments: {}};
+  body.querySelectorAll('[data-mapping-assignment-label]').forEach((field) => {
+    if (field.form !== submittedForm && chartMappingFieldChanged(field)) edits.assignments[field.dataset.value] = field.value;
+  });
   body.querySelectorAll('input[name="original_canonical"]').forEach((original) => {
     const row = original.closest('tr');
     const formId = original.getAttribute('form');
@@ -8053,6 +8063,9 @@ function unsavedChartMappingEdits(body, submittedForm = null) {
 }
 
 function restoreChartMappingEdits(body, edits) {
+  body.querySelectorAll('[data-mapping-assignment-label]').forEach((field) => {
+    if (Object.hasOwn(edits.assignments || {}, field.dataset.value) && !field.readOnly) setMappingLabelChoice(field, edits.assignments[field.dataset.value]);
+  });
   body.querySelectorAll('input[name="original_canonical"]').forEach((original) => {
     const fields = edits.rows[original.value];
     const formId = original.getAttribute('form');
@@ -8077,6 +8090,10 @@ async function submitChartMappingForm(form) {
   const panelKey = panel?.dataset.panelStateKey;
   if (!panelKey || !['admin:operator-mappings', 'admin:vendor-mappings'].includes(panelKey)) return;
   form.dataset.mappingSubmitting = '1';
+  if (!(await confirmChartMappingEffects([form]))) {
+    form.dataset.mappingSubmitting = '0';
+    return;
+  }
   const scrollTop = window.scrollY;
   const scrollLeft = window.scrollX;
   const submitters = panel.querySelectorAll('button[type="submit"]');
@@ -8099,10 +8116,13 @@ async function submitChartMappingForm(form) {
     const unsavedEdits = unsavedChartMappingEdits(currentBody, rejected ? null : form);
     currentBody.replaceWith(freshBody);
     restoreChartMappingEdits(freshBody, unsavedEdits);
+    renderMappingNameChips(freshBody);
+    setupPersistentPanelState(freshBody);
     addColourHexFields(freshBody);
     refreshChartMappingUnsavedState(panel);
     bindChartMappingForms(freshBody);
     freshBody.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
+    document.dispatchEvent(new CustomEvent('mapping-assignments-changed'));
     window.requestAnimationFrame(() => window.scrollTo({
       top: scrollTop, left: scrollLeft, behavior: 'auto',
     }));
@@ -8204,7 +8224,7 @@ function fitModuleTabs() {
 })();
 
 // Rows whose colour, label or source labels differ from the saved values are
-// marked, counted, and can be saved together with Save all changes.
+// marked, counted, and saved together with Save Labels.
 const CHART_MAPPING_PANEL_SELECTOR = '[data-panel-state-key="admin:operator-mappings"], [data-panel-state-key="admin:vendor-mappings"]';
 
 function chartMappingRows(panel) {
@@ -8221,19 +8241,17 @@ function chartMappingRows(panel) {
 function refreshChartMappingUnsavedState(panel) {
   if (!(panel instanceof HTMLElement)) return;
   const rows = chartMappingRows(panel);
-  rows.forEach(({row, form, unsaved}) => {
+  rows.forEach(({row, unsaved}) => {
     row?.classList.toggle('mapping-row-unsaved', unsaved);
-    const saveButton = form?.id ? panel.querySelector(`button[type="submit"][form="${CSS.escape(form.id)}"]`) : null;
-    saveButton?.classList.toggle('mapping-save-pending', unsaved);
   });
   const count = rows.filter((item) => item.unsaved).length;
   const label = panel.querySelector('[data-mapping-unsaved-count]');
-  if (label) label.textContent = count ? `${count} ${count === 1 ? 'group has' : 'groups have'} unsaved changes` : 'No unsaved changes';
+  if (label) label.textContent = count ? `${count} ${count === 1 ? 'label has' : 'labels have'} unsaved changes` : 'No unsaved changes';
   panel.querySelector('[data-mapping-save-all-bar]')?.classList.toggle('has-unsaved', count > 0);
   const saveAll = panel.querySelector('[data-mapping-save-all]');
   if (saveAll instanceof HTMLButtonElement) {
     saveAll.disabled = !count;
-    saveAll.textContent = count ? `Save all changes (${count})` : 'Save all changes';
+    saveAll.textContent = count ? `Save Labels (${count})` : 'Save Labels';
   }
 }
 
@@ -8242,6 +8260,7 @@ async function saveAllChartMappings(panel) {
   const body = panel.querySelector('.collapsible-panel-body');
   const pending = chartMappingRows(panel).filter((item) => item.unsaved && item.form instanceof HTMLFormElement);
   if (!body || !pending.length) return;
+  if (!(await confirmChartMappingEffects(pending.map((item) => item.form)))) return;
   const scrollTop = window.scrollY;
   const scrollLeft = window.scrollX;
   const edits = unsavedChartMappingEdits(body);
@@ -8268,24 +8287,27 @@ async function saveAllChartMappings(panel) {
     body.replaceWith(freshBody);
     // Groups that could not be saved keep what was typed in them.
     restoreChartMappingEdits(freshBody, edits);
+    renderMappingNameChips(freshBody);
+    setupPersistentPanelState(freshBody);
     addColourHexFields(freshBody);
     const saved = pending.length - failures.length;
     freshBody.querySelectorAll('.alert').forEach((alert) => alert.remove());
     if (saved) {
       const notice = document.createElement('div');
       notice.className = 'alert alert-success';
-      notice.textContent = `${saved} ${saved === 1 ? 'group' : 'groups'} saved.`;
+      notice.textContent = `${saved} ${saved === 1 ? 'label' : 'labels'} saved.`;
       freshBody.querySelector('.lede')?.after(notice);
     }
     bindChartMappingForms(freshBody);
     freshBody.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
+    document.dispatchEvent(new CustomEvent('mapping-assignments-changed'));
   } else {
     panel.querySelectorAll('button').forEach((button) => { button.disabled = false; });
   }
   refreshChartMappingUnsavedState(panel);
   window.requestAnimationFrame(() => window.scrollTo({top: scrollTop, left: scrollLeft, behavior: 'auto'}));
   if (failures.length) {
-    showInfoDialog(`These groups were not saved:\n${failures.join('\n')}`, {title: 'Some mappings were not saved', tone: 'error'});
+    showInfoDialog(`These labels were not saved:\n${failures.join('\n')}`, {title: 'Some mappings were not saved', tone: 'error'});
   }
 }
 
@@ -8303,6 +8325,518 @@ document.addEventListener('click', (event) => {
   if (panel instanceof HTMLElement) saveAllChartMappings(panel);
 });
 document.querySelectorAll(CHART_MAPPING_PANEL_SELECTOR).forEach(refreshChartMappingUnsavedState);
+
+// What a save of the Operator or Vendor Maps changes, as assignments of source values to labels:
+// the Values detected in the CDRs table, or one group (its canonical label and source labels).
+function chartMappingFormChanges(form) {
+  let path = '';
+  try { path = new URL(form.action, window.location.href).pathname; } catch (_error) { return null; }
+  const match = path.match(/\/(operator|vendor)-mappings\/(save|assign)$/);
+  if (!match) return null;
+  const [, kind, action] = match;
+  if (action === 'assign') {
+    const assignments = Array.from(form.querySelectorAll('[data-mapping-assignment-label]'))
+      .filter((field) => field.value.trim() && chartMappingFieldChanged(field))
+      .map((field) => ({value: field.dataset.value, label: field.value.trim()}));
+    return assignments.length ? {kind, payload: {assignments}} : null;
+  }
+  const field = (name) => form.elements.namedItem(name);
+  const split = (text) => String(text || '').split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean);
+  const original = String(field('original_canonical')?.value || '').trim();
+  const canonical = String(field('canonical_value')?.value || '').trim();
+  if (!canonical) return null;
+  const aliases = field('aliases');
+  const sources = [canonical, ...split(aliases?.value)];
+  const kept = new Set(sources.map((value) => value.toLocaleLowerCase()));
+  const previous = original ? [original, ...split(aliases?.defaultValue)] : [];
+  const assignments = [
+    ...sources.map((value) => ({value, label: canonical})),
+    ...previous.filter((value) => !kept.has(value.toLocaleLowerCase())).map((value) => ({value, label: null})),
+  ];
+  return {kind, payload: {assignments, rename: original && original !== canonical ? {from: original, to: canonical} : null}};
+}
+
+// Merging values of the CDRs under one label, taking a value out of a label that saved filters use,
+// or a new label with "_" are confirmed before saving.
+async function confirmChartMappingEffects(forms) {
+  const effects = {merges: [], moved: [], underscores: []};
+  for (const form of forms) {
+    const change = form instanceof HTMLFormElement ? chartMappingFormChanges(form) : null;
+    if (!change) continue;
+    try {
+      const response = await fetch(`/api/workspace-config/${change.kind}-mappings/preview`, {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(change.payload),
+      });
+      if (!response.ok) continue;
+      const payload = await response.json();
+      Object.keys(effects).forEach((key) => effects[key].push(...(payload[key] || [])));
+    } catch (_error) {
+      // The server still validates the save; only the confirmation is skipped.
+    }
+  }
+  const items = [];
+  effects.merges.forEach(({label, values}) => items.push(
+    `<strong>${escapeChartText(label)}</strong> merges ${values.length} names of the CDRs (${values.map(escapeChartText).join(', ')}): every filter, table, chart and report adds them up as one.`,
+  ));
+  effects.moved.filter((item) => item.filters).forEach(({value, from, to, filters}) => items.push(
+    `<strong>${escapeChartText(value)}</strong> leaves ${escapeChartText(from)}${to ? ` for ${escapeChartText(to)}` : ''}: ${filters} saved ${filters === 1 ? 'filter or Reporting Job uses' : 'filters or Reporting Jobs use'} ${escapeChartText(from)} and will no longer include it.`,
+  ));
+  effects.underscores.forEach((label) => items.push(
+    `<strong>${escapeChartText(label)}</strong> contains <code>_</code>, which also separates Operator and Vendor in values such as VF_Ericsson; a label such as ${escapeChartText(label.replace(/_/g, '-'))} avoids ambiguous values.`,
+  ));
+  if (!items.length) return true;
+  return showConfirmDialog('', {
+    title: 'Confirm the mapping changes', confirmLabel: 'Save', cancelLabel: 'Cancel',
+    copyHtml: `<ul>${items.map((item) => `<li>${item}</li>`).join('')}</ul>`,
+  });
+}
+
+// Use own names: every unassigned value of the table keeps its own name as its label.
+document.addEventListener('click', (event) => {
+  const button = event.target instanceof Element ? event.target.closest('[data-mapping-keep-names]') : null;
+  const form = button?.closest('form');
+  if (!form) return;
+  form.querySelectorAll('[data-mapping-assignment-label]').forEach((field) => {
+    if (!field.value.trim() && !field.readOnly && !field.hasAttribute('data-locked')) setMappingLabelChoice(field, field.dataset.value || '');
+  });
+});
+
+// The label of a name of the CDRs is chosen in a list; a label that is not in it yet is added to the
+// list of every name (before "+ New label…") so other names can choose it too.
+function setMappingLabelChoice(field, value) {
+  const label = String(value || '').trim();
+  if (!(field instanceof HTMLSelectElement)) {
+    field.value = label;
+    return;
+  }
+  if (label && !Array.from(field.options).some((option) => option.value.toLocaleLowerCase() === label.toLocaleLowerCase())) {
+    (field.form || document).querySelectorAll('select[data-mapping-assignment-label]:not([data-locked])').forEach((select) => {
+      const option = new Option(label, label);
+      select.insertBefore(option, Array.from(select.options).find((item) => item.value === '__new__') || null);
+    });
+  }
+  const match = Array.from(field.options).find((option) => option.value.toLocaleLowerCase() === label.toLocaleLowerCase());
+  field.value = match ? match.value : '';
+  field.dataset.previousValue = field.value;
+}
+
+document.addEventListener('focusin', (event) => {
+  const select = event.target instanceof HTMLSelectElement && event.target.matches('[data-mapping-assignment-label]') ? event.target : null;
+  if (select && select.value !== '__new__') select.dataset.previousValue = select.value;
+});
+document.addEventListener('change', (event) => {
+  const select = event.target instanceof HTMLSelectElement && event.target.matches('[data-mapping-assignment-label]') ? event.target : null;
+  if (!select) return;
+  if (select.value !== '__new__') {
+    select.dataset.previousValue = select.value;
+    return;
+  }
+  // + New label…: type it in place of the list.
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'table-input mapping-new-label-input';
+  input.placeholder = 'New label, then Enter';
+  input.setAttribute('aria-label', `New label of ${select.dataset.value}`);
+  input.value = select.dataset.value || '';
+  select.hidden = true;
+  select.after(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (accept) => {
+    if (done) return;
+    done = true;
+    if (accept && input.value.trim()) setMappingLabelChoice(select, input.value);
+    else select.value = select.dataset.previousValue || '';
+    input.remove();
+    select.hidden = false;
+    select.dispatchEvent(new Event('input', {bubbles: true}));
+  };
+  input.addEventListener('keydown', (keyEvent) => {
+    if (keyEvent.key === 'Enter') { keyEvent.preventDefault(); finish(true); }
+    if (keyEvent.key === 'Escape') { keyEvent.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+});
+
+// The possible names of each Operator or Vendor label are chips: highlighted when the current CDRs
+// have them (with in how many), grey for names of other campaigns. The hidden list of names of the
+// row keeps them, so saving, unsaved changes and confirmations work as for any other field.
+const splitMappingNames = (text) => String(text || '').split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean);
+
+function mappingFoundNames(panel) {
+  try {
+    const found = JSON.parse(panel?.querySelector('[data-mapping-found-names]')?.textContent || '{}');
+    return new Map(Object.entries(found).map(([name, cdrs]) => [name.toLocaleLowerCase(), {name, cdrs}]));
+  } catch (_error) {
+    return new Map();
+  }
+}
+
+function renderMappingNameChipsOfRow(row) {
+  const source = row.querySelector('[data-mapping-names-source]');
+  const host = row.querySelector('[data-mapping-name-chips]');
+  const panel = row.closest(CHART_MAPPING_PANEL_SELECTOR);
+  if (!source || !host || !panel) return;
+  const found = mappingFoundNames(panel);
+  const label = String(row.querySelector('[name="canonical_value"]')?.value || '').trim();
+  const names = splitMappingNames(source.value);
+  const chips = names.map((name) => ({name, locked: false}));
+  // The label is also a name of itself: shown, fixed, when the CDRs have it.
+  if (label && found.has(label.toLocaleLowerCase()) && !names.some((name) => name.toLocaleLowerCase() === label.toLocaleLowerCase())) {
+    chips.unshift({name: found.get(label.toLocaleLowerCase()).name, locked: true});
+  }
+  // The names in most CDRs first, then alphabetically.
+  const cdrCount = (name) => found.get(name.toLocaleLowerCase())?.cdrs.length || 0;
+  chips.sort((first, second) => cdrCount(second.name) - cdrCount(first.name)
+    || first.name.localeCompare(second.name, undefined, {sensitivity: 'base', numeric: true}));
+  const nodes = chips.map(({name, locked}) => {
+    const match = found.get(name.toLocaleLowerCase());
+    const chip = document.createElement('span');
+    chip.className = `mapping-name-chip${match ? ' is-found' : ''}`;
+    const tip = match
+      ? {title: `${name} · ${match.cdrs.length} ${match.cdrs.length === 1 ? 'CDR' : 'CDRs'}`, lines: [...match.cdrs]}
+      : {title: name, lines: ['Not in the current CDRs: a possible name of other campaigns.']};
+    if (locked) tip.note = 'It is the label itself: rename the label to change it.';
+    chip.dataset.mappingTip = JSON.stringify(tip);
+    chip.append(document.createTextNode(name));
+    if (match) {
+      const count = document.createElement('span');
+      count.className = 'mapping-name-chip-count';
+      count.textContent = String(match.cdrs.length);
+      chip.append(count);
+    }
+    if (locked) {
+      chip.classList.add('is-locked');
+    } else {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'mapping-name-chip-remove';
+      remove.textContent = '×';
+      remove.title = `Remove ${name} from this label`;
+      remove.setAttribute('aria-label', remove.title);
+      remove.addEventListener('click', () => {
+        source.value = splitMappingNames(source.value).filter((value) => value.toLocaleLowerCase() !== name.toLocaleLowerCase()).join('\n');
+        source.dispatchEvent(new Event('input', {bubbles: true}));
+        renderMappingNameChipsOfRow(row);
+      });
+      chip.append(remove);
+    }
+    return chip;
+  });
+  const add = document.createElement('span');
+  add.className = 'mapping-name-add';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'mapping-name-add-input';
+  input.placeholder = 'Add a name';
+  input.setAttribute('aria-label', `Add a possible name of ${label}`);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'icon-action mapping-name-add-button';
+  button.textContent = '+';
+  button.title = 'Add this name to the label';
+  button.setAttribute('aria-label', button.title);
+  const submit = () => addMappingName(row, input.value);
+  button.addEventListener('click', submit);
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    submit();
+  });
+  add.append(input, button);
+  host.replaceChildren(...nodes, add);
+  // A label that stands for several names of the current CDRs adds them up.
+  const badge = row.querySelector('[data-mapping-merge-badge]');
+  const merged = chips.filter(({name}) => found.has(name.toLocaleLowerCase())).length;
+  if (badge) {
+    badge.hidden = merged < 2;
+    badge.textContent = `Merges ${merged}`;
+    badge.dataset.mappingTip = JSON.stringify({
+      title: `${label} merges ${merged} names of the CDRs`,
+      lines: chips.map(({name}) => name).filter((name) => found.has(name.toLocaleLowerCase())),
+      note: 'Every filter, table, chart and report adds them up as one.',
+    });
+  }
+}
+
+function renderMappingNameChips(root = document) {
+  root.querySelectorAll('[data-mapping-name-chips]').forEach((host) => {
+    const row = host.closest('tr');
+    if (row) renderMappingNameChipsOfRow(row);
+  });
+}
+
+// A new name joins the row's names (saved with the row); a name of another label moves to this one now.
+function addMappingName(row, value) {
+  const name = String(value || '').trim();
+  const source = row.querySelector('[data-mapping-names-source]');
+  const panel = row.closest(CHART_MAPPING_PANEL_SELECTOR);
+  const original = String(row.querySelector('[name="original_canonical"]')?.value || '').trim();
+  if (!name || !source || !panel || !original) return;
+  if (name.toLocaleLowerCase() === original.toLocaleLowerCase()
+    || splitMappingNames(source.value).some((item) => item.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    renderMappingNameChipsOfRow(row);
+    return;
+  }
+  let owner = '';
+  let ownLabel = false;
+  panel.querySelectorAll('input[name="original_canonical"]').forEach((field) => {
+    const otherRow = field.closest('tr');
+    if (!otherRow || otherRow === row) return;
+    const label = field.value.trim();
+    if (label.toLocaleLowerCase() === name.toLocaleLowerCase()) ownLabel = true;
+    const names = splitMappingNames(otherRow.querySelector('[data-mapping-names-source]')?.defaultValue);
+    if (names.some((item) => item.toLocaleLowerCase() === name.toLocaleLowerCase())) owner = label;
+  });
+  if (ownLabel) {
+    showInfoDialog(`${name} is itself a label: rename or delete that label first.`, {title: 'Name not added', tone: 'error'});
+    return;
+  }
+  if (!owner) {
+    source.value = [...splitMappingNames(source.value), name].join('\n');
+    source.dispatchEvent(new Event('input', {bubbles: true}));
+    renderMappingNameChipsOfRow(row);
+    return;
+  }
+  // The name leaves its label: saved at once, with the same confirmations as any assignment.
+  const kind = panel.dataset.panelStateKey === 'admin:vendor-mappings' ? 'vendor' : 'operator';
+  const form = document.createElement('form');
+  form.method = 'post';
+  form.action = `/workspace-config/${kind}-mappings/assign`;
+  form.hidden = true;
+  const sourceField = document.createElement('input');
+  sourceField.type = 'hidden';
+  sourceField.name = 'source';
+  sourceField.value = name;
+  const labelField = document.createElement('input');
+  labelField.type = 'text';
+  labelField.name = 'label';
+  labelField.dataset.mappingAssignmentLabel = '';
+  labelField.dataset.value = name;
+  labelField.value = original;
+  form.append(sourceField, labelField);
+  panel.querySelector('.collapsible-panel-body')?.append(form);
+  submitChartMappingForm(form).finally(() => form.remove());
+}
+
+document.addEventListener('input', (event) => {
+  const field = event.target instanceof HTMLInputElement && event.target.name === 'canonical_value' ? event.target : null;
+  const row = field?.closest('tr');
+  if (row?.querySelector('[data-mapping-name-chips]')) renderMappingNameChipsOfRow(row);
+});
+renderMappingNameChips();
+
+// The chip of each map subpanel tells whether it collapses or expands (also after a table refresh).
+document.addEventListener('toggle', (event) => {
+  const subpanel = event.target instanceof HTMLDetailsElement && event.target.matches('.mapping-subpanel') ? event.target : null;
+  const chip = subpanel?.querySelector(':scope > summary .mapping-subpanel-chip');
+  if (chip) chip.textContent = subpanel.open ? 'Collapse' : 'Expand';
+}, true);
+
+// Details of the Operator and Vendor Maps ([data-mapping-tip]: its CDRs, the names a label merges):
+// shown quickly on hover, and pinned as a floating panel on click until closed (×, Esc or a click outside).
+(() => {
+  let panel = null;
+  let pinned = false;
+  let timer = 0;
+  const read = (element) => {
+    try {
+      return JSON.parse(element.dataset.mappingTip || '{}');
+    } catch (_error) {
+      return {title: element.dataset.mappingTip || ''};
+    }
+  };
+  const hide = () => {
+    window.clearTimeout(timer);
+    panel?.remove();
+    panel = null;
+    pinned = false;
+  };
+  const place = (element) => {
+    const anchor = element.getBoundingClientRect();
+    const box = panel.getBoundingClientRect();
+    const margin = 8;
+    let top = anchor.bottom + margin;
+    if (top + box.height > window.innerHeight - margin) top = Math.max(margin, anchor.top - box.height - margin);
+    const left = Math.min(Math.max(margin, anchor.left), window.innerWidth - box.width - margin);
+    panel.style.top = `${top}px`;
+    panel.style.left = `${Math.max(margin, left)}px`;
+  };
+  const show = (element, pin) => {
+    hide();
+    const {title = '', lines = [], note = ''} = read(element);
+    panel = document.createElement('div');
+    panel.className = `mapping-tip${pin ? ' is-pinned' : ''}`;
+    panel.setAttribute('role', pin ? 'dialog' : 'tooltip');
+    const head = document.createElement('div');
+    head.className = 'mapping-tip-head';
+    const heading = document.createElement('strong');
+    heading.textContent = title;
+    head.append(heading);
+    if (pin) {
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'mapping-tip-close';
+      close.textContent = '×';
+      close.setAttribute('aria-label', 'Close');
+      close.addEventListener('click', hide);
+      head.append(close);
+    }
+    panel.append(head);
+    if (lines.length) {
+      const list = document.createElement('ul');
+      lines.forEach((line) => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        list.append(item);
+      });
+      panel.append(list);
+    }
+    if (note) {
+      const text = document.createElement('p');
+      text.textContent = note;
+      panel.append(text);
+    }
+    document.body.append(panel);
+    place(element);
+    pinned = pin;
+  };
+  document.addEventListener('mouseover', (event) => {
+    const element = event.target instanceof Element ? event.target.closest('[data-mapping-tip]') : null;
+    if (!element || pinned || event.target.closest('button')) return;
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => show(element, false), 120);
+  });
+  document.addEventListener('mouseout', (event) => {
+    const element = event.target instanceof Element ? event.target.closest('[data-mapping-tip]') : null;
+    if (!element || pinned || (event.relatedTarget instanceof Node && element.contains(event.relatedTarget))) return;
+    window.clearTimeout(timer);
+    panel?.remove();
+    panel = null;
+  });
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const element = target?.closest('[data-mapping-tip]');
+    if (element && !target.closest('button, input, select, textarea')) {
+      show(element, true);
+      return;
+    }
+    if (pinned && !target?.closest('.mapping-tip')) hide();
+  });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && panel) hide(); });
+  window.addEventListener('scroll', () => { if (panel && !pinned) hide(); }, true);
+})();
+
+// A link to a map table (#operator-assignments, #vendor-assignments or #campaign-maps) opens its panels.
+function openMappingHashTarget() {
+  const id = decodeURIComponent(window.location.hash.slice(1));
+  const target = id ? document.getElementById(id) : null;
+  if (!target || !target.matches('[data-mapping-assignments], #campaign-maps')) return;
+  for (let element = target; element; element = element.parentElement) {
+    if (element.tagName === 'DETAILS') element.open = true;
+  }
+  window.requestAnimationFrame(() => window.requestAnimationFrame(() => target.scrollIntoView({behavior: 'smooth', block: 'start'})));
+}
+window.addEventListener('hashchange', openMappingHashTarget);
+if (window.location.hash) window.requestAnimationFrame(openMappingHashTarget);
+
+// The red card of every page: the Operators, Vendors and Campaigns of the CDRs that no map assigns,
+// shown until they are assigned. Editors open the assignment table from it; other roles are asked
+// to tell an administrator.
+(() => {
+  const card = document.querySelector('[data-unassigned-values-card]');
+  if (!card) return;
+  const TARGETS = {
+    operator: {title: 'Operators', href: '/workspace-config#operator-assignments', action: 'Assign Operators'},
+    vendor: {title: 'Vendors', href: '/workspace-config#vendor-assignments', action: 'Assign Vendors'},
+    campaign: {title: 'Campaigns', href: '/workspace-config#campaign-maps', action: 'Assign Campaigns'},
+  };
+  const MAX_LISTED = 6;
+  const COLLAPSED_KEY = 'drivetest-analyzer:unassigned-values-card-collapsed';
+  const canEdit = card.dataset.canEdit === '1';
+  const element = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const collapsed = () => { try { return window.sessionStorage.getItem(COLLAPSED_KEY) === '1'; } catch (_error) { return false; } };
+  const render = (unassigned) => {
+    const kinds = Object.keys(TARGETS).filter((kind) => Array.isArray(unassigned?.[kind]) && unassigned[kind].length);
+    card.hidden = !kinds.length;
+    if (!kinds.length) {
+      card.replaceChildren();
+      return;
+    }
+    const total = kinds.reduce((sum, kind) => sum + unassigned[kind].length, 0);
+    const header = element('div', 'unassigned-values-card-header');
+    header.append(element('span', 'unassigned-values-card-icon', '!'),
+      element('strong', 'unassigned-values-card-title', `${total} unassigned ${total === 1 ? 'value' : 'values'} in the CDRs`));
+    const toggle = element('button', 'unassigned-values-card-toggle');
+    toggle.type = 'button';
+    const body = element('div', 'unassigned-values-card-body');
+    const applyCollapsed = (value) => {
+      card.classList.toggle('is-collapsed', value);
+      body.hidden = value;
+      toggle.textContent = value ? '+' : '−';
+      toggle.title = value ? 'Show the unassigned values' : 'Minimize';
+      toggle.setAttribute('aria-label', toggle.title);
+      toggle.setAttribute('aria-expanded', String(!value));
+    };
+    toggle.addEventListener('click', () => {
+      const value = !card.classList.contains('is-collapsed');
+      try { window.sessionStorage.setItem(COLLAPSED_KEY, value ? '1' : '0'); } catch (_error) { /* Remembered for this page only. */ }
+      applyCollapsed(value);
+    });
+    header.append(toggle);
+    body.append(element('p', 'unassigned-values-card-copy',
+      'The processed CDRs have values that no Operator, Vendor or Campaign Map assigns: they are shown with their own name and never grouped with other values.'));
+    const list = element('ul', 'unassigned-values-card-list');
+    kinds.forEach((kind) => {
+      const values = unassigned[kind];
+      const item = element('li');
+      const listed = values.slice(0, MAX_LISTED).join(', ') + (values.length > MAX_LISTED ? ` and ${values.length - MAX_LISTED} more` : '');
+      item.append(element('strong', '', `${TARGETS[kind].title} (${values.length}): `), element('span', 'unassigned-values-card-values', listed));
+      item.title = values.join('\n');
+      if (canEdit) {
+        const link = element('a', 'unassigned-values-card-action', TARGETS[kind].action);
+        link.href = TARGETS[kind].href;
+        item.append(link);
+      }
+      list.append(item);
+    });
+    body.append(list);
+    if (!canEdit) {
+      body.append(element('p', 'unassigned-values-card-copy unassigned-values-card-ask',
+        'Inform an administrator so they can assign them in Workspace Config.'));
+    }
+    card.replaceChildren(header, body);
+    applyCollapsed(collapsed());
+  };
+  try {
+    render(JSON.parse(document.getElementById('unassigned-mapping-values')?.textContent || '{}'));
+  } catch (_error) {
+    render({});
+  }
+  let refreshing = false;
+  const refresh = async () => {
+    if (refreshing || document.hidden) return;
+    refreshing = true;
+    try {
+      const response = await fetch('/api/mapping-assignments/unassigned', {credentials: 'same-origin'});
+      if (response.ok) render((await response.json()).unassigned || {});
+    } catch (_error) {
+      // The card keeps its values until the next check.
+    } finally {
+      refreshing = false;
+    }
+  };
+  document.addEventListener('mapping-assignments-changed', refresh);
+  document.addEventListener('visibilitychange', refresh);
+  window.setInterval(refresh, 60000);
+})();
 // Leaving through a link of the application asks with the application's own dialog.
 // Reloading, closing the tab or going back can only show the browser's dialog.
 let leavingWithUnsavedMappings = false;
@@ -8317,7 +8851,7 @@ document.addEventListener('click', async (event) => {
   if (!unsaved) return;
   event.preventDefault();
   const leave = await showConfirmDialog(
-    `${unsaved} Operator or Vendor Map ${unsaved === 1 ? 'group has' : 'groups have'} unsaved changes. Leave this page without saving them?`,
+    `${unsaved} Operator or Vendor Map ${unsaved === 1 ? 'label has' : 'labels have'} unsaved changes. Leave this page without saving them?`,
     {title: 'Unsaved mapping changes', confirmLabel: 'Leave without saving', cancelLabel: 'Stay on this page'},
   );
   if (!leave) return;
@@ -9249,6 +9783,7 @@ if (queueNode) {
     if (progressCell) progressCell.dataset.queueSortValue = String(dataset.progress || 0);
     if (previousStatus && previousStatus !== 'ready' && dataset.status === 'ready') {
       refreshWorkspaceAfterCompletion = true;
+      document.dispatchEvent(new CustomEvent('mapping-assignments-changed'));
     }
     if (progressBar) {
       progressBar.style.width = `${dataset.progress || 0}%`;

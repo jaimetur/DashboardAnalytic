@@ -380,3 +380,46 @@ def test_only_explicit_job_list_selection_restores_saved_calculation_selection()
     assert job_list_handler.count('restoreCalculationSelectionFromJob(job);') == 1
     assert 'await loadJob(job, true);' in job_list_handler
     assert 'restoreCalculationSelectionFromJob' not in load_job
+
+
+def test_context_filters_keep_all_values_and_remembered_values_when_the_cdrs_change():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    refresh = _function_source(script, 'refreshContextFilterOptions')
+    program = r'''
+let selectedIds = ['sa'];
+const datasetCatalogues = new Map([
+  ['sa', {operators: ['VF', 'EE', 'VF-SA']}], ['nsa', {operators: ['VF', 'EE', 'VF-VoNR']}],
+]);
+const selectedDatasetIds = () => selectedIds;
+const contextFilterDefinitions = [{key: 'Operator', catalogueKey: 'operators'}];
+const uniqueCatalogueValues = values => [...new Set((values || []).map(String))];
+const contextFilterOptions = (key, values) => values.map(value => ({value, label: value, color: ''}));
+const scoringVendorName = value => value;
+const mainCityIdentities = new Set();
+const decorateOperatorOptions = () => {};
+const document = {createElement: () => ({value: '', textContent: '', selected: false, disabled: false, dataset: {}, style: {}})};
+const Event = class {constructor(type) {this.type = type;}};
+const select = {
+  options: [], dataset: {},
+  get selectedOptions() { return this.options.filter(option => option.selected); },
+  replaceChildren() { this.options = []; },
+  append(option) { this.options.push(option); },
+  dispatchEvent() {},
+};
+const contextFilterSelects = new Map([['Operator', select]]);
+''' + refresh + r'''
+const state = () => select.options.map(option => option.value + (option.selected ? '*' : '')).join(' ');
+const log = [];
+refreshContextFilterOptions();
+select.options.forEach(option => { option.selected = true; });
+for (const ids of [['nsa'], ['sa']]) { selectedIds = ids; refreshContextFilterOptions(); log.push(state()); }
+select.options.forEach(option => { option.selected = option.value !== 'VF'; });
+for (const ids of [['nsa'], ['sa']]) { selectedIds = ids; refreshContextFilterOptions(); log.push(state()); }
+process.stdout.write(JSON.stringify(log));
+'''
+    assert _run_node_json(program, {}) == [
+        # All values stays All values: the Operators the new CDRs add are checked too.
+        'VF* EE* VF-VoNR*', 'VF* EE* VF-SA*',
+        # A partial choice keeps the values the other CDRs do not have, for when they come back.
+        'VF EE* VF-VoNR', 'VF EE* VF-SA*',
+    ]

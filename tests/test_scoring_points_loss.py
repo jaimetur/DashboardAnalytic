@@ -21,7 +21,7 @@ from tests.test_scoring_exports import TEMPLATE
 PLACES = {'Leeds': (53.80, -1.55), 'Manchester': (53.48, -2.24), 'London': (51.51, -0.13)}
 
 
-def _result():
+def _result(levels=('Operator',)):
     """Three operators; Vodafone and Three fail calls mostly in Leeds and on a road towards it."""
     random.seed(7)
     rows = []
@@ -38,8 +38,8 @@ def _result():
                          'City': 'Sheffield to Leeds', 'Session_Type': 'CALL',
                          'Call_Status': 'Failed' if operator != 'EE' and index % 6 == 0 else 'Completed',
                          'Call_Start_Latitude_A': 53.38 + index * .014, 'Call_Start_Longitude_A': -1.47 - index * .003})
-    result = calculate_scoring({'voice': pd.DataFrame(rows)}, ['Operator'], configuration=scoring_configuration())
-    job = {'id': 1, 'levels': ['Operator'], 'baseline_operator': 'EE', 'configuration': result['configuration'],
+    result = calculate_scoring({'voice': pd.DataFrame(rows)}, list(levels), configuration=scoring_configuration())
+    job = {'id': 1, 'levels': list(levels), 'baseline_operator': 'EE', 'configuration': result['configuration'],
            'campaigns': ['2026-Q2']}
     return job, result
 
@@ -186,3 +186,14 @@ def test_the_web_map_links_the_ranking_and_the_areas():
     assert 'if (event.shiftKey && onSelect) onSelect(area, event); else apply(area);' in script
     # All Environments names the environments of each area.
     assert "...(withEnvironments ? ['Environment'] : [])" in script
+
+
+def test_a_level_with_a_single_value_keeps_the_maps():
+    # One campaign: the views leave the Campaign level out, in the score rows and in the points-lost shares alike.
+    job, result = _result(levels=('Operator', 'Campaign'))
+    assert result['points_loss']['shares'][0]['campaign'] == '2026-Q2'
+    maps = build_scoring_views(job, result)['insights']['points_loss_maps']
+    assert {item['operator'] for item in maps if item['field'] == 'City'} == {'Vodafone UK', 'Three UK'}
+    assert all(not item['context'] for item in maps)
+    # The saved result keeps its campaign.
+    assert result['points_loss']['shares'][0]['campaign'] == '2026-Q2'

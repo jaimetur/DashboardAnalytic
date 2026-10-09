@@ -104,12 +104,15 @@ def rename_in_query(query: str, rename: Callable[[str, str], str]) -> str:
 
 
 def rename_saved_filters(repository: Any, mapping_type: str, old_name: str, new_name: str,
-                         mapping_settings: dict[str, Any]) -> int:
-    """Rename an Operator or Vendor in the Reporting Jobs and workspace settings; returns how many changed."""
+                         mapping_settings: dict[str, Any], write: bool = True) -> int:
+    """Rename an Operator or Vendor in the Reporting Jobs and workspace settings; returns how many changed.
+
+    Without ``write`` nothing is saved: it counts the Reporting Jobs and saved filters that use the label.
+    """
     from src.modules.report_tasks import rename_definition_values
 
     rename = value_renamer(mapping_type, old_name, new_name, mapping_settings)
-    changed = rename_definition_values(repository, lambda definition: rename_in_document(definition, rename))
+    changed = rename_definition_values(repository, lambda definition: rename_in_document(definition, rename), write)
     for state_key in FILTER_STATE_KEYS:
         stored = repository.get_workspace_state(state_key)
         if not stored:
@@ -120,7 +123,8 @@ def rename_saved_filters(repository: Any, mapping_type: str, old_name: str, new_
             continue
         renamed = rename_in_document(document, rename)
         if renamed != document:
-            repository.set_workspace_state(state_key, json.dumps(renamed, ensure_ascii=False))
+            if write:
+                repository.set_workspace_state(state_key, json.dumps(renamed, ensure_ascii=False))
             changed += 1
     try:
         selection = json.loads(repository.get_workspace_state(CDR_ANALYSIS_STATE_KEY) or '{}')
@@ -130,6 +134,12 @@ def rename_saved_filters(repository: Any, mapping_type: str, old_name: str, new_
     if isinstance(queries, dict):
         renamed_queries = {key: rename_in_query(str(value), rename) for key, value in queries.items()}
         if renamed_queries != queries:
-            repository.set_workspace_state(CDR_ANALYSIS_STATE_KEY, json.dumps({**selection, 'queries': renamed_queries}))
+            if write:
+                repository.set_workspace_state(CDR_ANALYSIS_STATE_KEY, json.dumps({**selection, 'queries': renamed_queries}))
             changed += 1
     return changed
+
+
+def count_saved_filters(repository: Any, mapping_type: str, label: str, mapping_settings: dict[str, Any]) -> int:
+    """How many Reporting Jobs and saved filters use an Operator or Vendor label (nothing is changed)."""
+    return rename_saved_filters(repository, mapping_type, label, f'{label}\u0000', mapping_settings, write=False)

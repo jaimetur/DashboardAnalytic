@@ -177,6 +177,18 @@
   .scoring-insight-select { margin: .2rem 0 .55rem; }
   .scoring-insight-select select { min-width: 18rem; max-width: 100%; }
   .scoring-insight-section { margin-top: 1.4rem; }
+  /* Scoring Tables, Scoring Charts and GAP Analysis: each block of results in its own card (the Summary and
+     Breakdown tables, each chart with its table, the location cards and trends, the GAP tables, the KPI GAP
+     Profile and the Points Lost Map). */
+  [data-result-pane] > :is(.scoring-table-mode-section, .scoring-best-network-layout, .scoring-chart-card, .scoring-insight-section, .scoring-result-card) {
+    box-sizing: border-box; margin-top: 1.2rem; padding: calc(1rem + 5px) 1.15rem 1.15rem; border: 1px solid var(--line); border-radius: 13px;
+    /* Its top bar is a gradient of the colour of its results tab. */
+    background: linear-gradient(90deg, color-mix(in srgb, var(--pane-accent) 70%, #000), var(--pane-accent) 55%, color-mix(in srgb, var(--pane-accent) 55%, #fff)) top / 100% 5px no-repeat, rgba(255,255,255,.86);
+    box-shadow: 0 6px 16px rgba(23,35,45,.06); }
+  [data-result-pane] { --pane-accent: #4f46e5; }
+  [data-result-pane="scoring"] { --pane-accent: #0f766e; }
+  [data-result-pane="gap"] { --pane-accent: #c2410c; }
+  [data-result-pane] > * > :is(.scoring-table-section-title, h4):first-child { margin-top: 0; }
   .scoring-insight-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(30rem, 1fr)); gap: 1rem; }
   .scoring-insight-table-wrap { overflow-x: auto; }
   .scoring-insight-banner { padding: .3rem .6rem; background: #c8102e; color: #fff; font-weight: 800; text-align: right; font-size: .85rem; }

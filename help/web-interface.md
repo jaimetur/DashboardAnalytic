@@ -20,6 +20,7 @@ The UI uses a shared header, module tabs, panels, dialogs and tables. Read [Prod
 | Tables | [Open section](#tables) |
 | Dialogs and progress | [Open section](#dialogs-and-progress) |
 | Floating background-task cards | [Open section](#floating-background-task-cards) |
+| Unassigned values card | [Open section](#unassigned-values-card) |
 | Small screens | [Open section](#small-screens) |
 | Dashboard navigation and overlays | [Open section](#dashboard-navigation-and-overlays) |
 
@@ -125,6 +126,10 @@ Each card shows the task, its current stage and progress when the job reports on
 Browser dataset uploads retain their latest measured percentage between progress events and can be interrupted while their request is active; dataset jobs already accepted by the server then appear separately and can be stopped at their safe checkpoints. Report, Chart Set, Auto-calculated Field and combined-CDR work use the same cooperative stop behaviour.
 
 A stopped duplication removes its partial workspace; stopped exports remove temporary output; imports cannot be stopped after importing has begun.
+
+## Unassigned values card
+
+While the ready CDRs of the open workspace have Operators, Vendors or Campaigns that no Operator, Vendor or Campaign Map assigns, a red card at the lower right of every page lists them until they are assigned. Editors open the assignment table from its buttons; the user-viewer role is asked to inform an administrator. See [Unassigned values warning](workspace-config.md#unassigned-values-warning).
 
 ## Small screens
 

@@ -104,15 +104,41 @@
     }
     const table = node('table', undefined, 'operator-mappings-table campaign-map-preview-table');
     const head = node('tr');
-    ['#', 'Label', 'Source campaign'].forEach((text) => head.append(node('th', text)));
+    ['#', 'Label', 'Source campaign', 'Status'].forEach((text) => head.append(node('th', text)));
     table.append(node('thead'), node('tbody'));
     table.tHead.append(head);
     preview.forEach((item, index) => {
-      const row = node('tr');
-      row.append(node('td', String(index + 1)), node('td', item.label, 'campaign-map-label'), node('td', item.campaign));
+      const row = node('tr', undefined, item.assigned === false ? 'mapping-assignment-unassigned' : '');
+      const status = node('td');
+      if (item.assigned === false) {
+        // A campaign without a year and quarter gets its label from an exception.
+        status.append(node('span', 'Unassigned', 'mapping-status mapping-status-unassigned'),
+          iconButton('+', `Add an exception for ${item.campaign}`, () => {
+            const exception = exceptionRow({label: item.campaign, sources: [item.campaign]});
+            $('[data-campaign-exceptions]').append(exception);
+            exception.querySelector('input').select();
+            schedulePreview();
+          }));
+      } else if (item.merged > 1) {
+        const merged = node('span', `Merges ${item.merged}`, 'mapping-status mapping-status-merged');
+        merged.title = 'Campaigns with the same label are one campaign in every filter, table, chart and report.';
+        status.append(merged);
+      } else {
+        status.append(node('span', 'Assigned', 'mapping-status mapping-status-assigned'));
+      }
+      row.append(node('td', String(index + 1)), node('td', item.label, 'campaign-map-label'), node('td', item.campaign), status);
       table.tBodies[0].append(row);
     });
     host.replaceChildren(table);
+  };
+  // Exceptions that would merge two or more campaigns of the CDRs, other than the saved map already does.
+  const newMerges = (map) => {
+    const detected = new Set(campaigns.map((value) => String(value).trim().toLocaleLowerCase()));
+    const key = (item) => `${item.label.toLocaleLowerCase()}\u0000${item.sources.map((value) => value.toLocaleLowerCase()).sort().join('\u0000')}`;
+    const savedKeys = new Set((saved.exceptions || []).map(key));
+    return (map.exceptions || []).filter((item) => !savedKeys.has(key(item)))
+      .map((item) => ({label: item.label, sources: item.sources.filter((value) => detected.has(value.toLocaleLowerCase()))}))
+      .filter((item) => item.sources.length > 1);
   };
   let previewTimer = 0;
   let previewToken = 0;
@@ -147,11 +173,19 @@
   });
   $('[data-campaign-save]').addEventListener('click', async (event) => {
     const button = event.currentTarget;
+    const map = collect();
+    const merges = newMerges(map);
+    if (merges.length && globalThis.showConfirmDialog && !(await globalThis.showConfirmDialog(
+      merges.map((item) => `${item.label} merges ${item.sources.length} campaigns of the CDRs (${item.sources.join(', ')}): every filter, table, chart and report adds them up as one.`).join('\n'),
+      {title: 'Confirm the campaign merge', confirmLabel: 'Save', cancelLabel: 'Cancel'},
+    ))) return;
     button.disabled = true;
     try {
-      const payload = await request('/api/workspace-config/campaign-map', 'PUT', collect());
+      const payload = await request('/api/workspace-config/campaign-map', 'PUT', map);
       globalThis.setCampaignMap?.(payload.campaign_map);
+      Object.assign(saved, payload.campaign_map);
       fill(payload.campaign_map);
+      document.dispatchEvent(new CustomEvent('mapping-assignments-changed'));
       message('Campaign Maps saved: every chart, table, filter and report uses them.', 'success');
     } catch (error) {
       message(error.message, 'error');

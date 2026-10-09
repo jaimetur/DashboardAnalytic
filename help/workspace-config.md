@@ -20,6 +20,7 @@ Open **Config → Workspace Config** from the main navigation at `/workspace-con
 | Report Template reference | [Open section](#report-template-reference) |
 | Mappings & Reference Data | [Open section](#mappings-reference-data) |
 | Campaign Maps | [Open section](#campaign-maps) |
+| Unassigned values warning | [Open section](#unassigned-values-warning) |
 | Map Areas | [Open section](#map-areas) |
 | Spectrum Holdings | [Open section](#spectrum-holdings) |
 | CDR type | [Open section](#cdr-type) |
@@ -405,23 +406,33 @@ The Mappings & Reference Data panel contains Operator Maps, Vendor Maps, Campaig
 
 ### Operator Maps
 
-The table groups raw Operator labels under one canonical identity for charts. Each row shows **Order**, **Colour**, **Canonical label**, **Mapped source labels** and **Actions**. Enter source aliases one per line; comma and semicolon separators are accepted too. The canonical label also maps to itself automatically, so it need not be repeated among the aliases. An alias cannot belong to two canonical groups.
+Operator Maps set how the Operators are named, ordered and coloured in every filter, table, chart, legend and report. They have two numbered subpanels, each of which can be collapsed (the browser remembers it):
 
-Use **Add canonical mapping** to create a group. Change its label, aliases or colour and press **Save** to update it. **Move up** and **Move down** set its position in Operator charts and in Subscriber dimensions; the first and last rows cannot move beyond the table. **Delete** removes the entire group, including its aliases, after confirmation.
+**1 · Operator names found in the CDRs** lists every Operator name of the ready CDRs of the workspace, with the number of CDRs that contain it (hover it to see their names), its **Label** and its **Status**:
 
-Canonical renames update exact matching references in Report Templates and saved Dashboards, and the values of the Operator, Operator_Vendor, Vendor_Operator and Vendor filters saved in Reporting Jobs (including the GAP reference operator and the Scoring report scenarios), saved Scoring report configurations, the last Scoring calculation, the CDR Analysis filters of each CDR and the Non-Qualified Calls filters (`VF_UK` → `VF` also turns `VF_UK_Ericsson` into `VF_Ericsson` and `Ericsson_VF_UK` into `Ericsson_VF`). Campaign filters keep the full campaign value, so changing the Campaign Maps never requires renaming them.
+- **Unassigned** (red, and the number of the subpanel turns red): the name has no label yet, so it is shown as it is and never added up with other names. **Use own names** gives every unassigned name a new label with its own name.
+- **Merges N**: the label stands for N names of the CDRs, which are added up as one Operator (hover it to see the others).
+- **Assigned**: the label stands for this name only.
 
-The colour picker sets the group's chart theme colour; charts can derive related shades to distinguish campaigns or series. Order and colour are presentation choices, while aliases make source labels such as `Vodafone UK` resolve to the intended canonical Operator. Every filter, table, chart, legend and report of the tool shows the canonical Operator, and choosing it selects all its source labels; only Preview Dataset shows the source labels as they are.
+Choose the label of each name in its list: one of the Operator labels of subpanel 2, or **+ New label…**, which lets you type a new label (Enter to accept, Esc to cancel) that every list then offers too. Press **Save assignments**; a new label is added at the end of subpanel 2. Each name therefore keeps its own label unless you give several names the same one: for example `Vodafone UK` → `VF`, `Vodafone SA` → `VF-SA` and `Vodafone VoNR` → `VF-VoNR` keep the three apart, while two spellings of the same network (`Vodafone` and `Vodafone UK`) can share `VF`. A name that is itself one of the labels (for example `EE`, shown as `EE`) cannot be changed here: rename that label in subpanel 2. Saving asks for confirmation when a label would add up names of the CDRs that it did not add up before, when a name leaves a label that saved filters or Reporting Jobs use (they no longer include it, and the dialog says how many use it), and when a new label contains `_`, which also separates Operator and Vendor in `Operator_Vendor` values such as `VF_Ericsson`.
 
-They do not rewrite source workbooks, stored CDR rows or combined CDR tables. Saving, moving or deleting a group clears chart caches so later views use the new settings.
+**2 · Operator labels** lists one row per label with its **Order**, **Colour**, **Label**, **Possible names in the CDRs** and **Actions**. The possible names are how the label can be written in the CDRs of the different campaigns, shown as chips: highlighted with the number of CDRs when the current CDRs have them, grey when they are names of other campaigns, and ordered from the name in most CDRs (alphabetically when they tie). Hovering a chip, a CDRs count or a **Merges N** badge shows its CDRs or names at once; clicking it keeps them in a floating panel until it is closed (×, Esc or a click outside). **×** removes a name and **Add a name** with **+** adds one; a name of another label moves to this one at once. Under the label, **Merges N** tells that it adds up N names of the current CDRs. The label also stands for the name written like itself, so it need not be added. Saving a label asks for the same confirmation as subpanel 1.
+
+Use **Add label** to create a label with its colour and possible names (one per line; comma and semicolon separators are accepted too). Change a label's name, possible names or colour and press **Save Labels**, below the table, to save every changed label at once (Enter in a label saves that one). **Move up** and **Move down** set its position in Operator charts and in Subscriber dimensions; the first and last rows cannot move beyond the table. **Delete** removes the label after confirmation, and its names are shown as they are until they get another label.
+
+Renaming a label updates exact matching references in Report Templates and saved Dashboards, and the values of the Operator, Operator_Vendor, Vendor_Operator and Vendor filters saved in Reporting Jobs (including the GAP reference operator and the Scoring report scenarios), saved Scoring report configurations, the last Scoring calculation, the CDR Analysis filters of each CDR and the Non-Qualified Calls filters (`VF_UK` → `VF` also turns `VF_UK_Ericsson` into `VF_Ericsson` and `Ericsson_VF_UK` into `Ericsson_VF`). Campaign filters keep the full campaign value, so changing the Campaign Maps never requires renaming them.
+
+The colour picker sets the label's chart theme colour; charts can derive related shades to distinguish campaigns or series. Every filter, table, chart, legend and report of the tool shows the label, and choosing it selects all its names; only Preview Dataset shows the names as they are in the CDRs.
+
+The maps do not rewrite source workbooks, stored CDR rows or combined CDR tables. Saving, moving or deleting a label clears chart caches so later views use the new settings.
 
 ### Vendor Maps
 
-The Vendor table has the same **Order**, **Colour**, **Canonical label**, **Mapped source labels** and **Actions** controls. Use **Add canonical mapping**, **Save**, **Move up**, **Move down** or confirmed **Delete** to manage a Vendor and all its aliases. Alias matching is case-insensitive, the canonical label maps to itself, and an alias cannot belong to two Vendor groups.
+Vendor Maps have the same two subpanels: **1 · Vendor names found in the CDRs** lists every Vendor name of the ready CDRs (the Operators without a Vendor, `<Operator> - All`, are not Vendors) and gives each one a label exactly as in the [Operator Maps](#operator-maps), and **2 · Vendor labels** has the same **Order**, **Colour**, **Label**, **Possible names in the CDRs** and **Actions** controls, with **Add label**, **Save Labels**, **Move up**, **Move down** and confirmed **Delete**. Names are matched without regard to case.
 
-Renaming a canonical Vendor updates exact matching Report Template and saved Dashboard references, and the same saved filters as an Operator rename.
+Renaming a Vendor label updates exact matching Report Template and saved Dashboard references, and the same saved filters as an Operator rename.
 
-Vendor order determines the chart sequence for Vendor dimensions and the Vendor portion of combined `Operator_Vendor` categories. The selected colour gives a Vendor a consistent chart identity, with related shades where multiple series need distinction. Every filter, table, chart and report shows the canonical Vendor (and the canonical Operator and Vendor of an `Operator_Vendor`), and choosing it selects all its source spellings; they do not alter materialized CDR values, which only Preview Dataset shows. Group changes refresh chart caches without rematerializing source data.
+Vendor order determines the chart sequence for Vendor dimensions and the Vendor portion of combined `Operator_Vendor` values. The selected colour gives a Vendor a consistent chart identity, with related shades where multiple series need distinction. Every filter, table, chart and report shows the Vendor label (and the Operator and Vendor labels of an `Operator_Vendor`), and choosing it selects all its names; the maps do not alter materialized CDR values, which only Preview Dataset shows. Label changes refresh chart caches without rematerializing source data.
 
 ### Campaign Maps
 
@@ -431,7 +442,11 @@ Campaign Maps set how every chart, table, legend, filter and PowerPoint or Word 
 - **Order inside a quarter** orders campaigns by year and quarter, and the campaigns of one quarter by mode: by default first the campaign without mode, then NSA, then SA. Use the arrows to change it.
 - **Exceptions** give their own label to campaigns that do not follow the pattern, one or more source campaigns per label. They are ordered by the year and quarter of their label, after the campaigns of that quarter, or first, in the table order, when the label has none. Campaigns without a year and quarter and without an exception keep their name.
 
-The **Preview** lists the campaigns of the ready CDRs of the workspace with the labels and order of the map being edited. **Default map** fills the default map; **Save Campaign Maps** applies it and refreshes chart caches. Labels are only visual: filters, stored CDR values and saved selections keep the original campaigns.
+The **Preview** lists the campaigns of the ready CDRs of the workspace with the labels and order of the map being edited, and the **Status** of each one: **Unassigned** for a campaign without a year and quarter and without an exception (its **+** adds an exception for it, labelled with its own name to start with), **Merges N** when N campaigns share its label, which every filter, table, chart and report adds up as one campaign, and **Assigned** otherwise. Saving an exception that merges two or more campaigns of the CDRs asks for confirmation first. **Default map** fills the default map; **Save Campaign Maps** applies it and refreshes chart caches. Labels are only visual: filters, stored CDR values and saved selections keep the original campaigns.
+
+### Unassigned values warning
+
+While the ready CDRs of the workspace have Operators, Vendors or Campaigns that no map assigns, every page shows a red card at its lower right with the number of unassigned values and, for each kind, the first values (hover them to see all). It appears as soon as a processed CDR brings a new value and stays until every value is assigned; **−** minimizes it for the rest of the browser session. The user-editor, admin and super-admin roles have an **Assign Operators**, **Assign Vendors** or **Assign Campaigns** button that opens the names found in the CDRs of the matching map (or the Campaign Maps) in Workspace Config; the user-viewer role sees the card without the buttons and is asked to inform an administrator.
 
 ### Map Areas
 
@@ -453,7 +468,7 @@ Vodafone,B20,FDD,Low,20,2x10 MHz
 Vodafone,n78,TDD,High (TDD),90,
 ```
 
-- **Operator** should match a canonical label of the Operator Maps.
+- **Operator** should match a label of the Operator Maps.
 - **Band** uses LTE (`B20`) or NR (`n78`) names.
 - **Duplex** is `FDD`, `TDD` or `SDL`; **Band Class** is `Low`, `Mid` or `High (TDD)`. Both are inferred for known bands when left empty.
 - **Bandwidth MHz** is the total bandwidth held, for example `20` for 2×10 MHz FDD.

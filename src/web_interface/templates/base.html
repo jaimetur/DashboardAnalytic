@@ -244,6 +244,10 @@
   </div>
   <div class="preview-badge-tooltip" data-preview-badge-tooltip role="tooltip" hidden><span data-preview-badge-tooltip-kind></span><strong data-preview-badge-tooltip-title></strong><p data-preview-badge-tooltip-rule></p></div>
   <div class="preview-filtering-status" data-preview-filtering-status role="status" aria-live="polite" hidden><span class="preview-filtering-spinner" aria-hidden="true"></span><strong data-preview-filtering-text>Filtering dataset…</strong></div>
+  {% if user and active_workspace and not embedded_template_editor and not embedded_preview %}
+  <aside class="unassigned-values-card" data-unassigned-values-card data-can-edit="{{ 1 if can_edit_workspace_config else 0 }}" role="alert" aria-label="Unassigned values in the CDRs"{% if not unassigned_mapping_values %} hidden{% endif %}></aside>
+  <script id="unassigned-mapping-values" type="application/json">{{ unassigned_mapping_values | default({}) | tojson }}</script>
+  {% endif %}
   <script id="vendor-filter-operators" type="application/json">{{ vendor_filter_identities | default({}) | tojson }}</script>
   <script src="{{ static_path('js/app.js') }}?v={{ asset_version('js/app.js') }}"></script>
   {% block extra_scripts %}{% endblock %}

@@ -3,7 +3,7 @@
 This article collects rules that affect data interpretation, performance, persistence and generated output. Read it before comparing DriveTest Analyzer with another analytical tool.
 
 > [!IMPORTANT]
-> **Source values and presentation.** Stored source values and the labels the tool shows are different layers. Operators, Vendors and Campaigns are shown everywhere with their Operator, Vendor and Campaign Maps labels, and a mapped selection matches every source spelling; only Preview Dataset shows the source values. The maps never rewrite uploaded workbooks or stored CDR values.
+> **Source values and presentation.** Stored source values and the labels the tool shows are different layers. Operators, Vendors and Campaigns are shown everywhere with their Operator, Vendor and Campaign Maps labels, and a mapped selection matches every source spelling; only Preview Dataset shows the source values. Each value of the CDRs is assigned to its label in Workspace Config, so values share a label (and are added up as one) only when they are explicitly given the same one. The maps never rewrite uploaded workbooks or stored CDR values.
 
 > [!NOTE]
 > **Compare equivalent selections.** Match CDRs, NR Mode, filters, aggregation levels and missing-value rules before comparing results with another tool.

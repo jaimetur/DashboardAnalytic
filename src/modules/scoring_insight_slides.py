@@ -707,10 +707,10 @@ def add_points_loss_slides(presentation, maps: list[dict[str, Any]], background:
         slide = new_slide(presentation, f"Points Lost per {level} — {ranking['label']}",
                           ' · '.join(part for part in (subtitle, context) if part))
         bars = [area for area in ranking['areas'] if area['name'] != 'Not specified'][:MAX_LOSS_BARS]
-        # All environments: each area names the environments where it loses points.
+        # All environments: each city or route names the environments where it loses points (not per Region or Cluster).
         labels = environment_labels or {}
         bars = [{**area, 'name': f"{area['name']} ({', '.join(labels.get(name, name) for name in area['environments'])})"}
-                if area.get('environments') else area for area in bars]
+                if area.get('environments') and field == 'City' else area for area in bars]
         share = sum(area['points'] for area in bars) / ranking['total'] if ranking['total'] else 0
         plural = {'City': 'cities and routes', 'Cluster': 'clusters', 'Region': 'regions'}.get(field, 'areas')
         by_rows = layer is not None and layer['field'] == 'Area' and field == 'City'

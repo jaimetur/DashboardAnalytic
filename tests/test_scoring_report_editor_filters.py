@@ -85,13 +85,16 @@ def test_choosing_a_configuration_loads_it_and_unsaved_changes_ask_first():
     assert '.scoring-report-tool.is-delete { border-color: #c62828; background: #c62828;' in css
 
 
-def test_the_selector_opens_on_the_configuration_the_report_was_chosen_from():
+def test_the_selector_shows_the_configuration_whose_scenarios_are_shown():
     assert "const openedName = String(state.name || '');" in SCRIPT
     assert "close({configuration: {...clone(state), ...(chosenName ? {name: chosenName} : {})}, action});" in SCRIPT
     # Named configurations keep only their scenarios.
     assert "configuration: {scenarios: state.scenarios}" in SCRIPT
-    # Reports saved before they kept the name open on the configuration with the same content.
-    assert "if (!current && !openedName && !hasUnsavedChanges()) current = matchingConfiguration();" in SCRIPT
+    # The selector follows the content: the saved configuration with the same scenarios, or none.
+    assert "saved.replaceChildren(el('option', '', '<Not saved configuration>'));" in SCRIPT
+    assert "current = matchingConfiguration();" in SCRIPT
+    assert "const hasUnsavedChanges = () => !matchingConfiguration();" in SCRIPT
+    assert "list.addEventListener('input', refreshDifferences);" in SCRIPT
 
 
 def test_reporting_artifacts_show_the_cdrs_of_their_automatic_choice_and_tabs_sit_on_their_panel():

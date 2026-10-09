@@ -501,10 +501,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
   border-color: rgba(139, 29, 36, 0.22);
   background: linear-gradient(135deg, rgba(255, 247, 246, 0.94), rgba(255, 255, 255, 0.96));
 }
-/* Administration: header, Import / Export / Transfer, Interface Settings, then the other panels. */
+/* Administration: header, Import / Export / Transfer, then the other panels (Interface Settings below Features Activation). */
 .admin-stack .module-hero-admin { order: -3; }
 .admin-stack .import-export-panel { order: -2; }
-.admin-stack #interface-settings { order: -1; }
 .admin-stack .database-management-panel { order: 1; }
 .admin-stack [data-panel-state-key="admin:datasets"] { order: 2; }
 .admin-stack [data-panel-state-key="admin:audit"] { order: 3; }
@@ -514,7 +513,6 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 /* Groups with unsaved changes, and the bar that saves them together. */
 .operator-mappings-table tr.mapping-row-unsaved > td { background: #fff7e6; }
 .operator-mappings-table tr.mapping-row-unsaved > td:first-child { box-shadow: inset 4px 0 0 #b7791f; }
-.operator-mappings-table .icon-action.mapping-save-pending { background: linear-gradient(135deg, #b7791f, #d99a35); border-color: #9a6416; color: #fff; }
 .mapping-save-all-bar { display: flex; align-items: center; justify-content: flex-end; gap: 0.8rem; margin: 0 0 0.6rem; }
 .mapping-unsaved-count { color: var(--muted); font-size: 0.9rem; }
 .mapping-save-all-bar.has-unsaved .mapping-unsaved-count { color: #8a5a10; font-weight: 700; }
@@ -4320,3 +4318,88 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
   .dataset-cards { margin: 0 1rem 1rem; }
   .dataset-card-head .form-note { text-align: left; }
 }
+/* Values detected in the CDRs: the label each Operator, Vendor or Campaign of the CDRs is shown with. */
+.mapping-assignments-table { min-width: 640px; }
+.mapping-assignments-table th:nth-child(2), .mapping-assignments-table td.mapping-assignment-cdrs { width: 5rem; text-align: center; }
+.mapping-assignments-table th:nth-child(4) { width: 9rem; }
+.mapping-assignments-table .table-input { width: 100%; box-sizing: border-box; }
+.mapping-assignments-table select[data-locked] { background: #f1f4f6; color: #51616c; }
+.mapping-assignment-cdrs { cursor: help; }
+.operator-mappings-table tr.mapping-assignment-unassigned > td { background: #fff1f1; }
+.operator-mappings-table tr.mapping-assignment-unassigned > td:first-child { box-shadow: inset 4px 0 0 #b8323d; }
+.mapping-assignments-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .6rem; margin-top: .6rem; }
+.mapping-status { display: inline-block; padding: .15rem .55rem; border-radius: 999px; font-size: .8rem; font-weight: 800; white-space: nowrap; }
+.mapping-status-assigned { background: #e3f4ea; color: #1e6b41; }
+.mapping-status-unassigned { background: #b8323d; color: #fff; }
+.mapping-status-merged { background: #fdf0d5; color: #8a5a0b; cursor: help; }
+.campaign-map-preview-table td .icon-action { margin-left: .4rem; }
+/* The red card of every page while values of the CDRs wait for an assignment. */
+.unassigned-values-card { position: fixed; right: 1rem; bottom: 1rem; z-index: 10001; box-sizing: border-box; width: min(26rem, calc(100vw - 2rem)); max-height: min(60vh, 28rem); overflow-y: auto; padding: .8rem 1rem; border: 1px solid #8f1f2a; border-radius: .8rem; background: #b42f3b; color: #fff; box-shadow: 0 14px 34px rgba(77, 18, 24, .32); }
+.unassigned-values-card[hidden] { display: none; }
+/* The end of every page can scroll above the card. */
+body:has(> .unassigned-values-card:not([hidden], .is-collapsed)) { padding-bottom: 16rem; }
+.unassigned-values-card-header { display: flex; align-items: center; gap: .55rem; }
+.unassigned-values-card-icon { display: inline-grid; flex: 0 0 auto; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; background: #fff; color: #b42f3b; font-weight: 900; }
+.unassigned-values-card-title { flex: 1 1 auto; }
+.unassigned-values-card-toggle { flex: 0 0 auto; min-width: 0; width: 1.8rem; height: 1.8rem; padding: 0; border: 1px solid rgba(255, 255, 255, .55); border-radius: 50%; background: transparent; color: #fff; font-weight: 900; line-height: 1; box-shadow: none; }
+.unassigned-values-card-toggle:hover, .unassigned-values-card-toggle:focus-visible { background: rgba(255, 255, 255, .18); }
+.unassigned-values-card-copy { margin: .55rem 0 0; font-size: .88rem; color: rgba(255, 255, 255, .92); }
+.unassigned-values-card-list { display: grid; gap: .5rem; margin: .6rem 0 0; padding: 0; list-style: none; font-size: .9rem; }
+.unassigned-values-card-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .4rem; }
+.unassigned-values-card-values { overflow-wrap: anywhere; }
+.unassigned-values-card-action { margin-left: auto; padding: .2rem .65rem; border-radius: 999px; background: #fff; color: #9a2a34; font-weight: 800; font-size: .84rem; text-decoration: none; white-space: nowrap; }
+.unassigned-values-card-action:hover, .unassigned-values-card-action:focus-visible { background: #ffe3e5; }
+.unassigned-values-card-ask { font-weight: 800; }
+.unassigned-values-card.is-collapsed { width: auto; padding: .5rem .7rem; }
+.unassigned-values-card:not([hidden]) ~ .incoming-transfer-reminder { bottom: auto; top: 1rem; }
+@media (max-width: 640px) {
+  .unassigned-values-card { right: .5rem; bottom: .5rem; width: calc(100vw - 1rem); }
+}
+.operator-mappings-table th .mapping-column-note { display: block; margin-top: .15rem; font-size: .76rem; font-weight: 500; opacity: .85; }
+/* Operator and Vendor Maps: 1, the names found in the CDRs and their label; 2, the labels with their order, colour and possible names. */
+.mapping-subpanels { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.2rem; }
+.mapping-subpanel { overflow: hidden; border: 1px solid #b9cfdb; border-radius: 14px; background: #fff; box-shadow: 0 6px 16px rgba(33, 72, 94, .07); }
+.mapping-subpanel.mapping-labels-view { border-color: #c9c2e3; }
+.mapping-subpanel-summary { display: flex; align-items: center; gap: .85rem; padding: .85rem 1.1rem; background: linear-gradient(135deg, #eef5f9, #e1edf3); border-bottom: 1px solid #c7dbe5; color: #21485e; list-style: none; cursor: pointer; }
+.mapping-subpanel-summary::-webkit-details-marker { display: none; }
+.mapping-subpanel:not([open]) > .mapping-subpanel-summary { border-bottom: 0; }
+.mapping-labels-view > .mapping-subpanel-summary { background: linear-gradient(135deg, #f3f0fa, #e8e3f5); border-bottom-color: #d6cfec; color: #3e3266; }
+.mapping-subpanel-summary > div { flex: 1 1 auto; min-width: 0; }
+.mapping-subpanel-summary h3 { margin: 0; font-size: 1.05rem; color: inherit; }
+.mapping-subpanel-summary p { margin: .2rem 0 0; font-size: .86rem; color: #4f6876; }
+.mapping-labels-view > .mapping-subpanel-summary p { color: #5d5578; }
+.mapping-subpanel-step { display: inline-grid; flex: 0 0 auto; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: #21485e; color: #fff; font-weight: 800; }
+.mapping-labels-view .mapping-subpanel-step { background: #5b4a96; }
+.mapping-found-names.has-unassigned { border-color: #e3a3a9; }
+.mapping-found-names.has-unassigned .mapping-subpanel-step { background: #b8323d; }
+.mapping-subpanel-chip { flex: 0 0 auto; padding: .35rem .7rem; border: 1px solid #9ab7c7; border-radius: 999px; background: #f5f9fc; font-size: .8rem; font-weight: 700; }
+.mapping-labels-view .mapping-subpanel-chip { border-color: #b7acd8; background: #faf8fe; }
+.mapping-subpanel-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: .8rem; padding: 1rem 1.1rem 1.2rem; }
+.mapping-subpanel-body > .form-note { margin: 0; }
+.mapping-assignment-select, .mapping-new-label-input { width: 100%; box-sizing: border-box; }
+@media (max-width: 640px) {
+  .mapping-subpanel-summary { flex-wrap: wrap; }
+  .mapping-subpanel-summary > div { flex-basis: calc(100% - 3rem); }
+}
+.mapping-name-chips { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+.mapping-name-chip { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .3rem .2rem .6rem; border: 1px solid #d3d9de; border-radius: 999px; background: #f2f4f6; color: #6b7883; font-size: .84rem; white-space: nowrap; cursor: help; }
+.mapping-name-chip.is-found { border-color: #8cc3b4; background: #e4f4ef; color: #1d5a4b; font-weight: 700; }
+.mapping-name-chip.is-locked { padding-right: .6rem; }
+.mapping-name-chip-count { display: inline-grid; place-items: center; min-width: 1.2rem; height: 1.2rem; padding: 0 .25rem; border-radius: 999px; background: #1d7a66; color: #fff; font-size: .72rem; }
+.mapping-name-chip-remove { min-width: 0; width: 1.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; font-size: .95rem; line-height: 1; box-shadow: none; }
+.mapping-name-chip-remove:hover, .mapping-name-chip-remove:focus-visible { background: rgba(184, 50, 61, .14); color: #a3313d; }
+.mapping-name-add { display: inline-flex; align-items: center; gap: .25rem; }
+.mapping-name-add-input { width: 9rem; padding: .3rem .55rem; border-radius: 999px; font-size: .84rem; }
+.mapping-name-add-button { width: 1.8rem; height: 1.8rem; min-width: 0; padding: 0; }
+.operator-mappings-table [data-mapping-merge-badge] { margin-top: .35rem; }
+.operator-mappings-table [data-mapping-merge-badge][hidden] { display: none; }
+/* Details of the Operator and Vendor Maps: a tooltip on hover, a floating panel on click. */
+.mapping-tip { position: fixed; z-index: 10005; box-sizing: border-box; max-width: min(24rem, calc(100vw - 16px)); max-height: min(60vh, 26rem); overflow-y: auto; padding: .7rem .85rem; border: 1px solid #21485e; border-radius: 10px; background: #fff; color: #1f3340; font-size: .86rem; box-shadow: 0 14px 34px rgba(18, 40, 54, .28); pointer-events: none; }
+.mapping-tip.is-pinned { pointer-events: auto; border-width: 2px; box-shadow: 0 20px 46px rgba(18, 40, 54, .36); }
+.mapping-tip-head { display: flex; align-items: center; gap: .6rem; }
+.mapping-tip-head strong { flex: 1 1 auto; color: #21485e; }
+.mapping-tip-close { flex: 0 0 auto; min-width: 0; width: 1.6rem; height: 1.6rem; padding: 0; border: 0; border-radius: 50%; background: #e6eef3; color: #21485e; font-weight: 900; line-height: 1; box-shadow: none; }
+.mapping-tip ul { margin: .45rem 0 0; padding-left: 1.1rem; }
+.mapping-tip li { margin: .1rem 0; overflow-wrap: anywhere; }
+.mapping-tip p { margin: .45rem 0 0; color: #51616c; }
+[data-mapping-tip] { cursor: pointer; }

@@ -572,10 +572,12 @@ def save_task(task_repository: Any, task_id: int | None, payload: dict[str, Any]
     return get_task(task_repository, task_id)
 
 
-def rename_definition_values(task_repository: Any, transform: Callable[[dict[str, Any]], dict[str, Any]]) -> int:
+def rename_definition_values(task_repository: Any, transform: Callable[[dict[str, Any]], dict[str, Any]],
+                             write: bool = True) -> int:
     """Apply ``transform`` to every Reporting Job definition (a renamed Operator or Vendor); returns how many changed.
 
-    A changed job is saved again, so a Job Editor draft of its previous version is not restored.
+    A changed job is saved again, so a Job Editor draft of its previous version is not restored. Without
+    ``write`` the jobs are only counted.
     """
     ensure_report_task_tables(task_repository)
     changed = 0
@@ -587,7 +589,9 @@ def rename_definition_values(task_repository: Any, transform: Callable[[dict[str
             except (TypeError, ValueError):
                 continue
             renamed = transform(definition)
-            if renamed != definition:
+            if renamed != definition and not write:
+                changed += 1
+            elif renamed != definition:
                 connection.execute(f'UPDATE {REPORT_TASKS_TABLE} SET definition_json = ?, updated_at = ? WHERE id = ?',
                                    (json.dumps(renamed, ensure_ascii=False), now, row['id']))
                 changed += 1
