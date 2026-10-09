@@ -10885,7 +10885,9 @@ def test_module_tabs_take_order_title_icon_and_colour_from_interface_settings(cl
     assert settings['scoring']['title'] == 'Scoring & GAP Analysis' and settings['scoring']['tab_icon'] == 'scoring'
 
     page = client.get('/workspace').text
-    tabs = page.split('class="module-tabs-primary"', 1)[1].split('</nav>', 1)[0]
+    # The tabs, without the menus of their sections.
+    tabs = re.sub(r'<nav class="module-sections-menu.*?</nav>', '', page.split('class="module-tabs-primary"', 1)[1],
+                  flags=re.S).split('</nav>', 1)[0]
     assert tabs.index('Radio Insights') < tabs.index('CDR Analysis')
     assert '<span class="module-tab-label-desktop">Radio Insights</span><span class="module-tab-label-mobile">Radio</span>' in tabs
     assert 'module-tab-workspace module-tab-custom-colour' in tabs and 'style="--tab-accent: #AA3300"' in tabs

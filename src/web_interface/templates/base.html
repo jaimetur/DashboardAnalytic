@@ -3,7 +3,8 @@
 {%- macro module_tab_content(tab) -%}{% if tab.icon_path %}<svg class="module-tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{{ tab.icon_path | safe }}</svg>{% endif %}{% if tab.short_title == tab.title %}<span>{{ tab.title }}</span>{% else %}<span class="module-tab-label-desktop">{{ tab.title }}</span><span class="module-tab-label-mobile">{{ tab.short_title }}</span>{% endif %}{%- endmacro -%}
 {%- macro menu_icon(markup, colour='') -%}<svg class="menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"{% if colour %} style="stroke: {{ colour }}"{% endif %}>{{ markup | safe }}</svg>{%- endmacro -%}
 {#- The menu of a tab: its sections, each with its icon, in the colour of the module. -#}
-{%- macro sections_menu(key, title, links, accent) -%}{% if links %}<nav class="module-sections-menu{% if links | selectattr(3) | list %} module-sections-menu-grouped{% endif %}" popover="manual" data-module-sections-for="{{ key }}" aria-label="{{ title }} sections" style="--menu-accent: {{ accent }}">{% for href, label, icon, parts in links %}{% if parts %}<div class="module-config-group"><a href="{{ href }}">{{ menu_icon(icon) }}<span>{{ label }}</span><span class="module-config-chevron" aria-hidden="true">›</span></a><div class="module-config-sections" role="group" aria-label="{{ label }}">{% for part_href, part_label, part_icon in parts %}<a href="{{ part_href }}">{{ menu_icon(part_icon) }}<span>{{ part_label }}</span></a>{% endfor %}</div></div>{% else %}<a href="{{ href }}">{{ menu_icon(icon) }}<span>{{ label }}</span></a>{% endif %}{% endfor %}</nav>{% endif %}{%- endmacro -%}
+{#- The tabs are hidden in the embedded PPT Templates Editor, so it has no menus. -#}
+{%- macro sections_menu(key, title, links, accent) -%}{% if links and not embedded_template_editor %}<nav class="module-sections-menu{% if links | selectattr(3) | list %} module-sections-menu-grouped{% endif %}" popover="manual" data-module-sections-for="{{ key }}" aria-label="{{ title }} sections" style="--menu-accent: {{ accent }}">{% for href, label, icon, parts in links %}{% if parts %}<div class="module-config-group"><a href="{{ href }}">{{ menu_icon(icon) }}<span>{{ label }}</span><span class="module-config-chevron" aria-hidden="true">›</span></a><div class="module-config-sections" role="group" aria-label="{{ label }}">{% for part_href, part_label, part_icon in parts %}<a href="{{ part_href }}">{{ menu_icon(part_icon) }}<span>{{ part_label }}</span></a>{% endfor %}</div></div>{% else %}<a href="{{ href }}">{{ menu_icon(icon) }}<span>{{ label }}</span></a>{% endif %}{% endfor %}</nav>{% endif %}{%- endmacro -%}
 {%- macro new_badge(module) -%}{%- set badge = (module_tab_badges | default({})).get(module) -%}{%- if badge -%}<svg class="module-tab-new module-tab-new-{{ module }}" viewBox="0 0 {{ badge.width }} 14" style="width: {{ '%.2f' | format(badge.width * 1.06 / 14) }}rem" role="img" aria-label="{{ badge.text }}"><title>{{ badge.text }}</title><rect width="{{ badge.width }}" height="14" rx="4" style="fill: {{ badge.color }}"/>{%- if badge.icon_path -%}<path class="module-tab-new-icon" d="{{ badge.icon_path }}" style="{{ 'fill: ' ~ badge.icon_color ~ '; stroke: none' if badge.icon_mode == 'fill' else 'fill: none; stroke: ' ~ badge.icon_color }}"/>{%- endif -%}<text x="{{ badge.text_x }}" y="10.2" text-anchor="middle" style="fill: {{ badge.ink }}">{{ badge.text }}</text></svg>{%- endif -%}{%- endmacro -%}
 <!DOCTYPE html>
 <html lang="en">
@@ -77,7 +78,7 @@
           {{ sections_menu('changelog', 'Changelog', tab_sections.changelog, administrative_icons['changelog'].color) }}
           <a class="module-tab module-tab-utility{% if request.url.path.startswith('/documents/view/help') %} active{% endif %}" href="/documents/view/help" title="Open Help" data-module-sections="help">{{ tab_icon('help') }}<span>Help</span></a>
           {# Help lists Help Home and its chapters in the groups of the Help navigation, each group beside it on hover. #}
-          <nav class="module-sections-menu module-sections-menu-grouped" popover="manual" data-module-sections-for="help" aria-label="Help chapters" style="--menu-accent: {{ administrative_icons['help'].color }}">
+          {% if not embedded_template_editor %}<nav class="module-sections-menu module-sections-menu-grouped" popover="manual" data-module-sections-for="help" aria-label="Help chapters" style="--menu-accent: {{ administrative_icons['help'].color }}">
             {% for group, links in tab_sections.help %}{% if not group %}{% for href, label, icon, colour in links %}<a href="{{ href }}">{{ menu_icon(icon, colour) }}<span>{{ label }}</span></a>{% endfor %}{% else %}
             <div class="module-config-group">
               <a href="{{ links[0][0] }}" tabindex="-1" aria-haspopup="true">{{ menu_icon(section_icons[{'Main Modules': 'chart', 'Administrative Modules': 'sliders', 'Reference': 'bookmark'}.get(group, 'book')]) }}<span>{{ group }}</span><span class="module-config-chevron" aria-hidden="true">›</span></a>
@@ -86,7 +87,7 @@
               </div>
             </div>{% endif %}{% endfor %}
             <button type="button" data-about-open>{{ menu_icon(section_icons['info']) }}<span>About</span></button>
-          </nav>
+          </nav>{% endif %}
           <a class="module-tab module-tab-app-logs{% if request.url.path == '/app-logs' %} active{% endif %}" href="/app-logs" title="Open App Logs" data-module-sections="app-logs">{{ tab_icon('app-logs') }}<span>App Logs</span></a>
           {{ sections_menu('app-logs', 'App Logs', tab_sections['app-logs'], administrative_icons['app-logs'].color) }}
           {% if user.role in ['user-editor', 'admin', 'super-admin'] %}
@@ -128,7 +129,8 @@
             {% endfor %}
           </nav>{% else %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use {{ tab.title }}">{{ module_tab_content(tab) }}{{ new_badge(tab.key) }}</span>{% endif %}
           {% elif tab.key == 'workspace' or active_workspace %}<a class="module-tab {{ tab.css }}{% if tab.colour_style %} module-tab-custom-colour{% endif %}{% if request.url.path == tab.href %} active{% endif %}"{% if tab.colour_style %} style="{{ tab.colour_style }}"{% endif %} href="{{ tab.href }}" title="Open {{ tab.nav_title }}"{% if tab.sections %} data-module-sections="{{ tab.key }}"{% endif %}>{{ module_tab_content(tab) }}{{ new_badge(tab.key) }}</a>
-          {{ sections_menu(tab.key, tab.title, tab.sections, tab.tab_color) }}
+          {# Without an open workspace, Workspace only has its Workspaces Management panel. #}
+          {{ sections_menu(tab.key, tab.title, tab.sections if active_workspace or tab.key != 'workspace' else tab.sections[:1], tab.tab_color) }}
           {% else %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use {{ tab.title }}">{{ module_tab_content(tab) }}{{ new_badge(tab.key) }}</span>
           {% endif %}{% endif %}{% endfor %}
         </div>
