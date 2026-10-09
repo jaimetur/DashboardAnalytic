@@ -7330,7 +7330,9 @@ function followServerTransfer(initialState) {
     }
     if (dialogShown) {
       setLoadingProgress(transfer.progress);
-      setLoadingTransferCopy(progressCopy(transfer));
+      // Input or Output files not sent that the destination does not hold: those folders will be empty there.
+      const warnings = Array.isArray(transfer.warnings) ? transfer.warnings : [];
+      setLoadingTransferCopy([progressCopy(transfer), ...warnings.map((warning) => `⚠ ${warning}`)].join(' '));
       if (loadingHide instanceof HTMLButtonElement) {
         loadingHide.onclick = () => {
           state = {...state, hidden_status: transfer.status};
@@ -7718,11 +7720,14 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
             : offer.kind === 'mappings-reference-data'
               ? 'Next, choose the destination workspaces. Their complete Operator/Vendor aliases, order and theme colors will be replaced without modifying stored CDR values.'
           : 'After the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.';
+        // Input or Output files not sent that this server does not hold: those folders will be empty.
+        const folderWarnings = Array.isArray(offer.unsent_folder_warnings) ? offer.unsent_folder_warnings : [];
         const copyHtml = [
           `<p><strong>${escapeHtml(offer.source)}</strong>${escapeHtml(sourceAddress)} wants to transfer to this server:</p>`,
           workspaceNames.length ? `<p>Workspaces: <strong>${workspaceNames.map(escapeHtml).join(', ')}</strong></p>` : '',
           listHtml(targetLabels),
           componentLabels.length ? `<p>Including from each workspace:</p>${listHtml(componentLabels)}` : '',
+          ...folderWarnings.map((warning) => `<p class="incoming-transfer-warning">⚠ ${escapeHtml(warning)}</p>`),
           `<p class="incoming-transfer-effect">${escapeHtml(importEffect)}</p>`,
         ].join('');
         accepted = await showConfirmDialog(

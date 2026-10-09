@@ -3603,6 +3603,102 @@ def test_workspace_transfer_offer_without_input_or_output_folders_is_accepted(cl
     app_module.repository.delete_transfer_offer(offer_id)
 
 
+def test_workspace_import_without_input_or_output_keeps_identical_destination_folders(client, tmp_path) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    login_super(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    # The CDR files and a generated report sent by an earlier transfer, with the report in its history.
+    workspace.input_dir.mkdir(parents=True, exist_ok=True)
+    (workspace.input_dir / 'earlier_cdr.xlsx').write_bytes(b'cdr')
+    workspace.output_dir.mkdir(parents=True, exist_ok=True)
+    (workspace.output_dir / 'earlier_report.pptx').write_bytes(b'report')
+    with sqlite3.connect(workspace.database_path) as connection:
+        connection.execute(
+            "INSERT INTO generated_jobs (job_type, technology, scope, template_name, created_by, output_file, output_path) "
+            "VALUES ('report', 'nsa', 'national', 'NSA', 'super', ?, ?)",
+            ('earlier_report.pptx', str(workspace.output_dir / 'earlier_report.pptx')),
+        )
+
+    def export_without_folders(name):
+        package = tmp_path / name
+        app_module.build_export_archive_file([f'workspace:{workspace.id}'], package, [workspace.id],
+                                             include_generated_outputs=False, include_input_files=False)
+        return package
+
+    def generated_jobs(target):
+        with sqlite3.connect(target.database_path) as connection:
+            return connection.execute('SELECT COUNT(*) FROM generated_jobs').fetchone()[0]
+
+    # The destination holds identical files: it keeps both folders and the history of generated files.
+    package = export_without_folders('identical.zip')
+    manifest = app_module.read_import_manifest(package)
+    assert manifest['workspace']['unsent_files'] == {'input': {'earlier_cdr.xlsx': 3}, 'output': {'earlier_report.pptx': 6}}
+    notice = app_module._apply_import_archive(package, manifest)
+    replaced = app_module.workspace_registry.get(workspace.id)
+    assert notice == f'Workspace "{workspace.name}" imported successfully.'
+    assert (replaced.input_dir / 'earlier_cdr.xlsx').read_bytes() == b'cdr'
+    assert (replaced.output_dir / 'earlier_report.pptx').read_bytes() == b'report'
+    assert generated_jobs(replaced) == 1
+    assert not list(replaced.database_path.parent.parent.glob(f'.{replaced.database_path.parent.name}-import-backup-*'))
+
+    # The destination's Input files differ and its Output files are missing: both folders are empty, with a warning.
+    package = export_without_folders('different.zip')
+    (replaced.input_dir / 'earlier_cdr.xlsx').write_bytes(b'changed cdr')
+    (replaced.output_dir / 'earlier_report.pptx').unlink()
+    notice = app_module._apply_import_archive(package, app_module.read_import_manifest(package))
+    final = app_module.workspace_registry.get(workspace.id)
+    assert notice == (
+        f'Workspace "{workspace.name}" imported successfully. Workspace "{workspace.name}": the Input and Output files of the source '
+        'server were not found on the destination server and were not selected to be sent again, so its Input and Output '
+        'folders will be empty.'
+    )
+    assert not list(final.input_dir.iterdir()) and not list(final.output_dir.rglob('*.pptx'))
+    # Without its files, the history of generated files is not kept.
+    assert generated_jobs(final) == 0
+
+
+def test_transfer_offer_warns_about_unsent_files_the_destination_does_not_hold(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    workspace.input_dir.mkdir(parents=True, exist_ok=True)
+    (workspace.input_dir / 'held.xlsx').write_bytes(b'held')
+    check = app_module.unsent_folder_check({
+        workspace.name.upper(): {'input': {'held.xlsx': 4}, 'output': {'missing.pptx': 10}},
+        'Unknown workspace': {'input': {'held.xlsx': 4}},
+    })
+    assert check == {workspace.name.upper(): {'input': True, 'output': False}, 'Unknown workspace': {'input': False}}
+    # The message names the Input files, the Output files, or both.
+    assert app_module.unsent_folder_warnings({'UK': ['input']}) == [
+        'Workspace "UK": the Input files of the source server were not found on the destination server and were not '
+        'selected to be sent again, so its Input folder will be empty.']
+    assert 'the Output files' in app_module.unsent_folder_warnings({'UK': ['output']})[0]
+    assert 'Input and Output folders will be empty' in app_module.unsent_folder_warnings({'UK': ['input', 'output']})[0]
+
+    manifest = app_module.archive_manifest('workspace', workspace_components=app_module.archive_workspace_components_for_target(
+        f'workspace:{workspace.id}', include_generated_outputs=False, include_input_files=False,
+    ))
+    offer = client.post(
+        '/api/import-export/transfers/offers',
+        headers={'X-Dashboard-Transfer-Secret': 'unsent-folder-warning-secret-long-enough'},
+        json={'source': 'Test source', 'archive_version': 1, 'kind': 'workspace',
+              'components': app_module.archive_manifest_components(manifest),
+              'workspace_components': app_module.archive_workspace_components(manifest), 'content': 'Workspace',
+              'workspaces': [workspace.name],
+              'unsent_files': {workspace.name: {'input': {'held.xlsx': 4}, 'output': {'missing.pptx': 10}}}},
+    )
+    assert offer.status_code == 200, offer.text
+    assert offer.json()['unsent_folder_warnings'] == app_module.unsent_folder_warnings({workspace.name: ['output']})
+    login_super(client)
+    pending = client.get('/admin/import-export/transfers/offers').json()['offers']
+    assert pending[0]['unsent_folder_warnings'] == offer.json()['unsent_folder_warnings']
+    app_module.TRANSFER_OFFERS.pop(offer.json()['offer_id'], None)
+    app_module.repository.delete_transfer_offer(offer.json()['offer_id'])
+
+
 def test_admin_pages_during_reception_keep_the_package_being_received(client, monkeypatch, tmp_path) -> None:
     import src.DriveTestAnalyzer as app_module
 
@@ -3723,7 +3819,8 @@ def test_outgoing_transfer_reports_the_destination_reason_and_can_cancel_during_
             return None
 
         def post(self, *args, **kwargs):
-            return FakeResponse({'offer_id': 'remote-offer'})
+            # The destination warns about Input or Output files it does not hold.
+            return FakeResponse({'offer_id': 'remote-offer', 'unsent_folder_warnings': ['Input folder will be empty.']})
 
         def get(self, url, *args, **kwargs):
             if state.get('uploaded'):
@@ -3768,6 +3865,7 @@ def test_outgoing_transfer_reports_the_destination_reason_and_can_cancel_during_
     payload = finished_payload(rejected['id'])
     assert payload['status'] == 'failed'
     assert payload['error'] == 'The destination server could not receive the package: disk full'
+    assert payload['warnings'] == ['Input folder will be empty.']
     # The destination learns why the source stopped.
     assert state['delete_reasons'] == ['The destination server could not receive the package: disk full']
 

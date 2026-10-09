@@ -7175,7 +7175,68 @@ def recurring_backup_scheduler_loop(stop_event: Event) -> None:
         stop_event.wait(20)
 
 
-def _workspace_archive_metadata(workspace: Workspace) -> dict[str, Any]:
+def _folder_files(folder: Path) -> dict[str, int]:
+    """Every file of a workspace folder with its size, by its path inside the folder."""
+    if not folder.is_dir():
+        return {}
+    return {path.relative_to(folder).as_posix(): path.stat().st_size for path in folder.rglob('*') if path.is_file()}
+
+
+def _workspace_folder(workspace: Workspace, folder: str) -> Path:
+    return workspace.input_dir if folder == 'input' else workspace.output_dir
+
+
+def unsent_folder_files(
+    workspace: Workspace, *, include_input_files: bool, include_generated_outputs: bool,
+) -> dict[str, dict[str, int]]:
+    """The Input and Output files a package does not carry, which the destination may already hold."""
+    return {
+        folder: _folder_files(_workspace_folder(workspace, folder))
+        for folder, included in (('input', include_input_files), ('output', include_generated_outputs))
+        if not included
+    }
+
+
+def _holds_folder_files(workspace: Workspace | None, folder: str, files: dict[str, Any]) -> bool:
+    """Whether a local workspace already holds the same files (same paths and sizes) in a folder."""
+    local = _folder_files(_workspace_folder(workspace, folder)) if workspace else {}
+    return all(local.get(str(path)) == size for path, size in files.items())
+
+
+def unsent_folder_check(folder_files: Any) -> dict[str, dict[str, bool]]:
+    """Per workspace name, whether this server already holds the Input and Output files the source did not send."""
+    if not isinstance(folder_files, dict):
+        return {}
+    local = {workspace.name.casefold(): workspace for workspace in workspace_registry.list()}
+    check: dict[str, dict[str, bool]] = {}
+    for name, folders in folder_files.items():
+        if not isinstance(folders, dict):
+            continue
+        workspace = local.get(str(name).casefold())
+        check[str(name)[:160]] = {
+            folder: _holds_folder_files(workspace, folder, files)
+            for folder, files in folders.items() if folder in {'input', 'output'} and isinstance(files, dict)
+        }
+    return check
+
+
+def unsent_folder_warnings(missing: dict[str, Iterable[str]]) -> list[str]:
+    """Explain, per workspace, the unsent folders whose files this server does not hold and that will be empty."""
+    warnings = []
+    for name, folders in missing.items():
+        labels = [label for folder, label in (('input', 'Input'), ('output', 'Output')) if folder in set(folders)]
+        if not labels:
+            continue
+        both = len(labels) == 2
+        files = ' and '.join(labels)
+        warnings.append(
+            f'Workspace "{name}": the {files} files of the source server were not found on the destination server '
+            f'and were not selected to be sent again, so its {files} folder{"s" if both else ""} will be empty.'
+        )
+    return warnings
+
+
+def _workspace_archive_metadata(workspace: Workspace, unsent_files: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
     # The source id is required to translate user access grants when a Full
     # Environment is restored onto a server where the same workspace name is
     # already registered under a different local id.
@@ -7183,13 +7244,17 @@ def _workspace_archive_metadata(workspace: Workspace) -> dict[str, Any]:
         str(user['username']) for user in repository.list_users()
         if workspace.id in repository.list_user_workspace_ids(int(user['id']))
     ]
-    return {
+    metadata = {
         'id': workspace.id,
         'name': workspace.name,
         'source_input_dir': str(workspace.input_dir),
         'source_output_dir': str(workspace.output_dir),
         'access_usernames': access_usernames,
     }
+    if unsent_files:
+        # The Input and Output files not in the package: the destination keeps its own folder when it holds them.
+        metadata['unsent_files'] = unsent_files
+    return metadata
 
 
 DASHBOARD_STATE_KEY = 'e2e_dashboards_v2'
@@ -7739,7 +7804,8 @@ def _archive_workspace(
     _upgrade_workspace_database_for_export(workspace, task_repository)
     _archive_database(
         archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback,
-        exclude_tables=() if include_generated_outputs else ('generated_jobs', 'report_task_runs'),
+        # The history of generated files travels without them too: the destination keeps it when it holds the files.
+        exclude_tables=(),
     )
     _archive_workspace_dashboards(archive, workspace, archive_prefix, progress_callback)
     _archive_workspace_report_templates(archive, workspace, f'{archive_prefix}/report-templates', progress_callback)
@@ -8002,7 +8068,9 @@ def _build_single_export_archive_file(
                 raise ValueError('Workspace not found.')
             archive_path = f'workspaces/{workspace.name}'
             manifest = archive_manifest(
-                'workspace', workspace=_workspace_archive_metadata(workspace), archive_path=archive_path,
+                'workspace', workspace=_workspace_archive_metadata(workspace, unsent_folder_files(
+                    workspace, include_input_files=include_input_files, include_generated_outputs=include_generated_outputs,
+                )), archive_path=archive_path,
                 workspace_components=archive_workspace_components_for_target(
                     target, include_generated_outputs=include_generated_outputs, include_input_files=include_input_files,
                 ),
@@ -8023,7 +8091,9 @@ def _build_single_export_archive_file(
                 ),
                 includes_generated_outputs=include_generated_outputs,
                 workspaces=[
-                    {**_workspace_archive_metadata(workspace), 'archive_path': f'workspaces/{workspace.name}'}
+                    {**_workspace_archive_metadata(workspace, unsent_folder_files(
+                        workspace, include_input_files=True, include_generated_outputs=include_generated_outputs,
+                    )), 'archive_path': f'workspaces/{workspace.name}'}
                     for workspace in workspaces
                 ],
             )
@@ -8553,13 +8623,20 @@ def _unique_import_workspace_name(name: str) -> str:
     return candidate
 
 
-def _replace_workspace_from_staging(existing: Workspace, staging: Workspace) -> Workspace:
-    """Commit a validated workspace import while retaining its local identity."""
+def _replace_workspace_from_staging(
+    existing: Workspace, staging: Workspace, keep_existing_folders: Iterable[str] = (),
+) -> Workspace:
+    """Commit a validated workspace import while retaining its local identity.
+
+    ``keep_existing_folders`` names the folders (such as ``input_dir``) the package
+    does not carry: the workspace keeps its own instead of an empty one.
+    """
     existing_root = existing.database_path.parent
     staging_root = staging.database_path.parent
     backup_root = existing_root.with_name(f'.{existing_root.name}-import-backup-{uuid4().hex}')
     staged_database_name = staging.database_path.name
     was_active = bool(active_workspace and active_workspace.id == existing.id)
+    moved_folders: list[tuple[Path, Path]] = []
 
     if was_active:
         close_active_workspace()
@@ -8596,8 +8673,26 @@ def _replace_workspace_from_staging(existing: Workspace, staging: Workspace) -> 
         # The original registry row and workspace id are deliberately kept so
         # user access grants and references continue to work unchanged.
         workspace_registry.remove(staging.id, delete_files=False)
+        # A package without Input files keeps the workspace's own, for example
+        # the CDR files sent by an earlier transfer.
+        for attribute in keep_existing_folders:
+            try:
+                relative = getattr(existing, attribute).relative_to(existing_root)
+            except ValueError:
+                continue
+            kept, installed = backup_root / relative, existing_root / relative
+            if kept.is_dir():
+                shutil.rmtree(installed, ignore_errors=True)
+                installed.parent.mkdir(parents=True, exist_ok=True)
+                kept.rename(installed)
+                moved_folders.append((kept, installed))
     except Exception:
         replacement_root = existing_root
+        # Folders already moved back into the replacement return to the previous workspace first.
+        for kept, installed in reversed(moved_folders):
+            if installed.exists() and not kept.exists():
+                kept.parent.mkdir(parents=True, exist_ok=True)
+                installed.rename(kept)
         if replacement_root.exists():
             shutil.rmtree(replacement_root, ignore_errors=True)
         if backup_root.exists():
@@ -8612,7 +8707,16 @@ def _replace_workspace_from_staging(existing: Workspace, staging: Workspace) -> 
         return workspace_registry.get(existing.id) or existing
 
 
-def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | None, *, replace_existing: bool = False) -> Workspace:
+def import_workspace_archive(
+    payload: Path, workspace_info: dict[str, Any] | None, *, replace_existing: bool = False,
+    missing_folders: dict[str, list[str]] | None = None,
+) -> Workspace:
+    """Import a workspace package, replacing the workspace with the same name when asked.
+
+    A package without its Input or Output files lists them: the replaced workspace keeps
+    its own folder when it holds the same files, and otherwise the folder is empty and
+    ``missing_folders`` records it under the workspace name.
+    """
     database_snapshot = payload / 'database.sqlite'
     if not database_snapshot.exists():
         raise ValueError('The workspace archive does not contain its database.')
@@ -8620,6 +8724,24 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
     requested_name = str(source_name or 'Imported Workspace')
     existing_workspace = next((workspace for workspace in workspace_registry.list() if workspace.name.casefold() == requested_name.casefold()), None)
     replacing_workspace = existing_workspace if existing_workspace and replace_existing else None
+    unsent_files = (workspace_info or {}).get('unsent_files')
+    unsent_files = unsent_files if isinstance(unsent_files, dict) else {}
+    kept_folders: list[str] = []
+    empty_folders: list[str] = []
+    output_sent = any((payload / name).exists() for name in ('output', 'exports'))
+    for folder, sent in (('input', (payload / 'input').exists()), ('output', output_sent)):
+        files = unsent_files.get(folder)
+        # Packages without the list (from earlier versions) leave the folder empty, as they always did.
+        if sent or not isinstance(files, dict):
+            continue
+        if replacing_workspace and _holds_folder_files(replacing_workspace, folder, files):
+            kept_folders.append(folder)
+        elif files:
+            empty_folders.append(folder)
+    if empty_folders and missing_folders is not None:
+        missing_folders[requested_name] = empty_folders
+    # Without its files, the history of generated files would list files that do not exist.
+    clear_output_history = not output_sent and 'output' not in kept_folders
     if replacing_workspace:
         staging_name = _unique_import_workspace_name(f'{requested_name[:70]} - Importing {uuid4().hex[:8]}')
         workspace = workspace_registry.create(staging_name)
@@ -8681,6 +8803,10 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
                     'UPDATE report_task_runs SET output_dir = REPLACE(output_dir, ?, ?)',
                     (str(source_output_dir), str(workspace.output_dir)),
                 )
+            if clear_output_history:
+                for table in ('generated_jobs', 'report_task_runs', 'dashboard_ppt_jobs'):
+                    if connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone():
+                        connection.execute(f'DELETE FROM {table}')
             if has_generated_jobs:
                 # Older archives did not always retain source output metadata.
                 # Resolve copied report files inside the destination workspace
@@ -8704,7 +8830,7 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
         raise
     if replacing_workspace:
         try:
-            return _replace_workspace_from_staging(replacing_workspace, workspace)
+            return _replace_workspace_from_staging(replacing_workspace, workspace, [f'{folder}_dir' for folder in kept_folders])
         except Exception:
             if workspace_registry.get(workspace.id):
                 workspace_registry.remove(workspace.id)
@@ -9107,14 +9233,15 @@ def _apply_import_archive(
             workspace_info = manifest.get('workspace')
             if progress_callback:
                 progress_callback('importing workspace', 90.0)
+            missing_folders: dict[str, list[str]] = {}
             workspace = import_workspace_archive(
                 staging_root / archive_path,
                 workspace_info if isinstance(workspace_info, dict) else None,
-                replace_existing=True,
+                replace_existing=True, missing_folders=missing_folders,
             )
             if progress_callback:
                 progress_callback('finalising', 100.0)
-            return f'Workspace "{workspace.name}" imported successfully.'
+            return ' '.join([f'Workspace "{workspace.name}" imported successfully.', *unsent_folder_warnings(missing_folders)])
         if kind == 'config':
             _safe_extract_archive_prefix(archive, staging_root, 'config', extracted)
             if progress_callback:
@@ -9301,13 +9428,16 @@ def _apply_import_archive(
                 raise ValueError('The full-environment package has no workspace list.')
             imported_workspaces: list[Workspace] = []
             workspace_id_map: dict[str, str] = {}
+            missing_folders = {}
             for entry in entries:
                 if not isinstance(entry, dict) or not re.fullmatch(r'workspaces/[^/]+', str(entry.get('archive_path') or '')):
                     raise ValueError('The full-environment package contains an invalid workspace entry.')
                 _safe_extract_archive_prefix(archive, staging_root, str(entry['archive_path']), extracted)
                 if progress_callback:
                     progress_callback(f'importing workspace {len(imported_workspaces) + 1} of {len(entries)}', 90.0 + (len(imported_workspaces) * 9.0 / max(len(entries), 1)))
-                imported_workspace = import_workspace_archive(staging_root / str(entry['archive_path']), entry, replace_existing=True)
+                imported_workspace = import_workspace_archive(
+                    staging_root / str(entry['archive_path']), entry, replace_existing=True, missing_folders=missing_folders,
+                )
                 imported_workspaces.append(imported_workspace)
                 source_workspace_id = str(entry.get('id') or '').strip()
                 if source_workspace_id:
@@ -9322,7 +9452,8 @@ def _apply_import_archive(
             repository.remap_workspace_access(workspace_id_map)
             if progress_callback:
                 progress_callback('finalising', 100.0)
-            return f'Full environment imported successfully ({len(imported_workspaces)} workspaces added).'
+            return ' '.join([f'Full environment imported successfully ({len(imported_workspaces)} workspaces added).',
+                             *unsent_folder_warnings(missing_folders)])
         raise ValueError('The export package type is not supported.')
 
 
@@ -9732,6 +9863,29 @@ def _report_source_transfer_progress(
         return
 
 
+def _transfer_unsent_files(
+    targets: list[str], workspace_ids: list[str] | None, include_generated_outputs: bool, include_input_files: bool,
+) -> dict[str, dict[str, dict[str, int]]]:
+    """Per workspace name, the Input and Output files a transfer does not send."""
+    unsent: dict[str, dict[str, dict[str, int]]] = {}
+    for target in targets:
+        if target.startswith('workspace:'):
+            selected = [workspace_registry.get(target.removeprefix('workspace:'))]
+            include_input = include_input_files
+        elif target == 'full-environment':
+            selected = _selected_export_workspaces(workspace_ids)
+            include_input = True
+        else:
+            continue
+        for workspace in selected:
+            if not workspace:
+                continue
+            files = unsent_folder_files(workspace, include_input_files=include_input, include_generated_outputs=include_generated_outputs)
+            if files:
+                unsent[workspace.name] = files
+    return unsent
+
+
 def _raise_for_destination_response(response: Any, fallback: str) -> None:
     """Raise the destination server's own explanation of a rejected request."""
     status_code = int(getattr(response, 'status_code', 200) or 200)
@@ -9803,6 +9957,8 @@ def _run_transfer_job(job_id: str) -> None:
                 'content': _transfer_content_label(targets),
                 'workspaces': _transfer_offer_workspace_names(targets, workspace_ids),
                 'requires_destination_workspaces': manifest_requires_destination_workspaces(offer_manifest),
+                # The Input and Output files not sent, for the destination to tell whether it already holds them.
+                'unsent_files': _transfer_unsent_files(targets, workspace_ids, include_generated_outputs, include_input_files),
             }
             # Retry a transient first connection (for example while a remote
             # container wakes up). The offer endpoint is idempotent for this
@@ -9828,6 +9984,10 @@ def _run_transfer_job(job_id: str) -> None:
             offer_id = str(response.json().get('offer_id') or '')
             if not offer_id:
                 raise ValueError('The destination server did not create a transfer offer.')
+            warnings = response.json().get('unsent_folder_warnings')
+            if isinstance(warnings, list) and warnings:
+                with TRANSFER_LOCK:
+                    job['warnings'] = [str(warning) for warning in warnings]
             if cancellation_requested():
                 client.delete(_transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'), headers=headers)
                 stop_if_cancelled()
@@ -19040,6 +19200,11 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     ):
         raise HTTPException(status_code=400, detail='The transfer offer has incompatible content components.')
     source_address = request.client.host if request.client else 'unknown'
+    # Whether this server already holds the Input and Output files the source does not send.
+    folder_check = unsent_folder_check(payload.get('unsent_files'))
+    folder_warnings = unsent_folder_warnings({
+        name: [folder for folder, held in checks.items() if not held] for name, checks in folder_check.items()
+    })
     source = str(payload.get('source') or 'DriveTest Analyzer server')[:160]
     content = str(payload.get('content') or kind)[:160]
     workspaces = [str(value)[:160] for value in payload.get('workspaces', []) if value] if isinstance(payload.get('workspaces'), list) else []
@@ -19055,7 +19220,8 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
             and existing.get('status') not in {'rejected', 'failed', 'expired'}
         ), None)
         if existing_offer:
-            return JSONResponse({'offer_id': existing_offer['id'], 'status': existing_offer['status']})
+            return JSONResponse({'offer_id': existing_offer['id'], 'status': existing_offer['status'],
+                                 'unsent_folder_warnings': existing_offer.get('unsent_folder_warnings') or []})
         # A repeated click has a fresh secret but still represents the same
         # unreviewed request. Supersede the equivalent pending offer so retries
         # cannot fill all admission slots while the destination is unattended.
@@ -19079,9 +19245,11 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
                 'created_at': datetime.now(timezone.utc).timestamp(),
                 'started_at': None,
                 'finished_at': None,
+                'unsent_folder_warnings': folder_warnings,
             })
             _save_transfer_offer(reusable_offer)
-            return JSONResponse({'offer_id': reusable_offer['id'], 'status': reusable_offer['status'], 'reused': True})
+            return JSONResponse({'offer_id': reusable_offer['id'], 'status': reusable_offer['status'], 'reused': True,
+                                 'unsent_folder_warnings': folder_warnings})
     offer_id = uuid4().hex
     offer = {
         'id': offer_id,
@@ -19099,6 +19267,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         'phase': 'awaiting approval',
         'progress': 0.0,
         'created_at': datetime.now(timezone.utc).timestamp(),
+        'unsent_folder_warnings': folder_warnings,
     }
     # Do this as one SQLite write transaction. Process-local locks cannot
     # protect the handshake when Docker runs multiple application workers.
@@ -19116,7 +19285,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         }))
     except sqlite3.Error:
         pass
-    return JSONResponse({'offer_id': offer_id, 'status': 'pending'})
+    return JSONResponse({'offer_id': offer_id, 'status': 'pending', 'unsent_folder_warnings': folder_warnings})
 
 
 def _is_abandoned_transfer_import(offer_id: str, offer: dict[str, Any]) -> bool:
@@ -19308,7 +19477,7 @@ def list_pending_transfer_offers(user: SessionUser = Depends(super_admin_user)) 
     with TRANSFER_LOCK:
         _refresh_persisted_transfer_offers()
         offers = [
-            {key: offer.get(key) for key in ('id', 'source', 'source_address', 'kind', 'targets', 'components', 'workspace_components', 'content', 'workspaces', 'created_at', 'requires_destination_workspaces')}
+            {key: offer.get(key) for key in ('id', 'source', 'source_address', 'kind', 'targets', 'components', 'workspace_components', 'content', 'workspaces', 'created_at', 'requires_destination_workspaces', 'unsent_folder_warnings')}
             for offer in TRANSFER_OFFERS.values()
             if offer.get('status') == 'pending'
         ]
