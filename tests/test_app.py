@@ -75,7 +75,8 @@ def test_query_builder_assistant_uses_ready_source_columns(client, monkeypatch) 
     match = re.search(r'const datasetColumns = (\[.*?\]);', response.text)
     assert match is not None
     assert json.loads(match.group(1)) == [
-        {'id': 7, 'name': 'sample.csv', 'kind': 'data', 'columns': ['Operator', 'Test_Result']},
+        {'id': 7, 'name': 'sample.csv', 'kind': 'data', 'columns': ['Operator', 'Test_Result'],
+         'nr_mode': 'NSA', 'cdr_stage': 'final', 'campaigns': []},
     ]
 
 

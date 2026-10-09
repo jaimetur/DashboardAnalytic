@@ -7,9 +7,29 @@
   </article>
   <article class="panel" data-page-panel-label="Query editor">
     <div class="section-head"><div><p class="eyebrow">Sources</p><h2>Selected CDR tables</h2></div></div>
-    <label>Source Datasets <span class="form-label-hint">Select one or more ready CDRs</span>
-      <select data-sql-datasets multiple size="8">{% for dataset in datasets %}<option value="{{ dataset.id }}">{{ dataset.kind | upper }} · {{ dataset.name }}</option>{% endfor %}</select>
-    </label>
+    <div class="query-builder-sources">
+      <p class="query-builder-sources-title">Source Datasets <span class="form-label-hint">Select one or more ready CDRs of each type</span></p>
+      {# The chosen CDRs: the panels below check its options. #}
+      <select data-sql-datasets data-native-multiselect multiple hidden aria-hidden="true" tabindex="-1">{% for dataset in datasets %}<option value="{{ dataset.id }}">{{ dataset.kind | upper }} · {{ dataset.name }}</option>{% endfor %}</select>
+      <div class="query-builder-dataset-groups" data-sql-dataset-panels>
+        {% for kind, kind_label in [('data', 'Data'), ('voice', 'Voice'), ('speech', 'Speech')] %}
+        {% set kind_datasets = datasets | selectattr('kind', 'equalto', kind) | list %}
+        <section class="query-builder-dataset-group" data-sql-dataset-group="{{ kind }}">
+          <div class="query-builder-dataset-head"><strong>{{ kind_label }}</strong><span data-sql-kind-count="{{ kind }}">{{ kind_datasets | length }} available</span>{% if kind_datasets %}<button type="button" class="query-builder-dataset-toggle" data-sql-select-kind="{{ kind }}">Select All</button>{% endif %}</div>
+          <div class="query-builder-dataset-list">
+            {% for dataset in kind_datasets %}
+            <label class="query-builder-dataset-option" data-cdr-stage="{{ dataset.cdr_stage }}">
+              <input type="checkbox" value="{{ dataset.id }}" data-sql-dataset-check data-kind="{{ kind }}">
+              <span class="query-builder-dataset-copy"><strong title="{{ dataset.name }}">{{ dataset.name }}</strong><small>{% if dataset.cdr_stage in ('weekly', 'daily') %}<span class="cdr-stage-badge" data-cdr-stage="{{ dataset.cdr_stage }}">{{ dataset.cdr_stage | title }}</span> {% endif %}{{ kind_label }}{% for campaign in dataset.campaigns %} · {{ campaign | campaign_label }}{% endfor %}{% if dataset.nr_mode %} · {{ dataset.nr_mode }}{% endif %}</small></span>
+            </label>
+            {% else %}
+            <p class="form-note">No ready {{ kind_label }} CDRs.</p>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+      </div>
+    </div>
     <p class="form-note">The query can use <code>selected_data</code>, <code>selected_voice</code> and <code>selected_speech</code>. Each view adds <code>source_dataset_id</code>, <code>source_dataset_name</code> and <code>source_row_id</code>; all source CDR columns remain available.</p>
     <div class="query-builder-mode" role="group" aria-label="Query editor mode"><button type="button" data-sql-mode="assisted" aria-pressed="true">Assistance Mode</button><button type="button" data-sql-mode="sql" aria-pressed="false">SQL Mode</button></div>
     <div class="query-builder-assistant" data-sql-assistant>
@@ -66,6 +86,33 @@
 (() => {
   const sources = document.querySelector('[data-sql-datasets]'); const editor = document.querySelector('[data-sql-editor]'); const status = document.querySelector('[data-sql-status]'); const results = document.querySelector('[data-sql-results]'); const resultCount = document.querySelector('[data-sql-result-count]'); const paginationGroups = [...document.querySelectorAll('[data-sql-pagination]')]; const pageLabels = [...document.querySelectorAll('[data-sql-page]')]; const firstButtons = [...document.querySelectorAll('[data-sql-first]')]; const previousButtons = [...document.querySelectorAll('[data-sql-previous]')]; const nextButtons = [...document.querySelectorAll('[data-sql-next]')]; const lastButtons = [...document.querySelectorAll('[data-sql-last]')]; const runningOverlay = document.querySelector('[data-sql-running-overlay]'); const runButton = document.querySelector('[data-sql-run]'); const clearButton = document.querySelector('[data-sql-clear]'); const saveButton = document.querySelector('[data-sql-save]'); const copyButton = document.querySelector('[data-sql-copy]'); const exportButton = document.querySelector('[data-sql-export]'); const cancelRunButton = document.querySelector('[data-sql-cancel-run]'); let activeExecutionId = ''; let activeExportToken = 0; let nextOffset = null; let totalRows = 0; let currentOffset = 0; const pageSize = 50;
   const datasetColumns = {{ datasets | tojson }};
+  // The CDR panels check the options of the sources list, and follow it when a saved query or Clear Query changes it.
+  const datasetChecks = [...document.querySelectorAll('[data-sql-dataset-check]')];
+  const syncDatasetPanels = () => {
+    const chosen = new Set([...sources.selectedOptions].map(option => option.value));
+    datasetChecks.forEach(box => { box.checked = chosen.has(box.value); });
+    document.querySelectorAll('[data-sql-dataset-group]').forEach(group => {
+      const kind = group.dataset.sqlDatasetGroup;
+      const boxes = datasetChecks.filter(box => box.dataset.kind === kind);
+      const checked = boxes.filter(box => box.checked).length;
+      const count = group.querySelector('[data-sql-kind-count]');
+      if (count) count.textContent = `${boxes.length} available${checked ? ` · ${checked} selected` : ''}`;
+      const toggle = group.querySelector('[data-sql-select-kind]');
+      if (toggle) toggle.textContent = boxes.length && checked === boxes.length ? 'Select None' : 'Select All';
+    });
+  };
+  const chooseDatasets = (boxes, checked) => {
+    const values = new Set(boxes.map(box => box.value));
+    [...sources.options].forEach(option => { if (values.has(option.value)) option.selected = checked; });
+    sources.dispatchEvent(new Event('change', {bubbles: true}));
+  };
+  datasetChecks.forEach(box => box.addEventListener('change', () => chooseDatasets([box], box.checked)));
+  document.querySelectorAll('[data-sql-select-kind]').forEach(button => button.addEventListener('click', () => {
+    const boxes = datasetChecks.filter(box => box.dataset.kind === button.dataset.sqlSelectKind);
+    chooseDatasets(boxes, !boxes.every(box => box.checked));
+  }));
+  sources.addEventListener('change', syncDatasetPanels);
+  syncDatasetPanels();
   const assistant = document.querySelector('[data-sql-assistant]');
   const editorLabel = document.querySelector('[data-sql-editor-label]');
   const assistantStatus = document.querySelector('[data-sql-assistant-status]');

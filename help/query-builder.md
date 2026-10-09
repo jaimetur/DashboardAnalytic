@@ -27,7 +27,7 @@ Query Builder runs read-only SQL against selected, processed Data, Voice and Spe
 | Export CSV | Download all filtered result rows and columns. |
 
 1. Open **Query Builder** with a workspace active.
-2. Select one or more ready source datasets and one or more **CDR types to use** represented by those sources.
+2. Select one or more ready source datasets in the **Data**, **Voice** and **Speech** panels (each with its count, **Select All / None**, and the campaigns and NR Mode of every CDR; Weekly and Daily CDRs are highlighted) and one or more **CDR types to use** represented by those sources.
 3. By default, **Show all fields** is off and `source_dataset_name` and `cdr_type` are preselected. Enable **Show all fields** to include every available column, or choose the fields to include in the result.
 4. Add filter conditions by choosing a column, comparison and value. Choose **AND** or **OR** between conditions to control how they are combined.
 5. Choose the sort order and maximum rows, or select **All rows** to omit the SQL `LIMIT`.

@@ -1535,6 +1535,24 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .upload-daily-flag svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .upload-type-item[data-stage="daily"] { outline: 2px dashed rgba(240, 122, 26, 0.75); outline-offset: -5px; }
 /* Weekly CDRs: the same in violet. */
+/* Query Builder sources: a panel of CDRs for each type, as in the other modules. */
+.query-builder-sources { display: grid; gap: .45rem; }
+.query-builder-sources-title { margin: 0; font-weight: 700; }
+.query-builder-sources select[hidden] { display: none !important; }
+.query-builder-dataset-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+.query-builder-dataset-group { display: grid; align-content: start; gap: .45rem; min-width: 0; padding: .7rem; border: 1px solid rgba(11, 122, 117, .2); border-radius: 14px; background: rgba(236, 247, 244, .7); }
+.query-builder-dataset-head { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
+.query-builder-dataset-head span { margin-left: auto; color: var(--muted); font-size: .76rem; }
+.query-builder-dataset-toggle { min-height: 0; padding: .2rem .55rem; border-radius: 999px; font-size: .72rem; }
+.query-builder-dataset-list { display: grid; gap: .4rem; max-height: 19rem; overflow-y: auto; }
+.query-builder-dataset-option { display: flex; align-items: flex-start; gap: .6rem; min-width: 0; padding: .55rem .65rem; border: 1px solid rgba(25, 42, 53, .09); border-radius: 11px; background: rgba(255, 255, 255, .85); cursor: pointer; }
+.query-builder-dataset-option input { flex: 0 0 auto; width: 1rem; height: 1rem; margin: .14rem 0 0; accent-color: var(--brand); }
+.query-builder-dataset-copy { display: grid; gap: .15rem; min-width: 0; }
+.query-builder-dataset-copy strong { overflow: hidden; font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
+.query-builder-dataset-copy small { color: var(--muted); font-size: .72rem; }
+.query-builder-dataset-option[data-cdr-stage="daily"] { border: 1px dashed rgba(240, 122, 26, .75); background: #fff8ef; }
+.query-builder-dataset-option[data-cdr-stage="weekly"] { border: 1px dashed rgba(123, 92, 196, .75); background: #f7f3ff; }
+@media (max-width: 900px) { .query-builder-dataset-groups { grid-template-columns: minmax(0, 1fr); } }
 /* The badge of a Weekly or Daily CDR in the CDR selectors of every module. */
 .cdr-stage-badge { display: inline-flex; align-items: center; margin-right: .2rem; padding: .02rem .42rem; border-radius: 999px; background: linear-gradient(135deg, #ffb547, #f07a1a); color: #fff; font-size: .66rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; vertical-align: 1px; }
 .cdr-stage-badge[data-cdr-stage="weekly"] { background: linear-gradient(135deg, #a58bea, #7b5cc4); }

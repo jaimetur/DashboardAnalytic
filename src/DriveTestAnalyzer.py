@@ -15033,15 +15033,21 @@ def _query_builder_datasets(dataset_ids: Iterable[object]) -> list[dict[str, Any
 def query_builder(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
     if not active_workspace:
         return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Query+Builder.', status_code=status.HTTP_303_SEE_OTHER)
+    ready = [dict(row) for row in repository.list_datasets()
+             if row['status'] == 'ready' and row['dataset_kind'] in {'data', 'voice', 'speech'}]
+    # The CDR panels show the campaigns, NR Mode and CDR Type of each CDR, as the other modules do.
+    catalogues = repository.cdr_catalogues_by_dataset([int(row['id']) for row in ready])
     datasets = [
         {
             'id': int(row['id']),
             'name': str(row['file_name']),
             'kind': str(row['dataset_kind']),
             'columns': repository.list_dataset_row_columns(int(row['id'])),
+            'nr_mode': dataset_nr_mode(row['dataset_kind'], row.get('nr_mode'), row['file_name']) or '',
+            'cdr_stage': dataset_cdr_stage(row['dataset_kind'], row.get('cdr_stage'), row['file_name']) or 'final',
+            'campaigns': list((catalogues.get(int(row['id'])) or {}).get('campaigns') or []),
         }
-        for row in repository.list_datasets()
-        if row['status'] == 'ready' and row['dataset_kind'] in {'data', 'voice', 'speech'}
+        for row in ready
     ]
     dataset_names_by_id = {item['id']: item['name'] for item in datasets}
     saved = []

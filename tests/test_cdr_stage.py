@@ -229,3 +229,18 @@ def test_cdr_selectors_highlight_weekly_and_daily_cdrs(client, tmp_path):
     assert 'data-cdr-stage="final"' in option(final) and 'cdr-stage-badge' not in option(final)
     assert 'data-cdr-stage="weekly"' in option(weekly) and '<span class="cdr-stage-badge" data-cdr-stage="weekly">Weekly</span>' in option(weekly)
     assert 'data-cdr-stage="daily"' in option(daily) and '<span class="cdr-stage-badge" data-cdr-stage="daily">Daily</span>' in option(daily)
+
+
+def test_query_builder_chooses_its_cdrs_in_a_panel_per_type(client, tmp_path):
+    login(client)
+    final = add_cdr(tmp_path, 'UK_Voice_Q3_Final.xlsx', 'voice', voice(['0xA'], '2026-09-30'), 'final')
+    weekly = add_cdr(tmp_path, 'UK_Voice_Weekly_W39.xlsx', 'voice', voice(['0xB'], '2026-09-27'), 'weekly')
+    page = client.get('/query-builder').text
+    # The sources list stays as the model of the choice, hidden; the panels check its options.
+    assert '<select data-sql-datasets data-native-multiselect multiple hidden' in page
+    voice_panel = page.split('data-sql-dataset-group="voice"', 1)[1].split('data-sql-dataset-group="speech"', 1)[0]
+    assert f'value="{final}" data-sql-dataset-check data-kind="voice"' in voice_panel
+    assert f'value="{weekly}" data-sql-dataset-check data-kind="voice"' in voice_panel
+    assert '<span class="cdr-stage-badge" data-cdr-stage="weekly">Weekly</span>' in voice_panel
+    assert 'No ready Data CDRs.' in page.split('data-sql-dataset-group="data"', 1)[1].split('data-sql-dataset-group="voice"', 1)[0]
+
