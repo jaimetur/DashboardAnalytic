@@ -122,7 +122,7 @@ def _block_profiles(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             contexts = list(dict.fromkeys(tuple(sorted(item['context'].items())) for item in items))
     if len(contexts) > MAX_PROFILE_SCOPES:
         return []
-    return [item for item in items if item['operator'] != item['reference']]
+    return items
 
 
 def _context_text(context: dict[str, Any]) -> str:
@@ -335,25 +335,35 @@ def _profile_table(slide, profile: dict[str, Any], *, kind: str, left: float, wi
 def add_kpi_gap_profile_slides(presentation, profiles: list[dict[str, Any]], *, scoring_label: str, subtitle: str,
                                environment_labels: dict[str, str], new_slide: Callable,
                                operator_colors: dict[str, str]) -> None:
-    """Per compared operator: the KPIs sorted by the points lost against the maximum and the GAP to the reference."""
+    """Per compared operator: the KPIs sorted by the points lost against the maximum and the GAP to the reference.
+
+    The reference operator, when it is one of the compared operators, has its Gap to Maximum only.
+    """
     for profile in _block_profiles(profiles):
         context = _context_text(profile['context'])
-        slide = new_slide(presentation, f"KPI GAP Profile — {profile['label']} vs {profile['reference_label']}",
-                          ' · '.join(part for part in (subtitle, context) if part))
+        is_reference = profile['operator'] == profile['reference']
+        title = (f"KPI GAP Profile — {profile['label']} (reference)" if is_reference
+                 else f"KPI GAP Profile — {profile['label']} vs {profile['reference_label']}")
+        slide = new_slide(presentation, title, ' · '.join(part for part in (subtitle, context) if part))
         header = profile.get('color') or operator_colors.get(profile['operator']) or '#C8102E'
         _profile_table(slide, profile, kind='maximum', left=.35, width=6.2,
                        environment_labels=environment_labels, header_color=header)
-        _profile_table(slide, profile, kind='reference', left=6.78, width=6.2,
-                       environment_labels=environment_labels, header_color=header)
         lost = sum(row['total_gap_to_maximum'] for row in profile['to_maximum'])
-        reference = sum(row['total_gap_to_reference'] for row in profile['to_reference'])
-        reference_color = operator_colors.get(profile['reference']) or '#17232D'
-        runs = [(profile['label'], True, header), (' loses ', False, None),
-                (f'{lost:,.2f} {scoring_label} points', True, None), (' against the maximum; its GAP to ', False, None),
-                (profile['reference_label'], True, reference_color), (' is ', False, None),
-                (f'{reference:+,.2f} points', True, None),
-                ('. Gap to Maximum is the KPI maximum minus the points scored; Gap to the reference is the operator '
-                 'points minus the reference points.', False, None)]
+        if is_reference:
+            runs = [(profile['label'], True, header), (' is the reference operator and loses ', False, None),
+                    (f'{lost:,.2f} {scoring_label} points', True, None),
+                    (' against the maximum. Gap to Maximum is the KPI maximum minus the points scored.', False, None)]
+        else:
+            _profile_table(slide, profile, kind='reference', left=6.78, width=6.2,
+                           environment_labels=environment_labels, header_color=header)
+            reference = sum(row['total_gap_to_reference'] for row in profile['to_reference'])
+            reference_color = operator_colors.get(profile['reference']) or '#17232D'
+            runs = [(profile['label'], True, header), (' loses ', False, None),
+                    (f'{lost:,.2f} {scoring_label} points', True, None), (' against the maximum; its GAP to ', False, None),
+                    (profile['reference_label'], True, reference_color), (' is ', False, None),
+                    (f'{reference:+,.2f} points', True, None),
+                    ('. Gap to Maximum is the KPI maximum minus the points scored; Gap to the reference is the operator '
+                     'points minus the reference points.', False, None)]
         if profile.get('underline_most_reliable'):
             runs.append((' Underlined KPIs are used for the Most Reliable Network scoring.', False, None))
         note = slide.shapes.add_textbox(Inches(.35), Inches(PROFILE_TABLE_BOTTOM + .14), Inches(12.6), Inches(.36))

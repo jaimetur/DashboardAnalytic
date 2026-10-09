@@ -45,6 +45,19 @@ def build_scoring_insights(score_tables: list[dict[str, Any]], configuration: di
     return insights
 
 
+def operator_styles(score_tables: list[dict[str, Any]]) -> dict[str, Any]:
+    """The label, colour and position of every operator of the score tables.
+
+    Each table lists only its own operators, so an operator present in some
+    campaigns or scopes only (such as VF SA) takes its style from those tables.
+    """
+    styles: dict[str, Any] = {}
+    for table in score_tables:
+        for operator, style in (table.get('operator_styles') or {}).items():
+            styles.setdefault(operator, style)
+    return styles
+
+
 def _points_loss_maps(result: dict[str, Any] | None, score_tables: list[dict[str, Any]]) -> tuple[list, list]:
     """Points lost per area of each operator series, with the area locations to draw them."""
     from src.modules.scoring_points_loss import points_loss_maps
@@ -52,7 +65,7 @@ def _points_loss_maps(result: dict[str, Any] | None, score_tables: list[dict[str
     if not isinstance(document, dict) or not document.get('shares'):
         return [], []
     keys = [key for key in document['shares'][0] if key not in {'environment', 'kpi_code', 'areas'}]
-    styles = next((table.get('operator_styles') for table in score_tables if table.get('operator_styles')), {}) or {}
+    styles = operator_styles(score_tables)
     references = {table.get('baseline_operator') for table in score_tables}
     geometry = document.get('areas') or {}
     # What the map areas are, such as ITL3 areas or municipalities, and the countries without them.

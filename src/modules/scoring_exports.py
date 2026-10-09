@@ -31,6 +31,7 @@ from src.modules.scoring_insight_slides import (
     add_points_loss_slides, add_trend_slides,
 )
 from src.modules.scoring_config import BEST_NETWORK_SCORING, MOST_RELIABLE_SCORING, SCORING_LABELS
+from src.modules.scoring_insights import operator_styles
 from src.modules.scoring_vendors import normalize_scoring_vendor_result
 from src.modules.scoring_views import (
     THRESHOLD_COLORS, _gap_order_key, _hierarchy_display_value, build_scoring_views, refresh_baseline_warning, scoring_coverage_notes,
@@ -2375,8 +2376,7 @@ def _add_insight_slides(presentation, views: dict, environment: str, scoring: st
             add_trend_slides(presentation, items.get('campaign_trends', []), scoring_label=label,
                              subtitle=subtitle, new_slide=_slide)
         return
-    styles = next((table.get('operator_styles') for table in views.get('score_tables', [])
-                   if table.get('operator_styles')), {}) or {}
+    styles = operator_styles(views.get('score_tables', []))
     if _option(options, 'gap', 'profile'):
         profiles = [item for item in items.get('kpi_gap_profiles', [])
                     if _compared_operator(options, item['operator'], item.get('label'))]
@@ -2387,8 +2387,9 @@ def _add_insight_slides(presentation, views: dict, environment: str, scoring: st
             new_slide=_slide, operator_colors={name: style.get('color') for name, style in styles.items()},
         )
     if _option(options, 'gap', 'points_loss_map'):
+        # The reference operator has its map too when it is one of the operators to compare.
         maps = [item for item in items.get('points_loss_maps', [])
-                if not item.get('is_reference') and _compared_operator(options, item['operator'], item.get('label'))]
+                if _compared_operator(options, item['operator'], item.get('label'))]
         add_points_loss_slides(presentation, _latest_campaign_maps(maps), insights.get('points_loss_background') or [],
                                scoring_label=label, subtitle=subtitle, new_slide=_slide,
                                boundaries=views.get('_points_loss_boundaries'),

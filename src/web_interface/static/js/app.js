@@ -6624,6 +6624,12 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   return {definition: currentDefinition, close: closeMenu};
 }
 
+// Server-transfer dialogs are wider, and their counts and percentages never break across lines.
+function setLoadingTransferCopy(text) {
+  loadingOverlay?.querySelector('.loading-panel')?.classList.add('loading-panel-wide');
+  if (loadingCopy) loadingCopy.textContent = String(text).replace(/(\d+) of (\d+)/g, '$1\u00a0of\u00a0$2').replace(/ — /g, '\u00a0—\u00a0');
+}
+
 function resetLoadingActions() {
   if (loadingCancel instanceof HTMLButtonElement) { loadingCancel.hidden = true; loadingCancel.onclick = null; loadingCancel.disabled = false; }
   if (loadingHide instanceof HTMLButtonElement) { loadingHide.hidden = true; loadingHide.onclick = null; }
@@ -6632,6 +6638,7 @@ function resetLoadingActions() {
 function hideLoadingOverlay() {
   if (!loadingOverlay) return;
   loadingOverlay.hidden = true;
+  loadingOverlay.querySelector('.loading-panel')?.classList.remove('loading-panel-wide');
   resetLoadingActions();
   document.body.classList.remove('loading-active');
 }
@@ -6640,6 +6647,7 @@ function showLoadingOverlay(label, copy) {
   if (!loadingOverlay) return;
   loadingTitle.textContent = label || 'Processing request';
   loadingCopy.textContent = copy || 'Please wait while the workspace processes the selected dataset or updates the analysis.';
+  loadingOverlay.querySelector('.loading-panel')?.classList.remove('loading-panel-wide');
   resetLoadingActions();
   if (loadingProgressBar instanceof HTMLElement) {
     loadingProgressBar.style.width = '45%';
@@ -7311,6 +7319,7 @@ function followServerTransfer(initialState) {
   };
   const showDialog = (status) => {
     showLoadingOverlay('Server transfer', 'The server transfer is in progress.');
+    setLoadingTransferCopy('The server transfer is in progress.');
     dialogShown = true;
     if (loadingHide instanceof HTMLButtonElement) {
       loadingHide.hidden = false;
@@ -7388,7 +7397,7 @@ function followServerTransfer(initialState) {
     }
     if (dialogShown) {
       setLoadingProgress(transfer.progress);
-      if (loadingCopy) loadingCopy.textContent = progressCopy(transfer);
+      setLoadingTransferCopy(progressCopy(transfer));
       if (loadingHide instanceof HTMLButtonElement) {
         loadingHide.onclick = () => {
           state = {...state, hidden_status: transfer.status};
@@ -7695,7 +7704,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
             importing: `Importing the received package${offer.phase ? `: ${offer.phase}` : ''}`,
             cancelling: 'Cancelling the incoming transfer',
           };
-          loadingCopy.textContent = `${copies[offer.status] || 'Incoming transfer in progress'}${progress}.`;
+          setLoadingTransferCopy(`${copies[offer.status] || 'Incoming transfer in progress'}${progress}.`);
         }
       }
       window.setTimeout(() => { void poll(); }, 1200);

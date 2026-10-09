@@ -197,3 +197,49 @@ def test_a_level_with_a_single_value_keeps_the_maps():
     assert all(not item['context'] for item in maps)
     # The saved result keeps its campaign.
     assert result['points_loss']['shares'][0]['campaign'] == '2026-Q2'
+
+
+def test_operators_of_some_tables_only_keep_their_colour():
+    from src.modules.scoring_insights import operator_styles
+
+    # VF SA is measured in the 2026-Q2 campaign only, not in the first score table.
+    tables = [
+        {'operator_styles': {'VF': {'label': 'VF', 'color': '#E60000'}}},
+        {'operator_styles': {'VF': {'label': 'VF', 'color': '#123456'}, 'VF SA': {'label': 'VF SA', 'color': '#8B1A1A'}}},
+        {},
+    ]
+    styles = operator_styles(tables)
+    assert styles['VF SA']['color'] == '#8B1A1A'
+    assert styles['VF']['color'] == '#E60000'
+
+
+def test_the_reference_operator_has_its_map_and_its_gap_to_maximum():
+    from pathlib import Path
+
+    script = (Path(__file__).resolve().parents[1] / 'src/web_interface/static/js/scoring.js').read_text(encoding='utf-8')
+    # The reference operator keeps its Points Lost Map and its KPI GAP Profile, without the GAP to itself.
+    assert "const maps = insightItems(payload, 'points_loss_maps', environment);" in script
+    assert "const profiles = insightItems(payload, 'kpi_gap_profiles', environment);" in script
+    assert "if (!isReference) tables.append(profileTable(profile, 'reference'));" in script
+    # A choice of operators saved before the reference was offered leaves the reference enabled.
+    assert "const newlyOffered = item => offered === '*' ? false : Array.isArray(offered) ? !offered.includes(item.operator) : isReference(item);" in script
+    job, result = _result()
+    profiles = build_scoring_views(job, result)['insights']['kpi_gap_profiles']
+    reference = [item for item in profiles if item['operator'] == 'EE']
+    assert reference and all(item['to_maximum'] and not item['to_reference'] for item in reference)
+
+
+def test_exports_include_the_reference_operator_only_when_it_is_compared():
+    job, result = _result()
+
+    def scenario(operators):
+        chosen = default_scenario(operators=operators)
+        for options in chosen['scorings'].values():
+            options['gap']['operators'] = list(operators)
+        return chosen
+
+    titles = _titles(export_scoring_report([{'job': job, 'result': result, 'scenario': scenario(['Vodafone UK', 'EE'])}], TEMPLATE))
+    assert any(title.startswith('KPI GAP Profile — EE (reference)') for title in titles)
+    assert any(title.startswith('KPI GAP Profile — Vodafone UK vs EE') for title in titles)
+    titles = _titles(export_scoring_report([{'job': job, 'result': result, 'scenario': scenario(['Vodafone UK'])}], TEMPLATE))
+    assert not any(title.startswith('KPI GAP Profile — EE') for title in titles)

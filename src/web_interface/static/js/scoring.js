@@ -4935,11 +4935,18 @@
     }
     const inScope = items.filter(item => scopeKey(item) === scope);
     const operators = [...new Map(inScope.map(item => [item.operator, item])).values()];
-    // By default every operator is chosen.
+    // By default every operator is chosen. An operator offered after the choice was saved starts chosen too;
+    // choices saved before the reference operator was offered did not include it.
     let stored = null;
+    let offered = null;
     try { stored = JSON.parse(insightSelections.get('gap-insight-operators') || 'null'); } catch (_error) { stored = null; }
+    try { offered = JSON.parse(insightSelections.get('gap-insight-operators-offered') || 'null'); } catch (_error) { offered = null; }
     const names = operators.map(item => item.operator);
-    let chosen = Array.isArray(stored) ? stored.filter(operator => names.includes(operator)) : [];
+    const isReference = item => item.is_reference === true || (item.reference !== undefined && item.operator === item.reference);
+    const newlyOffered = item => offered === '*' ? false : Array.isArray(offered) ? !offered.includes(item.operator) : isReference(item);
+    let chosen = Array.isArray(stored)
+      ? [...new Set([...stored.filter(operator => names.includes(operator)), ...operators.filter(newlyOffered).map(item => item.operator)])]
+      : [];
     if (!chosen.length) chosen = [...names];
     const group = document.createElement('div');
     group.className = 'scoring-environment-filter scoring-loss-operators';
@@ -4952,6 +4959,7 @@
       chip.className = 'scoring-loss-operator';
       chip.dataset.gapInsightOperator = item.operator;
       chip.dataset.gapInsightOperators = JSON.stringify(chosen);
+      chip.dataset.gapInsightOffered = JSON.stringify(names);
       chip.setAttribute('aria-pressed', String(chosen.includes(item.operator)));
       chip.textContent = item.label;
       // Clicking an operator disables or enables it; one operator always stays enabled.
@@ -4967,7 +4975,8 @@
 
   function renderKpiGapProfiles(pane, payload, environment) {
     if (!environment) return;
-    const profiles = insightItems(payload, 'kpi_gap_profiles', environment).filter(profile => profile.operator !== profile.reference);
+    // The reference operator is shown too, with its Gap to Maximum only: its GAP to itself would be empty.
+    const profiles = insightItems(payload, 'kpi_gap_profiles', environment);
     if (!profiles.length) return;
     const section = document.createElement('section');
     section.className = 'scoring-insight-section scoring-result-card scoring-gap-profile-card';
@@ -4977,9 +4986,11 @@
     const {controls, inScope, chosen} = gapInsightControls(pane, profiles);
     section.append(heading, controls);
     for (const profile of inScope.filter(item => chosen.includes(item.operator))) {
+      const isReference = profile.operator === profile.reference;
       const tables = document.createElement('div');
       tables.className = 'scoring-insight-pair';
-      tables.append(profileTable(profile, 'maximum'), profileTable(profile, 'reference'));
+      tables.append(profileTable(profile, 'maximum'));
+      if (!isReference) tables.append(profileTable(profile, 'reference'));
       const lost = profile.to_maximum.reduce((sum, row) => sum + (Number(row.total_gap_to_maximum) || 0), 0);
       const gap = profile.to_reference.reduce((sum, row) => sum + (Number(row.total_gap_to_reference) || 0), 0);
       const note = document.createElement('p');
@@ -4992,8 +5003,13 @@
       lostText.textContent = `${insightNumber(lost, 2)} ${scoringLabel()} points`;
       const gapText = document.createElement('strong');
       gapText.textContent = `${gap >= 0 ? '+' : ''}${insightNumber(gap, 2)} points`;
-      note.append(operator, ' loses ', lostText, ' against the maximum; its GAP to ', reference, ' is ', gapText,
-        '. Gap to Maximum is the KPI maximum minus the points scored; Gap to the reference is the operator points minus the reference points.');
+      if (isReference) {
+        note.append(operator, ' is the reference operator and loses ', lostText,
+          ' against the maximum. Gap to Maximum is the KPI maximum minus the points scored.');
+      } else {
+        note.append(operator, ' loses ', lostText, ' against the maximum; its GAP to ', reference, ' is ', gapText,
+          '. Gap to Maximum is the KPI maximum minus the points scored; Gap to the reference is the operator points minus the reference points.');
+      }
       if (profile.underline_most_reliable) note.append(' Underlined KPIs are used for the Most Reliable Network scoring.');
       section.append(tables, note);
     }
@@ -5109,7 +5125,7 @@
   // side) and the analysis per City, Region or Cluster.
   function renderPointsLossMaps(pane, payload, environment, jobId) {
     if (!environment || !jobId) return;
-    const maps = insightItems(payload, 'points_loss_maps', environment).filter(item => !item.is_reference);
+    const maps = insightItems(payload, 'points_loss_maps', environment);
     if (!maps.length) return;
     const seriesKey = item => `${item.operator}|${JSON.stringify(item.context)}`;
     const layers = new Map(maps.filter(item => item.field === 'Area').map(item => [seriesKey(item), item]));
@@ -6354,7 +6370,10 @@
     if (gapSummaryOperator && currentResults) {
       gapComparisonSelections.set(gapSummaryOperator.dataset.gapSummaryStateKey, gapSummaryOperator.value);
       // The KPI GAP Profile and the Points Lost Map follow the operator chosen here.
-      if (gapSummaryOperator.value.startsWith('operator:')) insightSelections.set('gap-insight-operators', JSON.stringify([gapSummaryOperator.value.slice('operator:'.length)]));
+      if (gapSummaryOperator.value.startsWith('operator:')) {
+        insightSelections.set('gap-insight-operators', JSON.stringify([gapSummaryOperator.value.slice('operator:'.length)]));
+        insightSelections.set('gap-insight-operators-offered', JSON.stringify('*'));
+      }
       persistScoringViewState();
       renderResult(currentResults, selectedJob);
       return;
@@ -6363,7 +6382,10 @@
     if (hierarchyGapOperator && currentResults) {
       gapComparisonSelections.set(hierarchyGapOperator.dataset.hierarchyGapStateKey, hierarchyGapOperator.value);
       // The KPI GAP Profile and the Points Lost Map follow the operator chosen here.
-      if (hierarchyGapOperator.value.startsWith('operator:')) insightSelections.set('gap-insight-operators', JSON.stringify([hierarchyGapOperator.value.slice('operator:'.length)]));
+      if (hierarchyGapOperator.value.startsWith('operator:')) {
+        insightSelections.set('gap-insight-operators', JSON.stringify([hierarchyGapOperator.value.slice('operator:'.length)]));
+        insightSelections.set('gap-insight-operators-offered', JSON.stringify('*'));
+      }
       persistScoringViewState();
       renderResult(currentResults, selectedJob);
       return;
@@ -6450,6 +6472,7 @@
       chosen = chosen.includes(operator) ? chosen.filter(item => item !== operator) : [...chosen, operator];
       if (!chosen.length) return;
       insightSelections.set('gap-insight-operators', JSON.stringify(chosen));
+      insightSelections.set('gap-insight-operators-offered', insightOperator.dataset.gapInsightOffered || 'null');
       persistScoringViewState();
       // With one operator, the GAP comparison above follows it.
       const comparison = root.querySelector('[data-result-pane="gap"] [data-hierarchy-gap-operator], [data-result-pane="gap"] [data-gap-summary-operator]');

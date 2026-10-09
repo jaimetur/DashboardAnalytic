@@ -217,6 +217,11 @@
   .scoring-loss-map-grid { display: grid; gap: 1.2rem; }
   .scoring-loss-map-grid.is-multiple { grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); }
   .scoring-loss-map-card { min-width: 0; }
+  /* Side by side, the operator, note, map with its ranking and hint of every card share their rows,
+     so a note one line longer does not push its map below the others. */
+  .scoring-loss-map-grid.is-multiple > .scoring-loss-map-card { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 0; align-content: start; }
+  /* Grid items do not collapse margins: the note keeps the same distance below the operator. */
+  .scoring-loss-map-grid.is-multiple > .scoring-loss-map-card > .scoring-insight-note { margin-top: .25rem; }
   .scoring-loss-map.is-compact { grid-template-columns: minmax(0, 1fr); }
   /* Map zoom: a rectangle dragged with the mouse, or the floating buttons shown while the pointer is over the map. */
   .scoring-loss-map-figure { position: relative; }
