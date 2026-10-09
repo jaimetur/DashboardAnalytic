@@ -193,7 +193,7 @@ def test_bundled_rf_quality_template_is_valid() -> None:
         assert all(entry.layout == 'Title + 2 rows + 2 columns + comments right' for entry in entries)
         assert [entry.chart_type for entry in entries[:2]] == ['CDF Line', 'CDF Line']
         assert all(entry.chart_type == 'Histogram Line' for entry in entries[2:])
-        assert all(entry.grouping_rows == 'Operator' and entry.grouping_columns == 'Campaign' for entry in entries[2:])
+        assert all(entry.rows_split == 'Operator' and entry.columns_split == 'Campaign' for entry in entries[2:])
 
 
 @pytest.mark.parametrize('field,values,edges', [
@@ -207,7 +207,7 @@ def test_quality_maps_use_measurement_buckets_without_replacing_coordinates(fiel
         slide=1, slide_title='RF map', slide_subtitle='', layout='Title and 1 column + Comments',
         chart_title='Quality', cdr_source='CDR-Data', kpi=f'Latitude vs Longitude vs {field}',
         chart_type='Map', legend='Value Bucket', filters=f'Buckets = {edges}',
-        grouping_rows='Value Bucket', grouping_columns='',
+        rows_split='Value Bucket', columns_split='',
         legend_position='Right', exclude_null_empty=True,
     )
     frame = pd.DataFrame({
@@ -491,7 +491,7 @@ def test_two_axis_dynamic_expansion_filters_vendor_only_and_paginates_grid_frame
         layout='Title + dynamic rows + dynamic columns + comments down',
         chart_title='Signal', cdr_source='CDR-Data', kpi='LTE_RSRP',
         chart_type='Histogram Bars', legend='', filters='',
-        grouping_rows='Operator_Vendor', grouping_columns='Campaign',
+        rows_split='Operator_Vendor', columns_split='Campaign',
         dynamic_rows_field='Operator_Vendor', dynamic_columns_field='Campaign',
     )
     source = pd.DataFrame({

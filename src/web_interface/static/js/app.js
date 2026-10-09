@@ -2914,9 +2914,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   let activeCell = null;
   const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field]'))
     .map((cell) => cell.dataset.catalogueField);
-  const fieldColumns = new Set(['Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend']);
-  const assistedFields = new Set(['Dynamic Rows Field', 'Dynamic Columns Field', 'Layout', 'Source Dataset', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero']);
-  const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
+  const fieldColumns = new Set(['Filters', 'Rows Split', 'Columns Split', 'Legend']);
+  const assistedFields = new Set(['Dynamic Rows Field', 'Dynamic Columns Field', 'Layout', 'Source Dataset', 'KPI', 'Chart type', 'Filters', 'Rows Split', 'Columns Split', 'Legend', 'Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero']);
+  const splitColumns = new Set(['Rows Split', 'Columns Split']);
   const validationAlert = document.querySelector('[data-catalogue-validation-alert]');
   const validationMessage = validationAlert?.querySelector('[data-catalogue-validation-message]');
   const showCatalogueValidation = (message) => {
@@ -3035,8 +3035,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'Exclude Null/Empty') return 'Choose Yes to exclude rows whose plotted value is null or empty. Leave empty to keep them.';
     if (field === 'Exclude Zero') return 'Choose Yes to exclude rows whose plotted numeric value is exactly zero. Leave empty to keep them.';
     if (field === 'Filters') return 'Build complete conditions from a processed CDR field, operator and real observed value. Conditions are joined with semicolons (AND), and the cell remains manually editable.';
-    if (field === 'Rows Aggregation') return 'Select one or more dimensions for the chart category axis or table rows. They are appended with ×.';
-    if (field === 'Column Aggregation') return 'Select one or more dimensions for comparison series or table columns. They are appended with ×.';
+    if (field === 'Rows Split') return 'Select one or more dimensions for the chart category axis or table rows. They are appended with ×.';
+    if (field === 'Columns Split') return 'Select one or more dimensions for comparison series or table columns. They are appended with ×.';
     return 'This value can be edited directly. Select Layout, Chart type, Filters or Grouping for contextual suggestions.';
   };
   const selectedSource = (cell) => cell?.closest('tr')?.querySelector('[data-catalogue-field="Source Dataset"]')?.textContent.trim().toLocaleLowerCase() || '';
@@ -3268,7 +3268,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     options.replaceChildren();
     const existingValues = new Set(
       (allowsMultiple
-        ? cell.textContent.split(groupingColumns.has(field) ? /(?:\s*×\s*|\s+[xX]\s+)/ : /\s*,\s*/)
+        ? cell.textContent.split(splitColumns.has(field) ? /(?:\s*×\s*|\s+[xX]\s+)/ : /\s*,\s*/)
         : [field === 'KPI' && kpiExpression ? kpiExpression[2] : cell.textContent])
         .map((value) => value.trim())
         .filter(Boolean),
@@ -3663,8 +3663,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   }));
   const previewDefinitionFromRow = (row) => ({
     chart_type: rowValue(row, 'Chart type'), chart_title: rowValue(row, 'Chart Tittle'), cdr_source: rowValue(row, 'Source Dataset'),
-    kpi: rowValue(row, 'KPI'), filters: rowValue(row, 'Filters'), grouping_rows: rowValue(row, 'Rows Aggregation'),
-    grouping_columns: rowValue(row, 'Column Aggregation'), legend: rowValue(row, 'Legend'), legend_position: rowValue(row, 'Legend Position'), legend_format: rowValue(row, 'Legend Format'),
+    kpi: rowValue(row, 'KPI'), filters: rowValue(row, 'Filters'), rows_split: rowValue(row, 'Rows Split'),
+    columns_split: rowValue(row, 'Columns Split'), legend: rowValue(row, 'Legend'), legend_position: rowValue(row, 'Legend Position'), legend_format: rowValue(row, 'Legend Format'),
     axis_x_range: rowValue(row, 'Axis X Range'), axis_y_range: rowValue(row, 'Axis Y Range'),
     label_position: rowValue(row, 'Label Position'),
     label_format: rowValue(row, 'Label Format'),
@@ -3684,7 +3684,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       fields: [
         // Keep this sequence aligned with the editable Report Template columns.
         ['chart_title', 'Chart Tittle'], ['cdr_source', 'Source Dataset'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'],
-        ['dynamic_rows_field', 'Dynamic Rows Field'], ['dynamic_columns_field', 'Dynamic Columns Field'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+        ['dynamic_rows_field', 'Dynamic Rows Field'], ['dynamic_columns_field', 'Dynamic Columns Field'], ['filters', 'Filters'], ['rows_split', 'Rows'], ['columns_split', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
         ['legend_format', 'Legend Format'], ['label_position', 'Label Position'], ['label_format', 'Label Format'],
         ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
       ],
@@ -3751,7 +3751,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       {title: 'Update Template?', confirmLabel: 'Update Template', tone: 'warning'},
     );
     if (!accepted) return;
-    const mapping = {dynamic_rows_field: 'Dynamic Rows Field', dynamic_columns_field: 'Dynamic Columns Field', chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'Source Dataset', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position', legend_format: 'Legend Format', label_position: 'Label Position', label_format: 'Label Format', axis_x_range: 'Axis X Range', axis_y_range: 'Axis Y Range', exclude_null_empty: 'Exclude Null/Empty', exclude_zero: 'Exclude Zero'};
+    const mapping = {dynamic_rows_field: 'Dynamic Rows Field', dynamic_columns_field: 'Dynamic Columns Field', chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'Source Dataset', kpi: 'KPI', filters: 'Filters', rows_split: 'Rows Split', columns_split: 'Columns Split', legend: 'Legend', legend_position: 'Legend Position', legend_format: 'Legend Format', label_position: 'Label Position', label_format: 'Label Format', axis_x_range: 'Axis X Range', axis_y_range: 'Axis Y Range', exclude_null_empty: 'Exclude Null/Empty', exclude_zero: 'Exclude Zero'};
     Object.entries(previewDefinition()).forEach(([key, value]) => {
       const cell = Array.from(chartPreviewRow.querySelectorAll('[data-catalogue-field]')).find((item) => item.dataset.catalogueField === mapping[key]);
       if (!cell) return;
@@ -4530,7 +4530,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   try { templateLibrary = JSON.parse(form.dataset.catalogueTemplateLibrary || '{}'); } catch (_error) { templateLibrary = {}; }
   const currentHeaders = [
     'Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout', 'Dynamic Rows Field', 'Dynamic Columns Field', 'Chart Tittle', 'Source Dataset',
-    'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero',
+    'KPI', 'Chart type', 'Filters', 'Rows Split', 'Columns Split', 'Legend', 'Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero',
   ];
   const normalizedHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   const hasCurrentSchema = async (selected) => {
@@ -6216,11 +6216,11 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   if (!fieldsElement) return {definition: () => ({})};
   const fields = options.fields || [
     ['cdr_source', 'Source Dataset'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'], ['filters', 'Filters'],
-    ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'], ['legend_format', 'Legend Format'],
+    ['rows_split', 'Rows'], ['columns_split', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'], ['legend_format', 'Legend Format'],
     ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
     ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
   ];
-  const multiFields = new Set(['dataset_ids', 'grouping_rows', 'grouping_columns', 'legend']);
+  const multiFields = new Set(['dataset_ids', 'rows_split', 'columns_split', 'legend']);
   const parseKpiDefinition = (value) => {
     const text = String(value || '').trim();
     const match = text.match(/^\s*(SUM|COUNTD|COUNT|AVERAGE|AVG|MEAN|MAX|MIN|MEDIAN)\s*\(\s*(.+?)\s*\)\s*$/i);
@@ -6250,7 +6250,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   };
   const currentDefinition = () => Object.fromEntries(Array.from(fieldsElement.querySelectorAll('[name]')).map((control) => {
     if (['label_format', 'legend_format'].includes(control.name) && fieldsElement.querySelector(`[data-preview-${control.name.replace('_', '-')}-automatic]`)?.checked) return [control.name, ''];
-    if (options.editableGroupingInputs && ['grouping_rows', 'grouping_columns'].includes(control.name)) {
+    if (options.editableSplitInputs && ['rows_split', 'columns_split'].includes(control.name)) {
       const editor = control.parentElement?.querySelector('[data-preview-grouping-text]');
       if (editor) return [control.name, editor.value.trim()];
     }
@@ -6504,11 +6504,11 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       operation.value = kpiDefinition.operation;
       field.append(operationLabel, operation);
     }
-    if (key === 'grouping_rows' || key === 'grouping_columns') {
-      const parsed = document.createElement('input'); parsed.type = 'text'; parsed.className = 'report-chart-preview-parsed'; parsed.readOnly = !options.editableGroupingInputs; parsed.dataset.previewGroupingText = ''; parsed.placeholder = `No ${label.toLowerCase()} selected`; parsed.setAttribute('aria-label', `Selected ${label.toLowerCase()}`);
+    if (key === 'rows_split' || key === 'columns_split') {
+      const parsed = document.createElement('input'); parsed.type = 'text'; parsed.className = 'report-chart-preview-parsed'; parsed.readOnly = !options.editableSplitInputs; parsed.dataset.previewGroupingText = ''; parsed.placeholder = `No ${label.toLowerCase()} selected`; parsed.setAttribute('aria-label', `Selected ${label.toLowerCase()}`);
       const syncParsed = () => { parsed.value = orderedSelectedValues(control).join(' × '); };
       control.addEventListener('input', syncParsed); control.addEventListener('change', syncParsed); syncParsed(); field.append(parsed);
-      if (options.editableGroupingInputs) parsed.addEventListener('input', () => {
+      if (options.editableSplitInputs) parsed.addEventListener('input', () => {
         const requested = Array.from(valuesFor(parsed.value, key));
         const available = Array.from(control.options).map((option) => option.value);
         const selected = requested.map((value) => matchingPreviewValue(value, available));

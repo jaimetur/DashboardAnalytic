@@ -1,4 +1,4 @@
-Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position
+Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Split,Columns Split,Legend,Legend Position
 1,2025 Q4 Net check UK,NSA CDR analysis,Title Page,,,,Title Slide,,,,,Top
 2,Executive Summary,,Title Only,,,,Transition Slide,,,,,Top
 3,Completed Call Ratio,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,"Call Family IN (VoLTE, MultiRAB, WhatsApp); Operator IN (Vodafone UK, 3, EE)",Call Family,Operator × Campaign,,Top

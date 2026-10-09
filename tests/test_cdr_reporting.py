@@ -64,10 +64,10 @@ def test_table_payload_counts_test_ids_across_the_declared_row_hierarchy() -> No
     base = dict(
         slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Test count',
         cdr_source='CDR-Data', chart_type='Table', legend='', filters='',
-        grouping_rows='Benchmark × Subscriber × G Level 4 × Test Result',
+        rows_split='Benchmark × Subscriber × G Level 4 × Test Result',
         # A KPI accidentally repeated as a column dimension must not split its
         # own aggregation. Cell Assistance now makes the intended KPI syntax explicit.
-        grouping_columns='Test_ID', legend_position='Top',
+        columns_split='Test_ID', legend_position='Top',
     )
 
     count = catalog_chart_payload(frame, CatalogEntry(kpi='COUNT(Test_ID)', **base), prefiltered=True)
@@ -89,7 +89,7 @@ def test_dynamic_table_pivots_columns_and_exposes_hierarchy_metadata() -> None:
     entry = CatalogEntry(
         slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Test count',
         cdr_source='CDR-Data', kpi='COUNT(Test_ID)', chart_type='Dynamic Table', legend='Subscriber', filters='',
-        grouping_rows='Benchmark × Subscriber × G Level 4 × Test_Result', grouping_columns='G Level 4',
+        rows_split='Benchmark × Subscriber × G Level 4 × Test_Result', columns_split='G Level 4',
         legend_position='',
     )
 
@@ -126,7 +126,7 @@ def test_dynamic_table_uses_operator_mapping_order_by_default() -> None:
     entry = CatalogEntry(
         slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Test count',
         cdr_source='CDR-Data', kpi='COUNT(Test_ID)', chart_type='Dynamic Table', legend='', filters='',
-        grouping_rows='Subscriber × Test_Result', grouping_columns='G Level 4',
+        rows_split='Subscriber × Test_Result', columns_split='G Level 4',
         legend_position='',
     )
 
@@ -135,7 +135,7 @@ def test_dynamic_table_uses_operator_mapping_order_by_default() -> None:
     assert [row[0] for row in model['rows']] == ['3', 'EE', 'O2', 'VF_UK', 'VF_SA']
     column_model = catalog_chart_payload(
         frame,
-        replace(entry, grouping_rows='Test_Result', grouping_columns='Subscriber'),
+        replace(entry, rows_split='Test_Result', columns_split='Subscriber'),
         prefiltered=True,
     )
     assert column_model['headers'][1:] == ['3', 'EE', 'O2', 'VF_UK', 'VF_SA']
@@ -161,8 +161,8 @@ def test_failure_count_hierarchy_uses_operator_mapping_order() -> None:
     entry = CatalogEntry(
         slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Failures',
         cdr_source='CDR-Voice', kpi='COUNT(Test_ID)', chart_type='Count Stacked Horizontal Bars',
-        legend='Call Status', filters='', grouping_rows='Session Type × City',
-        grouping_columns='Operator × Campaign', legend_position='Right',
+        legend='Call Status', filters='', rows_split='Session Type × City',
+        columns_split='Operator × Campaign', legend_position='Right',
     )
 
     model = catalog_chart_payload(frame, entry, prefiltered=True)
@@ -193,8 +193,8 @@ def test_failure_count_hierarchy_keeps_operator_mapping_order_when_city_rows_are
     entry = CatalogEntry(
         slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Failures',
         cdr_source='CDR-Voice', kpi='COUNT(Test_ID)', chart_type='Count Stacked Horizontal Bars',
-        legend='Call Status', filters='', grouping_rows='Session Type × City',
-        grouping_columns='Operator × Campaign', legend_position='Right',
+        legend='Call Status', filters='', rows_split='Session Type × City',
+        columns_split='Operator × Campaign', legend_position='Right',
     )
 
     model = catalog_chart_payload(frame, entry, prefiltered=True)
@@ -219,7 +219,7 @@ def test_multivendor_dynamic_table_places_operator_only_identities_after_vendors
     entry = CatalogEntry(
         slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Test count',
         cdr_source='CDR-Data', kpi='COUNT(Test_ID)', chart_type='Dynamic Table', legend='', filters='',
-        grouping_rows='Operator_Vendor × Operator × Test_Result', grouping_columns='G Level 4',
+        rows_split='Operator_Vendor × Operator × Test_Result', columns_split='G Level 4',
         legend_position='',
     )
 
@@ -240,7 +240,7 @@ def test_dynamic_table_rejects_an_unreadable_number_of_pivot_columns() -> None:
     entry = CatalogEntry(
         slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Test count',
         cdr_source='CDR-Data', kpi='COUNT(Test_ID)', chart_type='Dynamic Table', legend='', filters='',
-        grouping_rows='Benchmark', grouping_columns='G Level 4', legend_position='',
+        rows_split='Benchmark', columns_split='G Level 4', legend_position='',
     )
 
     model = catalog_chart_payload(frame, entry, prefiltered=True)
@@ -329,7 +329,7 @@ def test_catalog_filters_accept_case_separators_and_subscriber_spelling_alias() 
         slide=1, slide_title='', slide_subtitle='', layout='', chart_title='',
         cdr_source='CDR-Data', kpi='test result', chart_type='Table', legend='',
         filters='SUBSCRIBER = alpha user; test result = completed; campaign = uk_q3_2026',
-        grouping_rows='', grouping_columns='',
+        rows_split='', columns_split='',
     )
 
     filtered = _apply_catalog_filters(frame, entry, False, 'test result')
@@ -346,7 +346,7 @@ def test_catalog_timestamp_conditions_remain_active_when_date_range_filtering_is
     entry = CatalogEntry(
         slide=1, slide_title='', slide_subtitle='', layout='', chart_title='',
         cdr_source='CDR-Data', kpi='Metric', chart_type='Table', legend='',
-        filters='Event_Start_Time = 2026-09-01 10:00:00', grouping_rows='', grouping_columns='',
+        filters='Event_Start_Time = 2026-09-01 10:00:00', rows_split='', columns_split='',
     )
 
     filtered = _apply_catalog_filters(frame, entry, False, 'Metric')
@@ -446,8 +446,8 @@ def test_vendor_only_grouping_pools_two_operators_for_radio_quality_charts(chart
         slide=1, slide_title='', slide_subtitle='',
         layout='2 rows + dynamic columns, comments down', chart_title='RSRP',
         cdr_source='CDR-All', kpi='LTE_RSRP', chart_type=chart_type,
-        legend='Operator', filters='', grouping_rows='Operator',
-        grouping_columns='Campaign', legend_position='Right', dynamic_field='Operator',
+        legend='Operator', filters='', rows_split='Operator',
+        columns_split='Campaign', legend_position='Right', dynamic_field='Operator',
     )
     prepared = prepare_multivendor_catalog_entry(entry, 'vendor_only')
     frame = chart_frame({
@@ -617,8 +617,8 @@ def test_combined_reporting_frame_keeps_every_data_attempt_before_template_filte
         legend='Test_Result', filters=(
             'Test Name CONTAINS FDFS; Test_Result IN (Completed, Cutoff, Failed); '
             'Operator IN (Vodafone UK, 3, EE); G Level 4 IN (London)'
-        ), grouping_rows='Test_Name',
-        grouping_columns='Operator × Campaign', legend_position='Right',
+        ), rows_split='Test_Name',
+        columns_split='Operator × Campaign', legend_position='Right',
     )
 
     frame = app_module._combined_reporting_frame(
@@ -631,7 +631,7 @@ def test_combined_reporting_frame_keeps_every_data_attempt_before_template_filte
     preview, summary = app_module.preview_catalog_chart_data(frame, entry, limit=100)
     assert summary['matched_rows'] == 3
     assert preview['Filter · Test_Result'].tolist() == ['Cutoff', 'Cutoff', 'Cutoff']
-    assert preview['Resolved Column Aggregation'].tolist() == ['EE · 2026-Q2'] * 3
+    assert preview['Resolved Columns Split'].tolist() == ['EE · 2026-Q2'] * 3
 
 
 def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> None:
@@ -728,8 +728,8 @@ def test_catalogue_converter_migrates_legacy_headers_and_grouping() -> None:
     assert entries[0].slide_title == 'Quality'
     assert entries[0].chart_title == ''
     assert entries[0].legend == ''
-    assert entries[0].grouping_rows == 'Operator'
-    assert entries[0].grouping_columns == 'Campaign'
+    assert entries[0].rows_split == 'Operator'
+    assert entries[0].columns_split == 'Campaign'
 
 
 def test_catalogue_converter_assigns_layouts_for_missing_legacy_layouts() -> None:
@@ -803,7 +803,7 @@ def test_catalogue_parses_legend_position_and_accepts_prior_schema() -> None:
 
 def test_catalogue_cdf_axis_ranges_are_optional_and_backward_compatible() -> None:
     rangeless = (
-        'Slide,Slide Tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        'Slide,Slide Tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Split,Columns Split,Legend,Legend Position\n'
         '8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,CDF Line,,Operator,,,Top\n'
     )
     legacy_entry = parse_catalog_csv(rangeless, 'nsa')[0]
@@ -840,8 +840,8 @@ def test_catalogue_label_format_is_validated_and_serialised() -> None:
     row = {
         'Slide': '8', 'Slide Tittle': 'Failures', 'Slide Subtittle': '', 'Layout': 'Title and 1 column + Comments',
         'Chart Tittle': 'Failures', 'Source Dataset': 'CDR-Voice', 'KPI': 'Call_Status',
-        'Chart type': 'Count Stacked Horizontal Bars', 'Filters': '', 'Rows Aggregation': 'Operator',
-        'Column Aggregation': '', 'Legend': '', 'Legend Position': 'Top', 'Label Position': 'Down',
+        'Chart type': 'Count Stacked Horizontal Bars', 'Filters': '', 'Rows Split': 'Operator',
+        'Columns Split': '', 'Legend': '', 'Legend Position': 'Top', 'Label Position': 'Down',
         'Label Format': '["#1a2b3c", "Verdana", "Large", "Bold"]', 'Axis X Range': '', 'Axis Y Range': '',
         'Exclude Null/Empty': '', 'Exclude Zero': '',
     }
@@ -858,8 +858,8 @@ def test_catalogue_legend_format_is_validated_and_serialised() -> None:
     row = {
         'Slide': '8', 'Slide Tittle': 'Failures', 'Slide Subtittle': '', 'Layout': 'Title and 1 column + Comments',
         'Chart Tittle': 'Failures', 'Source Dataset': 'CDR-Voice', 'KPI': 'Call_Status',
-        'Chart type': 'Count Stacked Horizontal Bars', 'Filters': '', 'Rows Aggregation': 'Operator',
-        'Column Aggregation': '', 'Legend': '', 'Legend Position': 'Top',
+        'Chart type': 'Count Stacked Horizontal Bars', 'Filters': '', 'Rows Split': 'Operator',
+        'Columns Split': '', 'Legend': '', 'Legend Position': 'Top',
         'Legend Format': '["#1a2b3c", "Verdana", "Large", "Bold"]', 'Label Position': '', 'Label Format': '',
         'Axis X Range': '', 'Axis Y Range': '', 'Exclude Null/Empty': '', 'Exclude Zero': '',
     }
@@ -879,7 +879,7 @@ def test_catalogue_null_and_zero_exclusions_are_independent_and_backward_compati
         parse_template_boolean('Sometimes', 'Exclude Zero')
 
     previous_visual_schema = (
-        'Slide,Slide Tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position,Label,Axis X Range,Axis Y Range\n'
+        'Slide,Slide Tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Split,Columns Split,Legend,Legend Position,Label,Axis X Range,Axis Y Range\n'
         '8,Quality,,Layout,Quality,CDR-Data,Metric,CDF Line,,Operator,,,Top,,,\n'
     )
     previous = parse_catalog_csv(previous_visual_schema, 'nsa')[0]
@@ -901,7 +901,7 @@ def test_null_and_zero_exclusions_filter_plotted_values_independently() -> None:
     base = dict(
         slide=1, slide_title='Chart', slide_subtitle='', layout='Layout', chart_title='Chart',
         cdr_source='CDR-Data', kpi='Metric', chart_type='CDF Line', legend='', filters='',
-        grouping_rows='Operator', grouping_columns='',
+        rows_split='Operator', columns_split='',
     )
 
     without_nulls, _ = prepare_catalog_chart_preview_frame(
@@ -933,7 +933,7 @@ def test_null_and_zero_exclusions_filter_plotted_values_independently() -> None:
         CatalogEntry(
             slide=1, slide_title='Scatter', slide_subtitle='', layout='Layout', chart_title='Scatter',
             cdr_source='CDR-Data', kpi='Y vs X', chart_type='Scatter', legend='', filters='',
-            grouping_rows='Operator', grouping_columns='', exclude_null_empty=True, exclude_zero=True,
+            rows_split='Operator', columns_split='', exclude_null_empty=True, exclude_zero=True,
         ),
     )
     assert scatter['series'][0]['points'] == [[1.0, 10.0]]
@@ -960,7 +960,7 @@ def test_chart_payload_applies_cdf_ranges_and_bar_label_override() -> None:
     base = dict(
         slide=1, slide_title='Chart', slide_subtitle='', layout='Layout', chart_title='Chart',
         cdr_source='CDR-Data', kpi='Metric', legend='', filters='',
-        grouping_rows='Operator', grouping_columns='',
+        rows_split='Operator', columns_split='',
     )
     cdf = catalog_chart_payload(
         frame,
@@ -1013,7 +1013,7 @@ def test_cdf_visible_points_preserve_the_vertical_step_at_the_automatic_minimum(
         CatalogEntry(
             slide=1, slide_title='CDF', slide_subtitle='', layout='Layout', chart_title='CDF',
             cdr_source='CDR-Data', kpi='Metric', chart_type='CDF Line', legend='', filters='',
-            grouping_rows='Operator', grouping_columns='',
+            rows_split='Operator', columns_split='',
         ),
         prefiltered=True,
     )
@@ -1040,7 +1040,7 @@ def test_resolved_legend_uses_selected_chart_field_values_and_empty_disables_it(
     base = dict(
         slide=5, slide_title='', slide_subtitle='', layout='', chart_title='', cdr_source='CDR-Data',
         kpi='Test_Result', chart_type='100% Stacked Vertical Bars', filters='',
-        grouping_rows='Test_Name', grouping_columns='', legend_position='top',
+        rows_split='Test_Name', columns_split='', legend_position='top',
     )
     assert _resolved_legend_items(CatalogEntry(legend='', **base), frame, 'Test_Result') == []
     assert [item[0] for item in _resolved_legend_items(CatalogEntry(legend='Test_Name', **base), frame, 'Test_Result')] == ['FDFS', 'FDTT']
@@ -1050,7 +1050,7 @@ def test_resolved_filter_legend_is_text_only() -> None:
     entry = CatalogEntry(
         slide=5, slide_title='', slide_subtitle='', layout='', chart_title='', cdr_source='CDR-Data',
         kpi='Test_Result', chart_type='100% Stacked Vertical Bars', legend='Operator',
-        filters='Operator IN (Vodafone UK, EE);', grouping_rows='Test_Name', grouping_columns='',
+        filters='Operator IN (Vodafone UK, EE);', rows_split='Test_Name', columns_split='',
         legend_position='top',
     )
     items = _resolved_legend_items(entry, pd.DataFrame({'Test_Name': ['FDFS']}), 'Test_Result')
@@ -1071,7 +1071,7 @@ def test_cdf_resolved_legend_reproduces_historical_and_latest_line_widths() -> N
     entry = CatalogEntry(
         slide=1, slide_title='', slide_subtitle='', layout='', chart_title='', cdr_source='CDR-Data',
         kpi='KPI', chart_type='CDF Lines', legend='Operator, Campaign', filters='',
-        grouping_rows='Operator', grouping_columns='Campaign', legend_position='top',
+        rows_split='Operator', columns_split='Campaign', legend_position='top',
     )
     items = _resolved_legend_items(entry, frame, 'KPI')
     assert [(caption, width) for caption, _colour_value, width in items] == [
@@ -1099,7 +1099,7 @@ def test_cdf_resolved_legend_decreases_four_campaign_widths_per_operator() -> No
     entry = CatalogEntry(
         slide=1, slide_title='', slide_subtitle='', layout='', chart_title='', cdr_source='CDR-Data',
         kpi='KPI', chart_type='CDF Lines', legend='Operator, Campaign', filters='',
-        grouping_rows='Operator', grouping_columns='Campaign', legend_position='top',
+        rows_split='Operator', columns_split='Campaign', legend_position='top',
     )
 
     items = _resolved_legend_items(entry, frame, 'KPI')
@@ -1662,7 +1662,7 @@ def test_threshold_legend_uses_the_resolved_value_and_chart_segment_colours() ->
         slide=8, slide_title='', slide_subtitle='', layout='', chart_title='POLQA <1.6',
         cdr_source='CDR-Speech', kpi='POLQA < 1.6 vs >= 1.6',
         chart_type='Threshold Stacked Vertical Bars', legend='Threshold', filters='',
-        grouping_rows='Operator', grouping_columns='Campaign', legend_position='bottom',
+        rows_split='Operator', columns_split='Campaign', legend_position='bottom',
     )
     assert _resolved_legend_items(entry, pd.DataFrame({'POLQA': [1.2, 2.1]}), 'POLQA') == [
         ('< 1.6', '#E15759', 2),
@@ -1678,8 +1678,8 @@ def test_distribution_bucket_legend_uses_resolved_bucket_colours_not_filter_text
         slide=10, slide_title='', slide_subtitle='', layout='', chart_title='FDTT DL (7s)',
         cdr_source='CDR-Data', kpi='FDTT_Sustainable_MDR',
         chart_type='Distribution Stacked Vertical Bars', legend='Buckets',
-        filters='Buckets = 1,5,20,100;', grouping_rows='Operator',
-        grouping_columns='Campaign x Rate Bucket', legend_position='bottom',
+        filters='Buckets = 1,5,20,100;', rows_split='Operator',
+        columns_split='Campaign x Rate Bucket', legend_position='bottom',
     )
     items = _resolved_legend_items(entry, frame, 'FDTT_Sustainable_MDR')
     assert [caption for caption, _colour_value, _width in items] == ['<1', '1-5', '5-20', '20-100', '100+']
@@ -1803,8 +1803,8 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
     assert rendered.slide_subtitle == 'Vendor subtitle'
     assert rendered.chart_title == 'Vendor chart'
     assert rendered.legend == 'Operator_Vendor, Operator'
-    assert rendered.grouping_rows == 'Operator_Vendor × Operator'
-    assert rendered.grouping_columns == 'Operator_Vendor × Operator × Campaign'
+    assert rendered.rows_split == 'Operator_Vendor × Operator'
+    assert rendered.columns_split == 'Operator_Vendor × Operator × Campaign'
     assert rendered.filters == 'Operator = Vodafone UK; Vendor NOT CONTAINS (Mixed, Other)'
 
     frame = chart_frame({
@@ -1949,7 +1949,7 @@ def test_chart_grouping_uses_workspace_order_for_subscribers_and_combined_vendor
     )
     assert grouped[primary].tolist() == ['Beta', 'Alpha']
 
-    vendor_entry = replace(subscriber_entry, grouping_rows='Operator_Vendor')
+    vendor_entry = replace(subscriber_entry, rows_split='Operator_Vendor')
     vendor_frame = chart_frame({
         'Operator_Vendor': ['VF_Ericsson', 'VF_Huawei'], 'Campaign': ['2026 Q1', '2026 Q1'],
         'Mean_Data_Rate': [1.0, 2.0],
@@ -3678,7 +3678,7 @@ def test_reporting_chart_dataset_reuses_one_source_frame_and_projects_chart_colu
     first = CatalogEntry(
         slide=1, slide_title='Slide', slide_subtitle='', layout='', chart_title='First',
         cdr_source='CDR-Data', kpi='Metric_A', chart_type='Table', legend='', filters='',
-        grouping_rows='Operator', grouping_columns='Campaign',
+        rows_split='Operator', columns_split='Campaign',
     )
     second = replace(first, chart_title='Second', kpi='Metric_B')
     loads: list[list[str]] = []

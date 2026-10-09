@@ -139,8 +139,8 @@ class DashboardChartFilterPreviewRequest(BaseModel):
     dataset_ids: list[int] | str | None = None
     kpi: str | None = None
     chart_type: str | None = None
-    grouping_rows: str | None = None
-    grouping_columns: str | None = None
+    rows_split: str | None = None
+    columns_split: str | None = None
     legend: str | None = None
     legend_position: str | None = None
     legend_format: str | None = None
@@ -2159,8 +2159,8 @@ def install_dashboard_routes(core):
             'token': token, 'chart_index': entry_index, 'cdr_source': entry.cdr_source,
             'chart_type': entry.chart_type, 'chart_title': entry.chart_title, 'kpi': entry.kpi,
             'dataset_ids': [str(row['id']) for row in dashboard_datasets(definition, entry.source_kind, task_repository)],
-            'filters': entry.filters, 'grouping_rows': entry.grouping_rows,
-            'grouping_columns': entry.grouping_columns, 'legend': entry.legend,
+            'filters': entry.filters, 'rows_split': entry.rows_split,
+            'columns_split': entry.columns_split, 'legend': entry.legend,
             'legend_position': entry.legend_position,
             'legend_format': entry.legend_format,
             'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
@@ -4220,8 +4220,8 @@ def install_dashboard_routes(core):
         explicit = set(catalog_kpi_fields(entry.kpi))
         explicit.update(field for field in entry_dynamic_fields(entry) if field)
         explicit.update(_legend_dimensions(entry.legend))
-        explicit.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
-        explicit.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
+        explicit.update(parse_catalog_grouping(entry.rows_split).dimensions)
+        explicit.update(parse_catalog_grouping(entry.columns_split).dimensions)
         explicit.update(condition.column for condition in parse_catalog_filters(entry.filters))
         for dimension in entry.calculated_dimensions:
             explicit.update(dimension.default_from)
@@ -4323,8 +4323,8 @@ def install_dashboard_routes(core):
         ):
             return None
         requested = [
-            *parse_catalog_grouping(entry.grouping_rows).dimensions,
-            *parse_catalog_grouping(entry.grouping_columns).dimensions,
+            *parse_catalog_grouping(entry.rows_split).dimensions,
+            *parse_catalog_grouping(entry.columns_split).dimensions,
             *catalog_kpi_fields(entry.kpi),
         ]
         resolved = [resolve_sql_column(columns, name) for name in requested]
@@ -4411,8 +4411,8 @@ def install_dashboard_routes(core):
             *catalog_kpi_fields(entry.kpi),
             *(field for field in entry_dynamic_fields(entry) if field),
             *_legend_dimensions(entry.legend),
-            *parse_catalog_grouping(entry.grouping_rows).dimensions,
-            *parse_catalog_grouping(entry.grouping_columns).dimensions,
+            *parse_catalog_grouping(entry.rows_split).dimensions,
+            *parse_catalog_grouping(entry.columns_split).dimensions,
             *(condition.column for condition in parse_catalog_filters(entry.filters)
               if identity(condition.column) not in CHART_SETTING_FILTERS),
         ]
@@ -5399,8 +5399,8 @@ def install_dashboard_routes(core):
             'kpi': entry.kpi,
             'dataset_ids': [str(row['id']) for row in dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)],
             'filters': entry.filters,
-            'grouping_rows': entry.grouping_rows,
-            'grouping_columns': entry.grouping_columns,
+            'rows_split': entry.rows_split,
+            'columns_split': entry.columns_split,
             'legend': entry.legend,
             'legend_position': entry.legend_position,
             'legend_format': entry.legend_format,
@@ -5424,8 +5424,8 @@ def install_dashboard_routes(core):
         changes = {
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
-                'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_rows_field', 'dynamic_columns_field', 'dynamic_field',
+                'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'rows_split',
+                'columns_split', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_rows_field', 'dynamic_columns_field', 'dynamic_field',
             }
         }
         # The template owns these required chart attributes. Custom dropdowns
@@ -5631,8 +5631,8 @@ def install_dashboard_routes(core):
         changes = {
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
-                'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_rows_field', 'dynamic_columns_field', 'dynamic_field',
+                'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'rows_split',
+                'columns_split', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_rows_field', 'dynamic_columns_field', 'dynamic_field',
             }
         }
         for key in ('cdr_source', 'kpi', 'chart_type'):
@@ -5661,7 +5661,7 @@ def install_dashboard_routes(core):
                     raise HTTPException(400, str(exc)) from exc
         if changes.get("chart_title") == _entry.chart_title and any(value is not None for value in (_entry.dynamic_row_value, _entry.dynamic_column_value, _entry.dynamic_value)):
             changes["chart_title"] = entries[source_index].chart_title
-        for field in ('dynamic_rows_field', 'dynamic_columns_field', 'dynamic_field', 'grouping_rows', 'grouping_columns', 'legend'):
+        for field in ('dynamic_rows_field', 'dynamic_columns_field', 'dynamic_field', 'rows_split', 'columns_split', 'legend'):
             if field in changes and changes[field] == getattr(_entry, field):
                 changes[field] = getattr(entries[source_index], field)
         updated_entry = replace(entries[source_index], **changes)

@@ -1,4 +1,4 @@
-Slide,Slide Tittle,Slide Subtittle,Layout,Dynamic Rows Field,Dynamic Columns Field,Chart Tittle,Source Dataset,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position,Legend Format,Label Position,Label Format,Axis X Range,Axis Y Range,Exclude Null/Empty,Exclude Zero
+Slide,Slide Tittle,Slide Subtittle,Layout,Dynamic Rows Field,Dynamic Columns Field,Chart Tittle,Source Dataset,KPI,Chart type,Filters,Rows Split,Columns Split,Legend,Legend Position,Legend Format,Label Position,Label Format,Axis X Range,Axis Y Range,Exclude Null/Empty,Exclude Zero
 1,RF Quality Analysis,RSRP & SINR · Coverage and interference,Title Page,,,,,,Title Slide,,,,,Top,,,,,,,
 2,Coverage (RSRP),,Title Only,,,,,,Transition Slide,,,,,Top,,,,,,,
 3,RSRP distribution,Data+Voice+Speech,Title + 2 rows + 2 columns + comments right,,,LTE RSRP (dBm) – Data+Voice+Speech,CDR-All,LTE_RSRP,CDF Line,"LTE_RSRP >= -160;

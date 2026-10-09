@@ -886,7 +886,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .slides-templates-editor-table th:nth-child(11), .slides-templates-editor-table td[data-catalogue-field="Filters"] { min-width: 340px; width: 340px; }
 .catalogue-filter-cell-line { position: relative; padding-left: 1rem; }
 .catalogue-filter-cell-line::before { content: "•"; position: absolute; left: 0.1rem; color: #673da7; font-weight: 800; }
-.slides-templates-editor-table th:nth-child(12), .slides-templates-editor-table td[data-catalogue-field="Rows Aggregation"], .slides-templates-editor-table th:nth-child(13), .slides-templates-editor-table td[data-catalogue-field="Column Aggregation"] { min-width: 108px; width: 108px; }
+.slides-templates-editor-table th:nth-child(12), .slides-templates-editor-table td[data-catalogue-field="Rows Split"], .slides-templates-editor-table th:nth-child(13), .slides-templates-editor-table td[data-catalogue-field="Columns Split"] { min-width: 108px; width: 108px; }
 .slides-templates-editor-table td:focus, .slides-templates-editor-table td.is-selected { outline: 3px solid rgba(103, 61, 167, 0.28); outline-offset: -3px; background: rgba(236, 224, 255, 0.72); }
 .slides-templates-editor-table tbody tr.catalogue-editor-focus-row td { box-shadow: inset 0 2px 0 #8b60c4, inset 0 -2px 0 #8b60c4; }
 .slides-templates-editor-table tbody tr.catalogue-slide-tone-purple td { background: #f6f1fc; }

@@ -1,4 +1,4 @@
-Slide,Slide tittle,Slide Subtittle,Layout,Dynamic Rows Field,Dynamic Columns Field,Chart Tittle,Source Dataset,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position,Legend Format,Label Position,Label Format,Axis X Range,Axis Y Range,Exclude Null/Empty,Exclude Zero
+Slide,Slide tittle,Slide Subtittle,Layout,Dynamic Rows Field,Dynamic Columns Field,Chart Tittle,Source Dataset,KPI,Chart type,Filters,Rows Split,Columns Split,Legend,Legend Position,Legend Format,Label Position,Label Format,Axis X Range,Axis Y Range,Exclude Null/Empty,Exclude Zero
 1,RF Quality Analysis,RSRP & SINR · Coverage and interference,Title Page,,,,,,Title Slide,,,,,Top,,,,,,,
 2,Coverage (RSRP),,Title Only,,,,,,Transition Slide,,,,,Top,,,,,,,
 3,RSRP distribution – All CDR types,"CDFs above; histograms below, normalized per Operator and Campaign",Title + 2 rows + 2 columns + comments right,,,LTE RSRP (dBm) – All CDR types,CDR-All,LTE_RSRP,CDF Line,LTE_RSRP >= -160; LTE_RSRP <= -20,Operator,Campaign,Operator,Right,,,,"[-130,-50]",,Yes,

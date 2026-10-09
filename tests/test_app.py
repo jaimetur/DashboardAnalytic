@@ -1867,7 +1867,7 @@ def test_template_field_changes_add_combined_columns_and_keep_unused_fields(tmp_
     fixture = (app_module.PROJECT_ROOT / 'tests' / 'fixtures' / 'NSA Slide Template.csv').read_bytes()
     entry = next(item for item in app_module.parse_catalog_csv(fixture, 'nsa') if item.source_kind == 'data')
     configured = replace(
-        entry, kpi='Extra_Metric', grouping_rows='Extra_Group',
+        entry, kpi='Extra_Metric', rows_split='Extra_Group',
         legend='Extra_Legend', filters='Extra_Filter = Example',
     )
     repository.add_report_template('nsa', 'Primary', app_module.catalogue_csv([configured]))
@@ -4272,8 +4272,8 @@ def test_chart_builder_uses_dashboard_canvas_model(client) -> None:
             'chart_type': 'Average Vertical Bars',
             'cdr_source': 'CDR-Data',
             'kpi': 'score',
-            'grouping_rows': 'Operator_Vendor',
-            'grouping_columns': '',
+            'rows_split': 'Operator_Vendor',
+            'columns_split': '',
             'legend': '',
             'legend_position': 'Top',
         },
@@ -6851,8 +6851,8 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
         kpi='Mean_Data_Rate',
         chart_type='CDF Line',
         filters='Operator IN (VF, VF_SA); Vendor IN (VF_Ericsson, VF_SA_Ericsson, Ericsson)',
-        grouping_rows='Operator',
-        grouping_columns='',
+        rows_split='Operator',
+        columns_split='',
         legend='Operator',
     )
     app_module.repository.add_report_template(

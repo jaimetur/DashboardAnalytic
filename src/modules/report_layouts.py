@@ -76,13 +76,15 @@ def normalize_catalog_layouts(content: bytes) -> bytes:
         if any(None in row for row in rows):
             return content
         changed = False
-        for legacy in ('CDR source', 'CDR Source'):
+        # Former column names: CDR Source is Source Dataset; Rows and Column Aggregation are Rows and Columns Split.
+        for legacy, current in (('CDR source', 'Source Dataset'), ('CDR Source', 'Source Dataset'),
+                                ('Rows Aggregation', 'Rows Split'), ('Column Aggregation', 'Columns Split')):
             if legacy in headers:
-                headers[headers.index(legacy)] = 'Source Dataset'
+                headers[headers.index(legacy)] = current
                 for row in rows:
-                    row['Source Dataset'] = row.pop(legacy)
+                    row[current] = row.pop(legacy)
                 changed = True
-        base_headers = ['Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'Source Dataset', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position']
+        base_headers = ['Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'Source Dataset', 'KPI', 'Chart type', 'Filters', 'Rows Split', 'Columns Split', 'Legend', 'Legend Position']
         optional_headers = ['Legend Format', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero', 'Dynamic Rows Field', 'Dynamic Columns Field']
         if 'Dynamic Field' in headers:
             position = headers.index('Dynamic Field')
@@ -121,7 +123,7 @@ def normalize_catalog_layouts(content: bytes) -> bytes:
 
 # Template fields that name aggregation dimensions, and the filter field.
 VENDOR_AGGREGATION_FIELDS = (
-    'Rows Aggregation', 'Column Aggregation', 'Legend', 'Dynamic Rows Field', 'Dynamic Columns Field', 'Dynamic Field',
+    'Rows Split', 'Columns Split', 'Legend', 'Dynamic Rows Field', 'Dynamic Columns Field', 'Dynamic Field',
     'Grouping', 'Grouping_Rows', 'Grouping_Columns',
 )
 _VENDOR_ONLY_NAME = re.compile(r'(?<![\w])vendor[ _]*only(?![\w])', re.IGNORECASE)

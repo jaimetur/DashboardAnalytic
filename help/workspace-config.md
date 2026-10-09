@@ -115,8 +115,8 @@ This is the canonical authoring reference for templates used by both [PPT Dashbo
 | `KPI` | Processed CDR field or metric expression to render. |
 | `Chart type` | Automated chart type or structural slide type. |
 | `Filters` | Conditions applied before aggregation, one per line and terminated with `;`. |
-| `Rows Aggregation` | Category/table-row hierarchy. Separate dimensions with `×`. |
-| `Column Aggregation` | Comparison-series/table-column hierarchy. Separate dimensions with `×`. |
+| `Rows Split` | Category/table-row hierarchy. Separate dimensions with `×`. |
+| `Columns Split` | Comparison-series/table-column hierarchy. Separate dimensions with `×`. |
 | `Legend` | Optional field whose plotted or filtered values should be explained. Blank means no legend. |
 | `Legend Position` | `Top`, `Bottom`, `Left` or `Right`; blank defaults to `Top`. |
 | `Legend Format` | Optional list defining legend colour, font, styles and relative size. Blank retains automatic formatting. |
@@ -171,7 +171,7 @@ Automated rows support:
 - `Distribution Stacked Vertical Bars`
 - `Threshold Stacked Vertical Bars`
 
-Choose a KPI and at least one Rows or Column Aggregation dimension. `CDF Line` creates one curve per complete aggregation combination. Count charts retain empty combinations where required so comparisons remain aligned.
+Choose a KPI and at least one Rows or Columns Split dimension. `CDF Line` creates one curve per complete aggregation combination. Count charts retain empty combinations where required so comparisons remain aligned.
 
 The RF Quality template includes combined Data/Voice/Speech slides before each chart family. Its `CDR-All` source is virtual: it uses the selected physical datasets and creates no duplicate CDR dataset or database table. Templates containing this source are retained by JSON/CSV import/export, workspace transfers and backup/restore.
 
@@ -204,8 +204,8 @@ Source Dataset: CDR-Voice
 KPI: Call_Status
 Chart type: 100% Stacked Vertical Bars
 Filters: Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone, 3, EE)
-Rows Aggregation: Call Family
-Column Aggregation: Operator × Campaign
+Rows Split: Call Family
+Columns Split: Operator × Campaign
 Legend Position: Right
 ```
 
@@ -219,8 +219,8 @@ Source Dataset: CDR-Data
 KPI: Test_Result
 Chart type: Count Stacked Horizontal Bars
 Filters: Test Family IN (FDFS, FDTT); Test_Result IN (Failed, Dropped)
-Rows Aggregation: Test Family × City
-Column Aggregation: Operator × Campaign
+Rows Split: Test Family × City
+Columns Split: Operator × Campaign
 Legend Position: Bottom
 ```
 
@@ -233,8 +233,8 @@ Source Dataset: CDR-Data
 KPI: Mean_Data_Rate
 Chart type: CDF Line
 Filters: Test_Result = Completed; Test_Name CONTAINS FDFS; Direction = DL
-Rows Aggregation: Operator
-Column Aggregation: Campaign
+Rows Split: Operator
+Columns Split: Campaign
 Legend Position: Bottom
 ```
 
@@ -242,15 +242,15 @@ With two operators and two campaigns this produces four curves. With multiple ca
 
 #### Multi KPI CDF Lines
 
-Separate continuous KPI names with `|`. The renderer keeps the shared filters, aggregations and legend and places one CDF panel per measure.
+Separate continuous KPI names with `|`. The renderer keeps the shared filters, Rows Split, Columns Split and legend and places one CDF panel per measure.
 
 ```text
 Source Dataset: CDR-Data
 KPI: NR_PCell_SINR_Avg | LTE_PCell_SINR_Avg
 Chart type: Multi KPI CDF Lines
 Filters: Test_Result = Completed; Test_Name = FDTT http DL MT
-Rows Aggregation: Operator
-Column Aggregation: Campaign
+Rows Split: Operator
+Columns Split: Campaign
 Legend Position: Right
 ```
 
@@ -263,8 +263,8 @@ Source Dataset: CDR-Speech
 KPI: LQ
 Chart type: Average Vertical Bars
 Filters: Call_Status = Completed; Call Family = WhatsApp
-Rows Aggregation: Operator
-Column Aggregation: Campaign
+Rows Split: Operator
+Columns Split: Campaign
 Legend Position: Top
 ```
 
@@ -279,8 +279,8 @@ Source Dataset: CDR-Data
 KPI: Mean_Data_Rate
 Chart type: Distribution Stacked Vertical Bars
 Filters: Test_Result = Completed; Test_Name = FDTT http DL MT; Buckets < 2,5,20,100
-Rows Aggregation: Operator
-Column Aggregation: Campaign × Rate Bucket
+Rows Split: Operator
+Columns Split: Campaign × Rate Bucket
 Legend Position: Right
 ```
 
@@ -297,8 +297,8 @@ Source Dataset: CDR-Speech
 KPI: LQ
 Chart type: Threshold Stacked Vertical Bars
 Filters: Call_Status = Completed; Call Family = VoLTE; Threshold = 1.6
-Rows Aggregation: Operator
-Column Aggregation: Campaign
+Rows Split: Operator
+Columns Split: Campaign
 Legend Position: Right
 ```
 
@@ -313,24 +313,24 @@ Source Dataset: CDR-Speech
 KPI: LQ vs Playing_RSRP_NR_Avg
 Chart type: Scatter
 Filters: Call_Status = Completed; Call Family = WhatsApp
-Rows Aggregation: Operator
-Column Aggregation: Campaign
+Rows Split: Operator
+Columns Split: Campaign
 Legend Position: Bottom
 ```
 
 #### Map
 
-Use latitude and longitude in `Latitude vs Longitude` order. Aggregations and legend determine point grouping and colour.
+Use latitude and longitude in `Latitude vs Longitude` order. Rows Split, Columns Split and Legend determine point grouping and colour.
 
-To colour a radio-quality map by a measured value, use `Latitude vs Longitude vs Measure`, set **Rows Aggregation** and **Legend** to `Value Bucket`, and define four ascending thresholds with `Buckets = ...`. For example, RSRP uses `Buckets = -110,-100,-90,-80`, and SINR uses `Buckets = 0,5,13,20`. These five ranges use red, orange, yellow, light green and green. Missing measurements are excluded when **Exclude Null/Empty** is enabled. Two-field maps retain their existing grouping colours.
+To colour a radio-quality map by a measured value, use `Latitude vs Longitude vs Measure`, set **Rows Split** and **Legend** to `Value Bucket`, and define four ascending thresholds with `Buckets = ...`. For example, RSRP uses `Buckets = -110,-100,-90,-80`, and SINR uses `Buckets = 0,5,13,20`. These five ranges use red, orange, yellow, light green and green. Missing measurements are excluded when **Exclude Null/Empty** is enabled. Two-field maps retain their existing grouping colours.
 
 ```text
 Source Dataset: CDR-Data
 KPI: Test_Start_Latitude vs Test_Start_Longitude
 Chart type: Map
 Filters: G_Level_4 = London
-Rows Aggregation: Operator
-Column Aggregation: Campaign
+Rows Split: Operator
+Columns Split: Campaign
 Legend: Test_Result
 Legend Position: Right
 ```
@@ -344,8 +344,8 @@ Source Dataset: CDR-Voice
 KPI: Call_Setup_Time
 Chart type: Table
 Filters: Call_Status = Completed
-Rows Aggregation: City
-Column Aggregation: Operator × Campaign
+Rows Split: City
+Columns Split: Operator × Campaign
 Legend Position: Top
 ```
 
@@ -368,18 +368,18 @@ Call Family IN (VoLTE, MultiRAB); Direction = DL; Vendor NOT CONTAINS (Mixed, Ot
 
 `IN`, `NOT IN`, `CONTAINS` and `NOT CONTAINS` accept comma-separated values. Parentheses are optional in Filter Builder input. A comma separates values within one condition; use `;` between independent conditions. `Threshold = 1.6` configures threshold charts and `Buckets = 1,5,20,100` configures distribution ranges.
 
-### Aggregations and legends
+### Rows Split, Columns Split and legends
 
 Selection order defines the hierarchy:
 
 ```text
-Rows Aggregation: Call Family × G Level 4
-Column Aggregation: Operator × Campaign
+Rows Split: Call Family × G Level 4
+Columns Split: Operator × Campaign
 ```
 
 - Rows supplies chart categories or table rows.
 - Column supplies comparison series or table columns.
-- Blank Column Aggregation creates one `(all)` comparison.
+- Blank Columns Split creates one `(all)` comparison.
 - `Campaign` is ordered chronologically from oldest to newest.
 - In Multivendor scope, `Operator` aggregation resolves to the mapped comparison field; an Operator filter still applies to the physical CDR Operator field.
 

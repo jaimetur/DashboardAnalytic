@@ -1,4 +1,4 @@
-Slide,Slide Tittle,Slide Subtittle,Layout,Dynamic Rows Field,Dynamic Columns Field,Chart Tittle,Source Dataset,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position,Legend Format,Label Position,Label Format,Axis X Range,Axis Y Range,Exclude Null/Empty,Exclude Zero
+Slide,Slide Tittle,Slide Subtittle,Layout,Dynamic Rows Field,Dynamic Columns Field,Chart Tittle,Source Dataset,KPI,Chart type,Filters,Rows Split,Columns Split,Legend,Legend Position,Legend Format,Label Position,Label Format,Axis X Range,Axis Y Range,Exclude Null/Empty,Exclude Zero
 1,NetCheck CDR Analysis,Non-Standalone,Title Page,,,,,,Title Slide,,,,,,,,,,,,
 2,NetCheck CDR Voice/Speech Analysis,Non-Standalone,Transition,,,,,,Transition Slide,,,,,,,,,,,,
 3,CDR-Voice/Speech Validation,Non-Standalone,Title + 2 rows + 1 columns + comments right,,,CDR-Voice Validation,CDR-Data,COUNT(Test_ID),Dynamic Table,,Benchmark ×  Test_Result,Operator,,,,,,,,,

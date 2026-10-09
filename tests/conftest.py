@@ -57,7 +57,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     sa_target = slides_templates_dir / "default" / "sa" / "SA Slide Template.csv"
     sa_target.parent.mkdir(parents=True, exist_ok=True)
     sa_target.write_text(
-        "Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n"
+        "Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Split,Columns Split,Legend,Legend Position\n"
         "1,SA test template,,Title Page,,,,Title Slide,,,,,Top\n",
         encoding="utf-8",
     )

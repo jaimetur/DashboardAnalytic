@@ -854,8 +854,8 @@ def rename_calculated_dimension_template_references(renames: dict[str, str]) -> 
                 updated,
                 kpi=renamed_value(updated.kpi, old_name, new_name),
                 filters=renamed_filters(updated.filters, old_name, new_name),
-                grouping_rows=renamed_grouping(updated.grouping_rows, old_name, new_name),
-                grouping_columns=renamed_grouping(updated.grouping_columns, old_name, new_name),
+                rows_split=renamed_grouping(updated.rows_split, old_name, new_name),
+                columns_split=renamed_grouping(updated.columns_split, old_name, new_name),
                 legend=renamed_grouping(updated.legend, old_name, new_name),
             )
         return updated
@@ -1487,8 +1487,8 @@ def workspace_template_fields(task_repository: Repository, kind: str) -> list[st
                 requested.extend(catalog_kpi_fields(entry.kpi))
                 try:
                     requested.extend(_legend_dimensions(entry.legend))
-                    requested.extend(parse_catalog_grouping(entry.grouping_rows).dimensions)
-                    requested.extend(parse_catalog_grouping(entry.grouping_columns).dimensions)
+                    requested.extend(parse_catalog_grouping(entry.rows_split).dimensions)
+                    requested.extend(parse_catalog_grouping(entry.columns_split).dimensions)
                     requested.extend(condition.column for condition in parse_catalog_filters(entry.filters))
                 except (TypeError, ValueError):
                     # Legacy invalid presentation fields must not block the
@@ -2563,8 +2563,8 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             'KPI': entry.kpi,
             'Chart type': entry.chart_type,
             'Filters': entry.filters,
-            'Rows Aggregation': entry.grouping_rows,
-            'Column Aggregation': entry.grouping_columns,
+            'Rows Split': entry.rows_split,
+            'Columns Split': entry.columns_split,
             'Legend': entry.legend,
             'Legend Position': entry.legend_position.title(), 'Legend Format': entry.legend_format,
             'Label Position': entry.label_position.title(),
@@ -13928,8 +13928,8 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         requested.update(catalog_kpi_fields(entry.kpi))
         requested.update(field for field in entry_dynamic_fields(entry) if field)
         requested.update(_legend_dimensions(entry.legend))
-        requested.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
-        requested.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
+        requested.update(parse_catalog_grouping(entry.rows_split).dimensions)
+        requested.update(parse_catalog_grouping(entry.columns_split).dimensions)
         requested.update(condition.column for condition in parse_catalog_filters(entry.filters))
         for dimension in entry.calculated_dimensions:
             if entry.cdr_source.casefold() not in dimension.sources:
@@ -14290,7 +14290,7 @@ def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, A
     """Normalise editable values shared by every Interactive Preview entry point."""
     allowed = {
         'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters',
-        'grouping_rows', 'grouping_columns', 'legend', 'legend_position', 'legend_format',
+        'rows_split', 'columns_split', 'legend', 'legend_position', 'legend_format',
         'axis_x_range', 'axis_y_range',
         'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_rows_field', 'dynamic_columns_field', 'dynamic_field',
     }
@@ -14358,7 +14358,7 @@ def temporary_chart_preview_context(source: str, identifier: str, chart_index: i
         'dataset_ids_by_source': {f'cdr-{kind}': [str(value) for value in values] for kind, values in selected_ids.items() if kind != 'all' or entry.source_kind == 'all'},
         'datasets_by_source': datasets_by_source,
         'kpi': entry.kpi, 'chart_type': entry.chart_type, 'filters': entry.filters,
-        'grouping_rows': entry.grouping_rows, 'grouping_columns': entry.grouping_columns,
+        'rows_split': entry.rows_split, 'columns_split': entry.columns_split,
         'legend': entry.legend, 'legend_position': entry.legend_position, 'legend_format': entry.legend_format,
         'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
         'label_position': entry.label_position,
@@ -14970,7 +14970,7 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
         chart_title=str(definition.get('chart_title') or 'Ad-hoc chart'), cdr_source=str(definition.get('cdr_source') or 'CDR-Data'),
         kpi=str(definition.get('kpi') or ''), chart_type=str(definition.get('chart_type') or '100% Stacked Vertical Bars'),
         legend=str(definition.get('legend') or ''), filters=str(definition.get('filters') or ''),
-        grouping_rows=str(definition.get('grouping_rows') or ''), grouping_columns=str(definition.get('grouping_columns') or ''),
+        rows_split=str(definition.get('rows_split') or ''), columns_split=str(definition.get('columns_split') or ''),
         legend_position=(
             parse_legend_position(str(definition.get('legend_position')).strip())
             if str(definition.get('legend_position') or '').strip() else ''

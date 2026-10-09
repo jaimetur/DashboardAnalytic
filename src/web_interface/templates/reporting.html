@@ -1443,7 +1443,7 @@
     });
     const sandboxFields = [
       ['cdr_source', 'Source Dataset'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'], ['filters', 'Filters'],
-      ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+      ['rows_split', 'Rows'], ['columns_split', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
       ['legend_format', 'Legend Format'], ['label_position', 'Label Position'], ['label_format', 'Label Format'],
       ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
     ];
@@ -1454,7 +1454,7 @@
     const previewColumns = (definition, source = definition.cdr_source) => (
       Array.from(new Set((definition.columns_by_source || {})[previewSourceKey(source)] || [])).sort((left, right) => left.localeCompare(right))
     );
-    const previewMultiFields = new Set(['grouping_rows', 'grouping_columns', 'legend']);
+    const previewMultiFields = new Set(['rows_split', 'columns_split', 'legend']);
     const viewerPreviewDefinition = () => Object.fromEntries(Array.from(reportChartViewerFields?.querySelectorAll('[name]') || []).map((input) => {
       const values = input.multiple ? Array.from(input.selectedOptions).map((option) => option.value).filter(Boolean) : null;
       const separator = input.name === 'legend' || input.name === 'dataset_ids' ? ', ' : ' × ';
@@ -1583,7 +1583,7 @@
           ['Top', 'Bottom', 'Left', 'Right'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
         } else {
           control = document.createElement('select');
-          if (['kpi', 'grouping_rows', 'grouping_columns', 'legend'].includes(key)) {
+          if (['kpi', 'rows_split', 'columns_split', 'legend'].includes(key)) {
             const selected = String(definition[key] || '');
             const selectedValues = previewMultiFields.has(key)
               ? new Set(selected.split(key === 'legend' ? ',' : /\s*(?:×|x)\s*/i).map((value) => value.trim()).filter(Boolean))
@@ -1663,7 +1663,7 @@
         fields: [
           // Keep this sequence aligned with the editable Report Template columns.
           ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Type'], ['dataset_ids', 'Datasets'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'],
-          ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+          ['filters', 'Filters'], ['rows_split', 'Rows'], ['columns_split', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
           ['legend_format', 'Legend Format'], ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['axis_x_range', 'Axis X Range'],
           ['axis_y_range', 'Axis Y Range'], ['exclude_null_empty', 'Exclude Null/Empty'],
           ['exclude_zero', 'Exclude Zero'],

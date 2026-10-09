@@ -183,7 +183,7 @@ def test_legacy_dynamic_field_migration_maps_to_the_declared_axis():
             old_rows.append({
                 'Slide': str(slide), 'Slide Tittle': f'{chart} quality', 'Layout': layout,
                 'Chart Tittle': chart, 'Source Dataset': 'CDR-Data', 'KPI': 'LTE_RSRP',
-                'Chart type': 'Histogram Bars', 'Rows Aggregation': 'Operator',
+                'Chart type': 'Histogram Bars', 'Rows Split': 'Operator',
                 'Dynamic Field': field,
             })
     output = io.StringIO()
@@ -217,7 +217,7 @@ def test_two_axis_dynamic_template_round_trips_both_fields():
         layout='Title + dynamic rows + dynamic columns + comments down',
         chart_title='Signal', cdr_source='CDR-Data', kpi='LTE_RSRP',
         chart_type='Histogram Bars', legend='', filters='',
-        grouping_rows='Vendor_Only', grouping_columns='Campaign',
+        rows_split='Vendor_Only', columns_split='Campaign',
         dynamic_rows_field='Vendor_Only', dynamic_columns_field='Campaign',
     )
 
@@ -241,7 +241,7 @@ def test_catalogue_csv_accepts_reordered_headers_and_legacy_trailing_dynamic_hea
         layout='Title + dynamic rows + dynamic columns + comments down',
         chart_title='Signal', cdr_source='CDR-Data', kpi='LTE_RSRP',
         chart_type='Histogram Bars', legend='', filters='',
-        grouping_rows='Vendor_Only', grouping_columns='Campaign',
+        rows_split='Vendor_Only', columns_split='Campaign',
         dynamic_rows_field='Vendor_Only', dynamic_columns_field='Campaign',
     )
     canonical_rows = list(csv.DictReader(io.StringIO(catalogue_csv([entry]).decode('utf-8'))))
@@ -271,7 +271,7 @@ def test_catalogue_csv_rejects_duplicate_canonical_header_aliases():
         slide=1, slide_title='Quality', slide_subtitle='', layout='Title + 1 rows + 1 columns',
         chart_title='Signal', cdr_source='CDR-Data', kpi='LTE_RSRP',
         chart_type='Histogram Bars', legend='', filters='',
-        grouping_rows='Operator', grouping_columns='Campaign',
+        rows_split='Operator', columns_split='Campaign',
     )]).decode('utf-8')
     header, *rows = exported.splitlines()
     duplicate_header = header.replace('Source Dataset', 'Source Dataset,CDR source')
@@ -296,7 +296,7 @@ def test_dynamic_layout_requires_fields_for_each_dynamic_axis(layout, count, err
         slide=1, slide_title='Quality', slide_subtitle='', layout=layout,
         chart_title=f'Signal {index}', cdr_source='CDR-Data', kpi='LTE_RSRP',
         chart_type='Histogram Bars', legend='', filters='',
-        grouping_rows='Operator', grouping_columns='Campaign',
+        rows_split='Operator', columns_split='Campaign',
         dynamic_rows_field='', dynamic_columns_field='', dynamic_field='',
     ) for index in range(count)]
 
@@ -311,7 +311,7 @@ def test_catalogue_csv_renames_source_dataset_and_accepts_the_legacy_header():
         slide=1, slide_title='Quality', slide_subtitle='', layout='Title + 1 rows + 1 columns',
         chart_title='Signal', cdr_source='CDR-Voice', kpi='Call_Status',
         chart_type='Average Vertical Bars', legend='', filters='',
-        grouping_rows='Operator', grouping_columns='Campaign',
+        rows_split='Operator', columns_split='Campaign',
     )
     current = catalogue_csv([entry])
     assert current.splitlines()[0].decode('utf-8').split(',')[7] == 'Source Dataset'
@@ -340,3 +340,12 @@ def test_compact_grids_and_dynamic_title_parts():
     )
     assert chart_title_parts(replace(entry, dynamic_column_value='EE')) == ('EE', 'LTE RSRP histogram – Data')
     assert chart_title_parts(entry) == ('', 'LTE RSRP histogram – Data – EE')
+
+
+def test_rows_and_column_aggregation_columns_become_rows_and_columns_split():
+    old = ('Slide,Slide Tittle,Slide Subtittle,Layout,Chart Tittle,Source Dataset,KPI,Chart type,Filters,'
+           'Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+           '1,Voice,,Title + 1 rows + 1 columns,Calls,CDR-Voice,Count,Clustered Vertical Bars,,Call_Family,Operator,,top\n')
+    migrated = list(csv.DictReader(io.StringIO(normalize_catalog_layouts(old.encode('utf-8')).decode('utf-8'))))
+    assert migrated[0]['Rows Split'] == 'Call_Family' and migrated[0]['Columns Split'] == 'Operator'
+    assert 'Rows Aggregation' not in migrated[0] and 'Column Aggregation' not in migrated[0]

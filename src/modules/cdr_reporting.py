@@ -58,7 +58,7 @@ TEMPLATE_NAMES = {
 CDR_REPORT_VERSION = "2026-09-22-v14"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
-VISUAL_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Legend Format", "Label Position", "Label Format", "Axis X Range", "Axis Y Range")
+VISUAL_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Split", "Columns Split", "Legend", "Legend Position", "Legend Format", "Label Position", "Label Format", "Axis X Range", "Axis Y Range")
 PRE_DYNAMIC_CATALOG_HEADERS = (*VISUAL_CATALOG_HEADERS, "Exclude Null/Empty", "Exclude Zero")
 SINGLE_DYNAMIC_CATALOG_HEADERS = (*PRE_DYNAMIC_CATALOG_HEADERS, "Dynamic Field")
 TRAILING_DYNAMIC_CATALOG_HEADERS = (*PRE_DYNAMIC_CATALOG_HEADERS, "Dynamic Rows Field", "Dynamic Columns Field")
@@ -66,10 +66,10 @@ CATALOG_HEADERS = (*PRE_DYNAMIC_CATALOG_HEADERS[:4], "Dynamic Rows Field", "Dyna
 # Templates created before configurable visual settings remain valid and
 # acquire empty Label/axis cells the next time they are saved in the editor.
 RANGELESS_CATALOG_HEADERS = VISUAL_CATALOG_HEADERS[:13]
-PRE_LEGEND_FORMAT_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label Position", "Label Format", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
-PRE_LABEL_COLOR_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
+PRE_LEGEND_FORMAT_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Split", "Columns Split", "Legend", "Legend Position", "Label Position", "Label Format", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
+PRE_LABEL_COLOR_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Split", "Columns Split", "Legend", "Legend Position", "Label", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
 PRE_LABEL_COLOR_RANGELESS_CATALOG_HEADERS = PRE_LABEL_COLOR_CATALOG_HEADERS[:16]
-PRE_LABEL_FORMAT_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Label Color", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
+PRE_LABEL_FORMAT_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Split", "Columns Split", "Legend", "Legend Position", "Label", "Label Color", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
 # Import the two immediately preceding schemas too, so existing templates remain
 # usable after the aggregation columns were renamed and the legend was repositioned.
 PREVIOUS_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns", "Legend Position")
@@ -327,14 +327,18 @@ CATALOG_HEADER_ALIASES = {
     "excludezero": "Exclude Zero",
     "filter": "Filters",
     "filters": "Filters",
-    "rowsaggregation": "Rows Aggregation",
-    "rowaggregation": "Rows Aggregation",
-    "groupingrows": "Rows Aggregation",
-    "groupingrow": "Rows Aggregation",
-    "columnaggregation": "Column Aggregation",
-    "columnsaggregation": "Column Aggregation",
-    "groupingcolumns": "Column Aggregation",
-    "groupingcolumn": "Column Aggregation",
+    "rowssplit": "Rows Split",
+    "rowsplit": "Rows Split",
+    "rowsaggregation": "Rows Split",
+    "rowaggregation": "Rows Split",
+    "groupingrows": "Rows Split",
+    "groupingrow": "Rows Split",
+    "columnssplit": "Columns Split",
+    "columnsplit": "Columns Split",
+    "columnaggregation": "Columns Split",
+    "columnsaggregation": "Columns Split",
+    "groupingcolumns": "Columns Split",
+    "groupingcolumn": "Columns Split",
     "grouping": "Grouping",
 }
 
@@ -419,8 +423,8 @@ class CatalogEntry:
     chart_type: str
     legend: str
     filters: str
-    grouping_rows: str
-    grouping_columns: str
+    rows_split: str
+    columns_split: str
     legend_position: str = "top"
     legend_format: str = ""
     calculated_dimensions: tuple[CalculatedDimension, ...] = ()
@@ -1264,8 +1268,8 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             legend_position=(row.get("Legend Position") or "").strip().casefold(),
             legend_format=parse_label_format(row.get("Legend Format") or ""),
             filters=normalize_vendor_filter_names((row.get("Filters") or "").strip()),
-            grouping_rows=((row.get("Rows Aggregation") or row.get("Grouping_Rows") or "").strip() or " × ".join(legacy_dimensions[:1])),
-            grouping_columns=((row.get("Column Aggregation") or row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:])),
+            rows_split=((row.get("Rows Split") or row.get("Grouping_Rows") or "").strip() or " × ".join(legacy_dimensions[:1])),
+            columns_split=((row.get("Columns Split") or row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:])),
             axis_x_range=(row.get("Axis X Range") or "").strip(),
             axis_y_range=(row.get("Axis Y Range") or "").strip(),
             label_position=parse_label_position(row.get("Label Position") or ""),
@@ -1286,7 +1290,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
                 raise ValueError(f"Catalog row {line_number} requires Layout for a structural slide.")
             structural_chart_fields = (
                 entry.chart_title, entry.cdr_source, entry.kpi, entry.legend,
-                entry.filters, entry.grouping_rows, entry.grouping_columns,
+                entry.filters, entry.rows_split, entry.columns_split,
                 entry.axis_x_range, entry.axis_y_range, entry.legend_format, entry.label_position, entry.label_format,
             )
             if any(value.strip() for value in structural_chart_fields) or entry.exclude_null_empty or entry.exclude_zero:
@@ -1308,13 +1312,13 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             raise ValueError(f"Catalog row {line_number} requires KPI and Chart type for a Source Dataset.")
         if entry.source_kind and entry.chart_type.casefold() not in CHART_TYPES:
             raise ValueError(f"Catalog row {line_number} has unsupported Chart type '{entry.chart_type}'.")
-        if entry.source_kind and not (entry.grouping_rows or entry.grouping_columns):
-            raise ValueError(f"Catalog row {line_number} requires Rows Aggregation or Column Aggregation for a Source Dataset.")
+        if entry.source_kind and not (entry.rows_split or entry.columns_split):
+            raise ValueError(f"Catalog row {line_number} requires Rows Split or Columns Split for a Source Dataset.")
         try:
             if validate_filters:
                 parse_catalog_filters(entry.filters)
-            parse_catalog_grouping(entry.grouping_rows)
-            parse_catalog_grouping(entry.grouping_columns)
+            parse_catalog_grouping(entry.rows_split)
+            parse_catalog_grouping(entry.columns_split)
             parse_legend_position(entry.legend_position)
             parse_label_format(entry.legend_format)
             parse_label_position(entry.label_position)
@@ -1386,10 +1390,10 @@ def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
         legacy_grouping = (row.get(header_map.get("Grouping", "")) or "").strip()
         if legacy_grouping:
             dimensions = parse_catalog_grouping(legacy_grouping).dimensions
-            if not converted["Rows Aggregation"]:
-                converted["Rows Aggregation"] = " × ".join(dimensions[:1])
-            if not converted["Column Aggregation"]:
-                converted["Column Aggregation"] = " × ".join(dimensions[1:])
+            if not converted["Rows Split"]:
+                converted["Rows Split"] = " × ".join(dimensions[:1])
+            if not converted["Columns Split"]:
+                converted["Columns Split"] = " × ".join(dimensions[1:])
         converted_rows.append(converted)
 
     # Older templates did not contain a Layout column. Its suitable default is
@@ -1465,8 +1469,8 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "KPI": entry.kpi,
             "Chart type": entry.chart_type,
             "Filters": normalize_vendor_filter_names(entry.filters),
-            "Rows Aggregation": entry.grouping_rows,
-            "Column Aggregation": entry.grouping_columns,
+            "Rows Split": entry.rows_split,
+            "Columns Split": entry.columns_split,
             "Legend": entry.legend,
             "Legend Position": entry.legend_position.title(),
             "Legend Format": entry.legend_format,
@@ -2190,8 +2194,8 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry, vendor_comparison: st
         # Keep both levels in Vendor-first comparison legends so the same
         # vendor used by two operators remains distinguishable.
         legend=vendor_legend(entry.legend),
-        grouping_rows=vendor_grouping(entry.grouping_rows),
-        grouping_columns=vendor_grouping(entry.grouping_columns),
+        rows_split=vendor_grouping(entry.rows_split),
+        columns_split=vendor_grouping(entry.columns_split),
         filters=filters,
         dynamic_field=dynamic(entry.dynamic_field),
         dynamic_rows_field=dynamic(entry_dynamic_fields(entry)[0]),
@@ -2897,8 +2901,8 @@ def _distribution_bucket_colours(
 def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> tuple[pd.DataFrame, str, str]:
     frame.attrs["catalogue_calculated_dimensions"] = entry.calculated_dimensions
     frame.attrs["catalogue_cdr_source"] = entry.cdr_source
-    row_spec = parse_catalog_grouping(entry.grouping_rows)
-    column_spec = parse_catalog_grouping(entry.grouping_columns)
+    row_spec = parse_catalog_grouping(entry.rows_split)
+    column_spec = parse_catalog_grouping(entry.columns_split)
     bucket_edges = _catalog_bucket_edges(entry)
     bucket_operator = _catalog_bucket_operator(entry)
     frame.attrs.pop("catalogue_map_colour_metric", None)
@@ -3151,12 +3155,12 @@ def preview_catalog_chart_data(
     for condition in parse_catalog_filters(entry.filters):
         if _normalise_catalog_name(condition.column) not in {'threshold', 'buckets', 'binsize', 'classcolours', 'histogramoperator'}:
             include(_catalog_column(grouped, condition.column, False, metric, bucket_edges, bucket_operator, operator_as_vendor=False), f'Filter · {condition.column}')
-    for axis, grouping in (('Rows Aggregation', entry.grouping_rows), ('Column Aggregation', entry.grouping_columns)):
+    for axis, grouping in (('Rows Split', entry.rows_split), ('Columns Split', entry.columns_split)):
         for dimension in parse_catalog_grouping(grouping).dimensions:
             include(_catalog_column(grouped, dimension, False, metric, bucket_edges, bucket_operator), f'{axis} · {dimension}')
     include(metric, f'KPI · {metric}' if metric else 'KPI')
-    include(primary, 'Resolved Rows Aggregation')
-    include(series, 'Resolved Column Aggregation')
+    include(primary, 'Resolved Rows Split')
+    include(series, 'Resolved Columns Split')
     include('__catalog_stack', 'Resolved Stack Aggregation')
 
     # Legend contains source dimensions selected by the template/editor.
@@ -4090,8 +4094,8 @@ def _resolved_legend_items(
             (f"< {threshold_caption}", "#E15759", 2),
             (f"≥ {threshold_caption}", "#59A14F", 2),
         ]
-    row_dimensions = parse_catalog_grouping(entry.grouping_rows).dimensions
-    column_dimensions = parse_catalog_grouping(entry.grouping_columns).dimensions
+    row_dimensions = parse_catalog_grouping(entry.rows_split).dimensions
+    column_dimensions = parse_catalog_grouping(entry.columns_split).dimensions
     kpi_dimensions = catalog_kpi_fields(entry.kpi)
     chart_names = {
         _normalise_catalog_name(value)
@@ -5633,29 +5637,29 @@ def _render_cdf_line(
     campaign_column = _period_column(frame)
     # A CDF series is defined by the complete aggregation hierarchy, not by
     # the flattened primary/series pair.  This preserves every combination
-    # when dimensions are split between Rows Aggregation and Column
+    # when dimensions are split between Rows Split and Column
     # Aggregation, or when several dimensions live on either one.
     hierarchy_columns = _chart_axis_hierarchy(frame)
-    grouping_columns = hierarchy_columns or [
+    columns_split = hierarchy_columns or [
         *([group] if group else []),
         *([period] if period and period != group else []),
     ]
-    columns = list(dict.fromkeys([*grouping_columns, metric, *([campaign_column] if campaign_column else [])]))
+    columns = list(dict.fromkeys([*columns_split, metric, *([campaign_column] if campaign_column else [])]))
     data = frame[columns].copy()
     data.attrs = frame.attrs.copy()
     if campaign_column:
         data["__cdf_campaign"] = data[campaign_column].fillna("(blank)").astype(str).map(_campaign_display_value)
     data[metric] = pd.to_numeric(data[metric], errors="coerce")
     # Optional campaign metadata must not discard otherwise valid CDF samples.
-    data = data.dropna(subset=[metric, *grouping_columns])
+    data = data.dropna(subset=[metric, *columns_split])
     if exclude_zero:
         data = data[data[metric].ne(0)]
     if data.empty: return _empty_chart(title)
-    combinations = _hierarchical_unique_keys(data, grouping_columns)
+    combinations = _hierarchical_unique_keys(data, columns_split)
     series_data: list[tuple[tuple[str, ...], pd.DataFrame, list[float]]] = []
     for combination in combinations:
         mask = pd.Series(True, index=data.index)
-        for column, value in zip(grouping_columns, combination, strict=True):
+        for column, value in zip(columns_split, combination, strict=True):
             mask &= data[column].astype(str).eq(str(value))
         subset = data.loc[mask]
         values = subset[metric].sort_values().tolist()
@@ -5671,7 +5675,7 @@ def _render_cdf_line(
     (low, high), (y_low, y_high) = _cdf_domains(low, automatic_high, axis_x_range, axis_y_range)
     layout_position = layout_legend_position or legend_position
     series_labels = [
-        _legend_key_caption(combination, grouping_columns, data, legend_labels)
+        _legend_key_caption(combination, columns_split, data, legend_labels)
         for combination, _subset, _values in series_data
     ]
     legend_columns = _horizontal_legend_columns(series_labels, 11, line_markers=True)
@@ -5680,8 +5684,8 @@ def _render_cdf_line(
     left, top, width, height = _cdf_plot_geometry(layout_position, legend_rows)
     # Colour policy is driven by the template's declared dimensions: operator
     # families are used only for genuine multi-operator comparisons.
-    comparison_colours = _series_colours(combinations, grouping_columns, data, line_chart=True)
-    line_dashes = _series_line_dashes(combinations, grouping_columns, data)
+    comparison_colours = _series_colours(combinations, columns_split, data, line_chart=True)
+    line_dashes = _series_line_dashes(combinations, columns_split, data)
     # A campaign is the temporal comparison within an operator/vendor.  Keep
     # that relationship visible even in monochrome printouts by making newer
     # campaigns progressively thicker than their earlier counterparts.
@@ -5692,7 +5696,7 @@ def _render_cdf_line(
         )
         for combination, subset, _values in series_data
     ]
-    line_widths = _cdf_campaign_line_widths(series_campaigns, grouping_columns, data)
+    line_widths = _cdf_campaign_line_widths(series_campaigns, columns_split, data)
     legend_items: list[tuple[str, str, int, tuple[int, ...]]] = []
     for index, (combination, subset, values) in enumerate(series_data):
         visible_points = _cdf_visible_points(values, low, high)
@@ -6429,11 +6433,11 @@ def catalog_chart_payload(
 
     def cdf_model(candidate_metric: str, candidate_title: str, *, histogram: bool = False) -> dict[str, object] | None:
         campaign_column = _period_column(data)
-        grouping_columns = _chart_axis_hierarchy(data) or list(dict.fromkeys(
+        columns_split = _chart_axis_hierarchy(data) or list(dict.fromkeys(
             [*([group] if group else []), *([period] if period and period != group else [])]
         ))
         columns = list(dict.fromkeys([
-            *grouping_columns, candidate_metric, *([campaign_column] if campaign_column else []),
+            *columns_split, candidate_metric, *([campaign_column] if campaign_column else []),
         ]))
         numeric = data[columns].copy()
         numeric.attrs = data.attrs.copy()
@@ -6442,7 +6446,7 @@ def catalog_chart_payload(
             campaign_labels = {value: _campaign_display_value(value) for value in campaign_values.unique()}
             numeric["__cdf_campaign"] = campaign_values.map(campaign_labels)
         numeric[candidate_metric] = pd.to_numeric(numeric[candidate_metric], errors="coerce")
-        numeric = numeric.dropna(subset=[candidate_metric, *grouping_columns])
+        numeric = numeric.dropna(subset=[candidate_metric, *columns_split])
         if render_entry.exclude_zero:
             numeric = numeric[numeric[candidate_metric].ne(0)]
         if numeric.empty:
@@ -6462,13 +6466,13 @@ def catalog_chart_payload(
             grouping_view.attrs = {}
             return grouping_view.groupby(grouper, sort=False, dropna=False).indices
 
-        while len(grouping_columns) > 1:
-            unique_series = len(grouped_indexes(grouping_columns))
+        while len(columns_split) > 1:
+            unique_series = len(grouped_indexes(columns_split))
             if unique_series <= INTERACTIVE_CDF_SERIES_LIMIT:
                 break
-            grouping_columns = grouping_columns[1:]
-        if grouping_columns:
-            raw_positions = grouped_indexes(grouping_columns)
+            columns_split = columns_split[1:]
+        if columns_split:
+            raw_positions = grouped_indexes(columns_split)
             # Iterating a pandas GroupBy materialises one DataFrame for every
             # group.  A CDF can have thousands of groups, so that creates an
             # enormous number of copies (and their DataFrame attrs) before
@@ -6479,11 +6483,11 @@ def catalog_chart_payload(
                 for key, positions in raw_positions.items()
             }
             combinations = list(grouped_positions)
-            if len(grouping_columns) > 1:
+            if len(columns_split) > 1:
                 ordered_combinations: list[tuple[str, ...]] = []
 
                 def visit(keys: list[tuple[str, ...]], level: int) -> None:
-                    if level == len(grouping_columns) - 1:
+                    if level == len(columns_split) - 1:
                         ordered_combinations.extend(keys)
                         return
                     children: dict[str, list[tuple[str, ...]]] = {}
@@ -6530,11 +6534,11 @@ def catalog_chart_payload(
             if bin_count > 400:
                 raise ValueError(f"Slide {render_entry.slide}: reduce the histogram range or increase Bin Size to use at most 400 bins.")
             bin_edges = [low + index * bin_size for index in range(bin_count + 1)]
-        colours = _series_colours(combinations, grouping_columns, numeric, line_chart=True)
-        line_dashes = _series_line_dashes(combinations, grouping_columns, numeric)
+        colours = _series_colours(combinations, columns_split, numeric, line_chart=True)
+        line_dashes = _series_line_dashes(combinations, columns_split, numeric)
         line_widths = _cdf_campaign_line_widths(
             [(combination, campaigns) for combination, _values, campaigns in series_rows],
-            grouping_columns,
+            columns_split,
             numeric,
         )
         payload_series = []
@@ -6556,7 +6560,7 @@ def catalog_chart_payload(
                 continue
             sampled = _interactive_sample(visible_points, INTERACTIVE_CHART_POINTS_PER_SERIES)
             line_width = line_widths.get(tuple(str(value) for value in combination), 4)
-            full_label = _legend_key_caption(combination, grouping_columns, numeric, ())
+            full_label = _legend_key_caption(combination, columns_split, numeric, ())
             # A CDF legend and tooltip identify a concrete curve. Retaining
             # the full hierarchy prevents Operator-only captions when Vendor
             # is represented by its own multivendor aggregation level.
