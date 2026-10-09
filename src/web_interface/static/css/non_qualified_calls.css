@@ -110,6 +110,11 @@
 .nq-table th { position: sticky; top: 0; z-index: 1; padding: 9px 6px; background: #f6dbe4; color: #5e0f2c; font-size: .7rem; font-weight: 850; letter-spacing: 0; line-height: 1.25; text-align: left; text-transform: uppercase; vertical-align: bottom; }
 .nq-table [data-sort] { cursor: pointer; user-select: none; }
 .nq-table th[data-sort]:hover, .nq-table th[data-sort]:focus-visible { background: #f0c9d6; outline: none; }
+/* Columns are moved by dragging their header onto another; a bar marks where the column goes. */
+.nq-table th[draggable="true"] { cursor: grab; }
+.nq-table th.is-dragging { opacity: .45; }
+.nq-table th.is-drop-before { box-shadow: inset 4px 0 0 #8b1d3b; }
+.nq-table th.is-drop-after { box-shadow: inset -4px 0 0 #8b1d3b; }
 .nq-table span[data-sort] { border-radius: 4px; white-space: nowrap; }
 .nq-table span[data-sort]:hover, .nq-table span[data-sort]:focus-visible { background: #f0c9d6; outline: none; }
 .nq-table [data-sort]::after { content: '↕'; margin-left: .12rem; opacity: .3; }
@@ -454,8 +459,9 @@ span.nq-root-suggestion { cursor: default; }
 .nq-rate-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 12px 0 16px; }
 .nq-rate-card { display: grid; gap: .25rem; padding: 14px 16px; border: 1px solid var(--nq-border); border-radius: 14px; background: #fff; box-shadow: 0 6px 16px rgba(125, 18, 56, .07); }
 .nq-rate-card strong { color: var(--nq-dark); font-size: 1.75rem; line-height: 1.1; }
+.nq-rate-operator { color: var(--nq-dark); font-size: 1.05rem; font-weight: 900; letter-spacing: .04em; line-height: 1.2; text-transform: uppercase; }
 .nq-rate-card-total { background: linear-gradient(135deg, #7d1238, #e0507a); border-color: transparent; }
-.nq-rate-card-total :is(strong, .nq-kpi-label, .nq-kpi-note) { color: #fff; }
+.nq-rate-card-total :is(strong, .nq-kpi-label, .nq-kpi-note, .nq-rate-operator) { color: #fff; }
 .nq-rate-meter { display: block; height: .45rem; margin-top: .3rem; overflow: hidden; border-radius: 999px; background: var(--nq-soft); }
 .nq-rate-meter span { display: block; height: 100%; border-radius: inherit; }
 .nq-rate-wrap { overflow-x: auto; }

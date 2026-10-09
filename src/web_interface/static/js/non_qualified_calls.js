@@ -842,10 +842,115 @@
     bindSort(name);
     return cell;
   };
-  // The optional columns follow Result / Failure, the analysis fields follow the root cause.
+  // -- column order: a header dragged onto another moves its column; each browser remembers it per workspace --
+  const STATIC_HEADERS = [...($('nq-table')?.tHead.rows[0].cells || [])];
+  const COLUMN_ORDER_STORAGE = `nq-column-order:${$('nq-table')?.dataset.workspace || ''}`;
+  // Optional columns shown by default before a fixed column instead of after Result / Failure.
+  const DEFAULT_COLUMN_PLACES = {session_type: 'test_name'};
+  // The column keys in the order the rows are built, and in the order they are shown.
+  let naturalColumns = [];
+  let shownColumns = [];
+  let draggedColumn = '';
+  const columnKeyOf = (cell) => cell.querySelector('[data-sort]')?.dataset.sort || '';
+  const storedColumnOrder = () => {
+    try {
+      const order = JSON.parse(localStorage.getItem(COLUMN_ORDER_STORAGE) || '[]');
+      return Array.isArray(order) ? order.map(String) : [];
+    } catch (_error) {
+      return [];
+    }
+  };
+  const defaultColumnOrder = () => {
+    const order = [...naturalColumns];
+    Object.entries(DEFAULT_COLUMN_PLACES).forEach(([key, before]) => {
+      if (!order.includes(key) || !order.includes(before)) return;
+      order.splice(order.indexOf(key), 1);
+      order.splice(order.indexOf(before), 0, key);
+    });
+    return order;
+  };
+  const saveColumnOrder = (order) => {
+    try {
+      if (order.join('|') === defaultColumnOrder().join('|')) localStorage.removeItem(COLUMN_ORDER_STORAGE);
+      else localStorage.setItem(COLUMN_ORDER_STORAGE, JSON.stringify(order));
+    } catch (_error) {
+      // Without browser storage the order lasts until the page is reloaded.
+    }
+  };
+  const clearDropMarks = () => $('nq-table').tHead.querySelectorAll('.is-drop-before, .is-drop-after')
+    .forEach((cell) => cell.classList.remove('is-drop-before', 'is-drop-after'));
+  const moveColumn = (key, target, after) => {
+    const order = shownColumns.filter((item) => item !== key);
+    order.splice(order.indexOf(target) + (after ? 1 : 0), 0, key);
+    saveColumnOrder(order);
+    applyColumnOrder(order);
+    if (state.result) renderRows(state.result);
+  };
+  const bindColumnDrag = (cell) => {
+    if (cell.dataset.dragBound) return;
+    cell.dataset.dragBound = '1';
+    cell.draggable = true;
+    cell.addEventListener('dragstart', (event) => {
+      draggedColumn = columnKeyOf(cell);
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', draggedColumn);
+      cell.classList.add('is-dragging');
+    });
+    cell.addEventListener('dragend', () => {
+      draggedColumn = '';
+      cell.classList.remove('is-dragging');
+      clearDropMarks();
+    });
+    cell.addEventListener('dragover', (event) => {
+      if (!draggedColumn || draggedColumn === columnKeyOf(cell)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      const box = cell.getBoundingClientRect();
+      const after = event.clientX > box.left + box.width / 2;
+      clearDropMarks();
+      cell.classList.add(after ? 'is-drop-after' : 'is-drop-before');
+    });
+    cell.addEventListener('dragleave', (event) => {
+      if (!cell.contains(event.relatedTarget)) cell.classList.remove('is-drop-before', 'is-drop-after');
+    });
+    cell.addEventListener('drop', (event) => {
+      event.preventDefault();
+      const target = columnKeyOf(cell);
+      const after = cell.classList.contains('is-drop-after');
+      clearDropMarks();
+      if (draggedColumn && draggedColumn !== target) moveColumn(draggedColumn, target, after);
+    });
+  };
+  // Shows the header in the stored order; columns missing from it (newly added) keep their default place.
+  const applyColumnOrder = (stored = storedColumnOrder()) => {
+    const row = $('nq-table').tHead.rows[0];
+    const movable = [...row.cells].filter((cell) => columnKeyOf(cell));
+    const defaults = defaultColumnOrder();
+    const order = stored.filter((key) => naturalColumns.includes(key));
+    defaults.forEach((key, index) => {
+      if (order.includes(key)) return;
+      const previous = defaults.slice(0, index).reverse().find((item) => order.includes(item));
+      order.splice(previous ? order.indexOf(previous) + 1 : 0, 0, key);
+    });
+    shownColumns = order;
+    const byKey = new Map(movable.map((cell) => [columnKeyOf(cell), cell]));
+    row.append(...order.map((key) => byKey.get(key)));
+    movable.forEach(bindColumnDrag);
+    $('nq-column-order-reset').hidden = order.join('|') === defaults.join('|');
+  };
+  // The cells of a row, built in the natural order, are shown in the order of the header.
+  const orderRowCells = (row) => {
+    if (!shownColumns.length) return;
+    const cells = [...row.cells].slice(row.cells.length - naturalColumns.length);
+    if (cells.length !== naturalColumns.length) return;
+    row.append(...shownColumns.map((key) => cells[naturalColumns.indexOf(key)]));
+  };
+  // The optional columns follow Result / Failure, the analysis fields follow the root cause; then the column order applies.
   const renderDynamicHeaders = () => {
     const row = $('nq-table').tHead.rows[0];
     row.querySelectorAll('.nq-dynamic-col').forEach((cell) => cell.remove());
+    // The fixed columns go back to the order of the page before the others are placed.
+    row.append(...STATIC_HEADERS);
     const after = (sortKey) => row.querySelector(`[data-sort="${sortKey}"]`)?.closest('th');
     let anchor = after('result');
     optionalColumns().forEach((column) => {
@@ -860,6 +965,8 @@
       anchor.after(cell);
       anchor = cell;
     });
+    naturalColumns = [...row.cells].map(columnKeyOf).filter(Boolean);
+    applyColumnOrder();
   };
   const saveFieldValue = async (call, key, value, control) => {
     if (control) control.disabled = true;
@@ -1034,8 +1141,9 @@
       row.append(
         start, stacked(call.operator, call.vendor), stacked(call.region, call.cluster), stacked(call.city, campaignLabel(call.campaign)),
         stacked(call.test_name, call.technology), failure, ...optionalColumns().map((column) => optionalCell(call, column)),
-        status, tracking('team', 'assignee'), root, ...fieldColumns().map((field) => fieldCell(call, field)), comments,
+        root, ...fieldColumns().map((field) => fieldCell(call, field)), tracking('team', 'assignee'), status, comments,
       );
+      orderRowCells(row);
       row.addEventListener('click', (event) => {
         if (event.target.closest('select, input, a')) return;
         openDetail(call.call_key);
@@ -1615,13 +1723,13 @@
   }
 
   // -- NQ rate by campaign and operator -------------------------------------------------
-  // A colour from pale green (no NQ calls) through amber to deep red (the highest rate of the matrix).
+  // A pastel colour from soft mint (no NQ calls) through apricot to dusty rose (the highest rate of the matrix).
   const heat = (rate, highest) => {
     if (rate === null || rate === undefined) return ['#f7f2f4', 'var(--nq-muted)'];
     const share = highest > 0 ? Math.min(1, rate / highest) : 0;
-    const low = [0xea, 0xf6, 0xee];
-    const mid = [0xf6, 0xc3, 0x5b];
-    const high = [0xc8, 0x10, 0x2e];
+    const low = [0xee, 0xf6, 0xef];
+    const mid = [0xfb, 0xe0, 0xbd];
+    const high = [0xeb, 0x95, 0xaa];
     const [start, end, step] = share < 0.5 ? [low, mid, share * 2] : [mid, high, (share - 0.5) * 2];
     const rgb = start.map((value, index) => Math.round(value + (end[index] - value) * step));
     const luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
@@ -1655,7 +1763,10 @@
     const operatorCards = matrix.operators.map((operator) => {
       const cell = matrix.operator_totals[operator];
       const card = node('article', undefined, 'nq-rate-card');
-      card.append(node('span', operator, 'nq-kpi-label'), node('strong', rateText(cell)),
+      // The operator's name in its Operator Maps colour.
+      const label = node('span', operator, 'nq-rate-operator');
+      if (matrix.operator_colors?.[operator]) label.style.color = matrix.operator_colors[operator];
+      card.append(label, node('strong', rateText(cell)),
         node('span', `${number(cell?.nq)} of ${number(cell?.total)} calls`, 'nq-kpi-note'));
       const meter = node('span', undefined, 'nq-rate-meter');
       const fill = node('span');
@@ -1666,7 +1777,7 @@
       return drillCard(card, {pairs: [['operator', operator]]});
     });
     const overall = node('article', undefined, 'nq-rate-card nq-rate-card-total');
-    overall.append(node('span', 'Overall', 'nq-kpi-label'), node('strong', rateText(total)),
+    overall.append(node('span', 'Overall', 'nq-rate-operator'), node('strong', rateText(total)),
       node('span', `${number(total.nq)} Non-Qualified of ${number(total.total)} calls`, 'nq-kpi-note'));
     $('nq-rate-overview').replaceChildren(overall, ...operatorCards);
     const highest = Math.max(0, ...matrix.campaigns.flatMap((campaign) => Object.values(matrix.cells[campaign] || {}).map((cell) => Number(cell.rate || 0))));
@@ -1713,13 +1824,24 @@
       node('span', 'Each cell: NQ rate · Non-Qualified / all calls', 'nq-muted'));
   };
   let rateToken = 0;
+  // The NQ rate depends only on these filters and on the indexed CDRs: other filter changes keep it.
+  const RATE_FILTER_KEYS = ['datasets', 'service', 'campaign', 'operator', 'nr_mode'];
+  let rateKey = '';
   async function loadRates() {
+    const filters = currentFilters();
+    const rateFilters = Object.fromEntries(RATE_FILTER_KEYS.filter((key) => key in filters).map((key) => [key, filters[key]]));
+    const key = JSON.stringify([rateFilters, state.result?.sync?.synced_at || '']);
+    if (key === rateKey) return;
+    rateKey = key;
     const token = ++rateToken;
     try {
-      const rates = await api('/api/non-qualified-calls/rates', {method: 'POST', body: JSON.stringify({filters: currentFilters()})});
+      const rates = await api('/api/non-qualified-calls/rates', {method: 'POST', body: JSON.stringify({filters: rateFilters})});
       if (token === rateToken) renderRates(rates);
     } catch (error) {
-      if (token === rateToken) $('nq-rate-overview').replaceChildren(node('p', error.message, 'nq-muted'));
+      if (token === rateToken) {
+        rateKey = '';
+        $('nq-rate-overview').replaceChildren(node('p', error.message, 'nq-muted'));
+      }
     }
   }
 
@@ -1899,7 +2021,8 @@
   const DETAIL_FIELDS = [
     ['Service', 'service_label'], ['Result', 'result'], ['Operator', 'operator'], ['Vendor', 'vendor'], ['Campaign', 'campaign'],
     ['NR Mode', 'nr_mode'], ['Region', 'region'], ['City', 'city'], ['Technology', 'technology'], ['Test Name', 'test_name'],
-    ['Direction', 'direction'], ['Start Time', 'start_time'], ['End Time', 'end_time'], ['Failure Phase', 'failure_phase'],
+    ['Session Type', 'session_type'], ['Direction', 'direction'], ['Start Time', 'start_time'], ['End Time', 'end_time'],
+    ['Failure Phase', 'failure_phase'],
     ['Failure Technology', 'failure_technology'], ['Failure Classification', 'failure_classification'],
     ['Failure Category', 'failure_category'], ['Failure Subcategory', 'failure_subcategory'],
     ['Failure Comment', 'failure_comment'], ['Cell ID', 'cell_id'], ['Root Domain', 'root_domain'], ['Root Cause', 'root_cause'],
@@ -2210,6 +2333,42 @@
   });
   $('nq-refresh').addEventListener('click', () => loadState());
   $('nq-page-size').addEventListener('change', (event) => { state.pageSize = Number(event.target.value) || 50; state.page = 1; loadCalls(); });
+  // -- scroll position: a reload returns to where the page was, while its panels load ------------
+  const SCROLL_STORAGE = `nq-scroll:${window.location.pathname}`;
+  const rememberScroll = () => {
+    try {
+      window.sessionStorage.setItem(SCROLL_STORAGE, String(Math.round(window.scrollY)));
+    } catch (_error) {
+      // Without session storage a reload opens the page at its top.
+    }
+  };
+  window.addEventListener('pagehide', rememberScroll);
+  (() => {
+    let target = 0;
+    try {
+      target = Number(window.sessionStorage.getItem(SCROLL_STORAGE)) || 0;
+    } catch (_error) {
+      target = 0;
+    }
+    if (target <= 0 || !('ResizeObserver' in window)) return;
+    if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
+    // The panels fill in after the page opens, so the position is applied again as the page grows,
+    // until the reader scrolls or the page has settled.
+    const observer = new ResizeObserver(() => window.scrollTo({top: target, behavior: 'auto'}));
+    const stop = () => {
+      observer.disconnect();
+      ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach((type) => window.removeEventListener(type, stop));
+    };
+    ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach((type) => window.addEventListener(type, stop, {passive: true}));
+    observer.observe(document.body);
+    window.scrollTo({top: target, behavior: 'auto'});
+    window.setTimeout(stop, 10000);
+  })();
+  $('nq-column-order-reset').addEventListener('click', () => {
+    saveColumnOrder(defaultColumnOrder());
+    applyColumnOrder([]);
+    if (state.result) renderRows(state.result);
+  });
   $('nq-table').querySelectorAll('[data-sort]').forEach(bindSort);
   $('nq-select-page')?.addEventListener('change', (event) => {
     (state.result?.calls || []).forEach((call) => {

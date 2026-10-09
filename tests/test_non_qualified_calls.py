@@ -858,6 +858,16 @@ def test_nq_rate_of_each_campaign_and_operator(client, tmp_path):
     assert [matrix['service'] for matrix in rates['matrices']] == ['voice', 'data', 'all']
     only_data = client.post('/api/non-qualified-calls/rates', json={'filters': {'service': ['data']}}).json()
     assert [matrix['service'] for matrix in only_data['matrices']] == ['data']
+    # Each operator comes with its Operator Maps colour.
+    assert voice['operator_colors']['EE'] == '#76B7B2'
+    # The counts are reused until the indexed CDRs change: a changed CDR is counted again.
+    assert nq._rate_counts_cache
+    with core.repository.connection() as connection:
+        connection.execute(f"UPDATE {nq.NQ_CALL_POPULATION_TABLE} SET is_nq = 0")
+    assert client.post('/api/non-qualified-calls/rates', json={'filters': {}}).json()['matrices'][0]['total']['nq'] == 2
+    with core.repository.connection() as connection:
+        connection.execute(f"UPDATE {nq.NQ_CALL_SOURCES_TABLE} SET synced_at = 'later'")
+    assert client.post('/api/non-qualified-calls/rates', json={'filters': {}}).json()['matrices'][0]['total']['nq'] == 0
     document = client.post('/api/non-qualified-calls/export/powerpoint', json={'filters': {}})
     assert document.status_code == 200
 
@@ -974,6 +984,25 @@ def test_cdr_columns_and_optional_columns_of_the_calls_table(client, tmp_path):
     rows = [dict(zip(headers, (cell.value for cell in row))) for row in sheet.iter_rows(min_row=2)]
     assert {row['Cellname_A'] for row in rows} == {'LEEDS_3', 'YORK_2'} and all(row['Call_Status'] for row in rows)
     assert client.put('/api/non-qualified-calls/table-columns', json={'builtin': ['unknown'], 'cdr': []}).status_code == 400
+
+
+def test_session_type_is_a_call_column_with_its_own_filter(client, tmp_path):
+    enable_module()
+    rows = voice_rows()
+    rows['Session_Type'] = ['MO Call', 'MT Call', 'MO Call']
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'voice', rows)
+    login(client)
+    assert client.get('/api/non-qualified-calls/state').json()['optional_columns']['session_type'] == 'Session Type'
+    saved = client.put('/api/non-qualified-calls/table-columns', json={'builtin': ['session_type'], 'cdr': []})
+    assert saved.status_code == 200
+    calls = query(client, sort='session_type', direction='asc')['calls']
+    assert [call['session_type'] for call in calls] == ['MO Call', 'MT Call']
+    assert client.get('/api/non-qualified-calls/state').json()['filter_options']['column:session_type'] == ['MO Call', 'MT Call']
+    filtered = query(client, filters={'columns': {'session_type': ['MT Call']}})['calls']
+    assert [call['session_type'] for call in filtered] == ['MT Call']
+    sheet = load_workbook(io.BytesIO(client.post('/api/non-qualified-calls/export', json={'filters': {}}).content))['NQ Calls']
+    headers = [cell.value for cell in sheet[1]]
+    assert headers.index('Session Type') == headers.index('Test Name') + 1
 
 
 def test_follow_up_moves_once_to_the_join_id_call_keys(client, tmp_path):

@@ -45,7 +45,7 @@ from typing import Any
 from src.modules.cdr_stage import dataset_cdr_stage
 from src.modules.column_names import campaign_sort_key, column_identity
 from src.modules.value_maps import ValueMapper, field_kind
-from src.modules.mapping_order import dimension_order_key
+from src.modules.mapping_order import dimension_order_key, mapping_group
 
 NQ_CALLS_TABLE = 'nq_calls'
 NQ_CALL_SOURCES_TABLE = 'nq_call_sources'
@@ -78,7 +78,7 @@ SERVICES = ('voice', 'speech', 'data')
 SERVICE_LABELS = {'voice': 'Voice', 'speech': 'Speech', 'data': 'Data'}
 QUALIFIED_RESULT = 'completed'
 # Bump when the indexed fields or the call key change so every CDR is indexed again.
-INDEX_VERSION = 3
+INDEX_VERSION = 4
 # The call key of version 3: the JOIN_ID first, and Speech calls (not samples).
 KEY_SCHEME = '3'
 KEY_SCHEME_STATE_KEY = 'nq_calls_key_scheme'
@@ -175,6 +175,7 @@ FIELD_SOURCES: dict[str, tuple[str, ...]] = {
     'city': ('city', 'City'),
     'technology': ('Technology', 'technology_primary', 'RAT_A', 'RAT'),
     'test_name': ('Test_Name', 'Type_Of_Test', 'Session_Type', 'Test_Type'),
+    'session_type': ('Session_Type',),
     'direction': ('Direction', 'Call_Direction'),
     'result': ('status', 'Call_Status', 'Test_Result', 'Test_Status'),
     'start_time': ('event_start_time', 'Call_Start_Time', 'Test_Start_Time'),
@@ -229,7 +230,8 @@ SORT_COLUMNS = {
     'result': 'result', 'failure': 'failure_classification', 'status': 'status', 'team': 'team',
     'assignee': 'assignee', 'root_cause': 'root_domain', 'cause': 'root_cause', 'comments': 'comment_count',
     'updated_at': 'updated_at', 'join_id': 'join_id', 'region': 'region', 'cluster': 'cluster', 'nr_mode': 'nr_mode',
-    'cell_id': 'cell_id', 'direction': 'direction', 'end_time': 'end_time', 'cdr': 'dataset_id', 'version': 'version_state',
+    'cell_id': 'cell_id', 'direction': 'direction', 'session_type': 'session_type', 'end_time': 'end_time', 'cdr': 'dataset_id',
+    'version': 'version_state',
 }
 # The breakdowns of the Summary, in the order of the page and of the one-slide Executive Summary.
 BREAKDOWNS = (
@@ -240,7 +242,8 @@ BREAKDOWNS = (
 )
 SEARCH_FIELDS = (
     'operator', 'operator_vendor', 'vendor', 'campaign', 'region', 'cluster', 'city', 'technology', 'test_name', 'result',
-    'failure_classification', 'failure_category', 'failure_subcategory', 'failure_comment', 'cell_id', 'join_id', 'extra_json',
+    'failure_classification', 'failure_category', 'failure_subcategory', 'failure_comment', 'cell_id', 'join_id', 'session_type',
+    'extra_json',
 )
 # How the CDRs see a call (see ``_base_sql``); "current" is the latest version with nothing to tell.
 VERSION_STATES = ('current', 'changed', 'newer', 'not_in_final', 'qualified')
@@ -286,6 +289,9 @@ CREATE TABLE IF NOT EXISTS {NQ_CALL_POPULATION_TABLE} (
 );
 CREATE INDEX IF NOT EXISTS idx_{NQ_CALL_POPULATION_TABLE}_key ON {NQ_CALL_POPULATION_TABLE}(call_key);
 CREATE INDEX IF NOT EXISTS idx_{NQ_CALL_POPULATION_TABLE}_latest ON {NQ_CALL_POPULATION_TABLE}(is_latest, service);
+-- Covers the NQ rate of the latest version of every call, read from the index alone.
+CREATE INDEX IF NOT EXISTS idx_{NQ_CALL_POPULATION_TABLE}_rates
+    ON {NQ_CALL_POPULATION_TABLE}(is_latest, service, campaign, operator, nr_mode, is_nq);
 CREATE TABLE IF NOT EXISTS {NQ_CALL_VERSIONS_TABLE} (
     call_key TEXT PRIMARY KEY,
     latest_dataset_id INTEGER NOT NULL,
@@ -375,6 +381,10 @@ CREATE TABLE IF NOT EXISTS {NQ_ROOT_CAUSES_TABLE} (
 
 _sync_locks: dict[str, Lock] = {}
 _sync_locks_guard = Lock()
+# The NQ rate counts of each workspace and CDR scope, kept until the indexed CDRs change.
+_rate_counts_cache: dict[tuple[Any, ...], list[tuple[Any, ...]]] = {}
+_rate_counts_guard = Lock()
+RATE_COUNTS_CACHE_SIZE = 32
 
 
 def now_iso() -> str:
@@ -528,14 +538,15 @@ TABLE_COLUMNS_STATE_KEY = 'nq_calls_table_columns'
 # Optional columns of the Calls table, with their labels.
 OPTIONAL_COLUMNS = {
     'join_id': 'JOIN_ID', 'nr_mode': 'NR Mode', 'cell_id': 'Cell ID',
-    'direction': 'Direction', 'end_time': 'End Time', 'cdr': 'CDR',
+    'direction': 'Direction', 'session_type': 'Session Type', 'end_time': 'End Time', 'cdr': 'CDR',
 }
 MAX_CDR_COLUMNS = 12
 # CDR columns exported to Excel besides those of the table.
 MAX_EXPORT_CDR_COLUMNS = 100
 # The optional columns filtered by their own values; CDR uses the CDRs filter.
 COLUMN_FILTER_SQL = {
-    'join_id': 'join_id', 'nr_mode': 'nr_mode', 'cell_id': 'cell_id', 'direction': 'direction', 'end_time': 'end_time',
+    'join_id': 'join_id', 'nr_mode': 'nr_mode', 'cell_id': 'cell_id', 'direction': 'direction', 'session_type': 'session_type',
+    'end_time': 'end_time',
 }
 MAX_COLUMN_FILTER_VALUES = 5000
 
@@ -2430,20 +2441,32 @@ def nq_rates(task_repository: Any, filters: dict[str, Any]) -> dict[str, Any]:
             FROM {NQ_CALL_POPULATION_TABLE} p WHERE {' AND '.join(where)}
             GROUP BY p.service, p.campaign, p.operator, p.nr_mode"""
     with task_repository.connection() as connection:
-        rows = connection.execute(source, params).fetchall()
+        # The counts change only when the indexed CDRs do, so the same sources and scope reuse them.
+        sources = tuple(tuple(row) for row in connection.execute(
+            f'SELECT dataset_id, revision, synced_at FROM {NQ_CALL_SOURCES_TABLE} ORDER BY dataset_id').fetchall())
+        key = (str(task_repository.db_path), sources, tuple(sorted(scope or ())), tuple(sorted(services)))
+        with _rate_counts_guard:
+            rows = _rate_counts_cache.get(key)
+        if rows is None:
+            rows = [(row['service'], row['campaign'], row['operator'], row['nr_mode'], row['total'], row['nq'])
+                    for row in connection.execute(source, params).fetchall()]
+            with _rate_counts_guard:
+                if len(_rate_counts_cache) >= RATE_COUNTS_CACHE_SIZE:
+                    _rate_counts_cache.pop(next(iter(_rate_counts_cache)))
+                _rate_counts_cache[key] = rows
     groups: dict[str, dict[tuple[str, str], list[int]]] = {}
-    for row in rows:
-        campaign, operator = str(row['campaign'] or ''), str(mapper.map(field_kind('operator'), row['operator'] or '') or '')
+    for row_service, row_campaign, row_operator, row_nr_mode, row_total, row_nq in rows:
+        campaign, operator = str(row_campaign or ''), str(mapper.map(field_kind('operator'), row_operator or '') or '')
         if campaigns and campaign not in campaigns:
             continue
         if operators and operator not in operators:
             continue
-        if nr_modes and str(row['nr_mode'] or '') not in nr_modes:
+        if nr_modes and str(row_nr_mode or '') not in nr_modes:
             continue
-        for service in (str(row['service']), 'all'):
+        for service in (str(row_service), 'all'):
             cell = groups.setdefault(service, {}).setdefault((campaign, operator), [0, 0])
-            cell[0] += int(row['total'] or 0)
-            cell[1] += int(row['nq'] or 0)
+            cell[0] += int(row_total or 0)
+            cell[1] += int(row_nq or 0)
     mapping_settings = task_repository.chart_mapping_settings()
 
     def matrix(service: str) -> dict[str, Any]:
@@ -2458,6 +2481,9 @@ def nq_rates(task_repository: Any, filters: dict[str, Any]) -> dict[str, Any]:
         return {
             'service': service, 'label': 'All services' if service == 'all' else SERVICE_LABELS.get(service, service),
             'campaigns': campaign_list, 'operators': operator_list,
+            # The colour of each operator in the Operator Maps, for its name.
+            'operator_colors': {operator: str(group.get('color') or '') for operator in operator_list
+                                if (group := mapping_group(operator, mapping_settings['operator_mapping_groups']))},
             'cells': {campaign: {operator: summary(*cells[(campaign, operator)]) for operator in operator_list
                                  if (campaign, operator) in cells} for campaign in campaign_list},
             'campaign_totals': {campaign: summary(*map(sum, zip(*(value for (row, _operator), value in cells.items()
@@ -2820,7 +2846,8 @@ EXPORT_COLUMNS = (
     ('Service', 'service_label'), ('Start Time', 'start_time'), ('End Time', 'end_time'), ('Operator', 'operator'),
     ('Operator_Vendor', 'operator_vendor'), ('Vendor_Operator', 'vendor_operator'), ('Vendor', 'vendor'),
     ('Campaign', 'campaign'), ('NR Mode', 'nr_mode'), ('Region', 'region'), ('Cluster', 'cluster'), ('City', 'city'),
-    ('Technology', 'technology'), ('Test Name', 'test_name'), ('Direction', 'direction'), ('Result', 'result'),
+    ('Technology', 'technology'), ('Test Name', 'test_name'), ('Session Type', 'session_type'), ('Direction', 'direction'),
+    ('Result', 'result'),
     ('Failure Phase', 'failure_phase'), ('Failure Technology', 'failure_technology'),
     ('Failure Classification', 'failure_classification'), ('Failure Category', 'failure_category'),
     ('Failure Subcategory', 'failure_subcategory'), ('Failure Comment', 'failure_comment'), ('Cell ID', 'cell_id'),

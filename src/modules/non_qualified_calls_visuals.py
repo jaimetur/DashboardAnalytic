@@ -436,12 +436,12 @@ def root_cause_panels(stats: dict[str, Any]) -> list[tuple[str, BytesIO]]:
 
 
 def _heat(rate: float | None, highest: float) -> tuple[str, str]:
-    """The fill and text colours of an NQ rate: pale green for none, deep red for the highest of the matrix."""
+    """The fill and text colours of an NQ rate, in pastel: soft mint for none, dusty rose for the highest of the matrix."""
     if rate is None:
         return '#f7f2f4', MUTED
     share = 0.0 if highest <= 0 else min(1.0, rate / highest)
-    low, high = (0xEA, 0xF6, 0xEE), (0xC8, 0x10, 0x2E)
-    mid = (0xF6, 0xC3, 0x5B)
+    low, high = (0xEE, 0xF6, 0xEF), (0xEB, 0x95, 0xAA)
+    mid = (0xFB, 0xE0, 0xBD)
     if share < 0.5:
         start, end, step = low, mid, share * 2
     else:
