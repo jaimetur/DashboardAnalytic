@@ -165,9 +165,15 @@ def _scope_summary(tables: dict[str, dict[str, Any]], environment: str) -> dict[
         sources = [table]
     if not sources:
         return None
-    maximum = sum(_number(row.get('max_points')) or 0.0 for source in sources for row in _kpi_rows(source))
-    service_maximum = {service: sum(_number(row.get('max_points')) or 0.0 for source in sources
-                                    for row in _kpi_rows(source) if _service(row) == service)
+    # All Environments scales to the maximum of the methodology (that of its own table), also when an environment
+    # has no measurements in the scope (a city without Connecting Roads, for example).
+    totals_from = [table] if environment == COMBINED and any(
+        (_number(row.get('max_points')) or 0) > 0 for row in _kpi_rows(table)) else sources
+    maximum = max(sum(_number(row.get('max_points')) or 0.0 for source in sources for row in _kpi_rows(source)),
+                  sum(_number(row.get('max_points')) or 0.0 for source in totals_from for row in _kpi_rows(source)))
+    service_maximum = {service: max(sum(_number(row.get('max_points')) or 0.0 for source in group
+                                        for row in _kpi_rows(source) if _service(row) == service)
+                                    for group in (sources, totals_from))
                        for service in ('Voice', 'Data')}
     operators = []
     scaled = False

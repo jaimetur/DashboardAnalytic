@@ -153,6 +153,27 @@ def test_an_area_not_measured_in_the_latest_campaign_keeps_its_trend_without_a_s
         assert row['trend'][0] is not None and row['trend'][1] is None
 
 
+def test_an_area_without_an_environment_is_scaled_to_the_full_maximum():
+    levels = ('Operator', 'Campaign')
+    job, result = synthetic_result(levels=levels, campaigns=('2026-Q1',))
+    # London has no Connecting Roads measurements at all: its score is scaled to the 1,000 points of the methodology.
+    _job, london = synthetic_result(levels=('Operator', 'City', 'Campaign'), cities=('London',), campaigns=('2026-Q1',))
+    london['scoring'] = [row for row in london['scoring'] if row['environment'] != 'DriveConnectionroad']
+    london['totals'] = [row for row in london['totals'] if row['environment'] != 'DriveConnectionroad']
+    result['area_summary'] = {'breakdown': None, 'cities': ['London'], 'passes': [
+        {'kind': 'National', 'field': None, 'levels': list(levels), 'reuses_job': True},
+        {'kind': 'City', 'field': 'city', 'levels': [*levels, 'City'], 'cities': ['London'], 'reuses_job': False,
+         'result': {key: value for key, value in london.items() if key != 'configuration'}},
+    ]}
+    combined = next(item for item in build_area_summary(job, result) if item['environment'] == 'Combined')
+    city = combined['areas'][1]
+    ee = next(row for row in city['rows'] if row['operator'] == 'EE')
+    city_points = sum(row['weighted_points'] for row in london['scoring']
+                      if row['operator'] == 'EE' and row['environment'] == 'DriveCity')
+    assert combined['maximum'] == pytest.approx(1000) and combined['scaled'] is True
+    assert ee['points'] == pytest.approx(city_points * 1000 / 650)
+
+
 @pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
 def test_a_single_separate_city_is_charted_next_to_national_and_several_after_the_breakdown():
     script = (Path(__file__).resolve().parents[1] / 'src/web_interface/static/js/scoring.js').read_text(encoding='utf-8')
