@@ -514,3 +514,70 @@ def rate_panels(rates: dict[str, Any], rows_per_panel: int = 8) -> list[tuple[st
             suffix = f' · {number}/{len(pages)}' if len(pages) > 1 else ''
             panels.append((f"NQ Rate by Campaign and Operator · {matrix['label']}{suffix}", panel.png()))
     return panels
+
+
+def lifecycle_panels(lifecycle: dict[str, Any]) -> list[tuple[str, BytesIO]]:
+    """The Analysis Center lifecycle: how many calls are in each NQ Call Status and in each value of the phase fields."""
+    total = int(lifecycle.get('total') or 0)
+    if not total:
+        return []
+    pipeline = lifecycle.get('pipeline') or []
+    closed = sum(item['count'] for item in pipeline if item.get('closed'))
+    modes = lifecycle.get('modes') or {}
+    panel = Panel()
+    _kpi_row(panel, [
+        ('Calls', _number(total), 'in the selection', 'total'),
+        ('Closed', _number(closed), _share(closed, total), 'closed'),
+        ('Open', _number(total - closed), _share(total - closed, total), 'open'),
+        ('Automatic status', _number(modes.get('auto', 0)), 'set by the status rules', 'team'),
+        ('Status by hand', _number(modes.get('manual', 0)), 'chosen by the analysts', 'commented'),
+        (f"No change for {lifecycle.get('stalled_days', 14)} days", _number(lifecycle.get('stalled_total', 0)), 'open calls', 'attended'),
+    ], 0, 1.05, compact=True)
+    cards = [('NQ Call Status', [(item['status'], item['count'], item['color'] or RASPBERRY) for item in pipeline])]
+    for phase in (lifecycle.get('phases') or [])[:3]:
+        items = [(item['value'], item['count'], item['color'] or PALETTE[index % len(PALETTE)])
+                 for index, item in enumerate(phase['items'])]
+        if phase.get('empty'):
+            items.append(('Not set', phase['empty'], '#c9cfd4'))
+        cards.append((phase['label'], items))
+    gap = 0.15
+    width = (panel.width - gap * (len(cards) - 1)) / len(cards)
+    for index, (title, items) in enumerate(cards):
+        _bar_card(panel, index * (width + gap), 1.2, width, panel.height - 1.2, title, items, label_above=True, compact=True)
+    return [('Analysis Center · Lifecycle', panel.png())]
+
+
+def rca_insight_panels(insights: dict[str, Any]) -> list[tuple[str, BytesIO]]:
+    """The three root cause sources compared: coverage, agreement and the categories each one proposes."""
+    coverage = insights.get('coverage') or {}
+    total = int(coverage.get('total') or 0)
+    if not total:
+        return []
+    agreement = insights.get('agreement') or {}
+
+    def rate(name: str) -> tuple[str, str]:
+        item = agreement.get(name) or {}
+        value = item.get('rate')
+        return (f'{value:.0f}%' if value is not None else '—'), f"{_number(item.get('agree'))} of {_number(item.get('compared'))} calls"
+
+    panel = Panel()
+    _kpi_row(panel, [
+        ('RCA script', _number(coverage.get('script')), f"{_share(int(coverage.get('script') or 0), total)} of the calls", 'team'),
+        ('NetCheck RCA', _number(coverage.get('netcheck')), f"{_share(int(coverage.get('netcheck') or 0), total)} of the calls", 'attended'),
+        ('Selected', _number(coverage.get('selected')), f"{_share(int(coverage.get('selected') or 0), total)} of the calls", 'closed'),
+        ('Selected = script', *rate('selected_script'), 'commented'),
+        ('Selected = NetCheck', *rate('selected_netcheck'), 'open'),
+        ('Script = NetCheck', *rate('script_netcheck'), 'total'),
+    ], 0, 1.05, compact=True)
+    mapped = insights.get('mapped') or {}
+    cards = [
+        ('RCA script → Root Category', [(item['category'], item['count'], '#e0a400') for item in mapped.get('script') or []]),
+        ('NetCheck RCA → Root Category', [(item['category'], item['count'], '#0f6f7d') for item in mapped.get('netcheck') or []]),
+        ('Selected Root Category', [(item['category'], item['count'], RASPBERRY) for item in mapped.get('selected') or []]),
+        ('Selected by Domain', [(item['domain'], item['count'], item.get('color') or RASPBERRY) for item in insights.get('domains') or []]),
+    ]
+    gap = 0.15
+    width = (panel.width - gap * (len(cards) - 1)) / len(cards)
+    for index, (title, items) in enumerate(cards):
+        _bar_card(panel, index * (width + gap), 1.2, width, panel.height - 1.2, title, items, label_above=True, compact=True)
+    return [('Analysis Center · Root Cause Sources', panel.png())]

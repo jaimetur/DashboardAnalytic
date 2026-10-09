@@ -18,7 +18,8 @@
     region: 'Region', cluster: 'Cluster', city: 'City', dataset_id: 'CDR', join_id: 'Join ID',
     technology: 'Technology', test_name: 'Test Name', result: 'Result', failure_classification: 'Failure Classification',
     failure_category: 'Failure Category', status: 'Status', team: 'Team', assignee: 'Assignee', datasets: 'CDR',
-    root_domain: 'Root Domain', root_cause: 'Root Cause', nr_mode: 'NR Mode', call_type: 'Call Type', period: 'Period',
+    root_domain: 'Root Domain', root_category: 'Root Category', root_cause: 'Root Cause', status_mode: 'Status Set',
+    nr_mode: 'NR Mode', call_type: 'Call Type', period: 'Period',
     age: 'Age of Open Calls', root_pair: 'Root Domain · Cause', effective_domain: 'Root Domain (with suggestions)',
     effective_cause: 'Root Domain · Cause (with suggestions)', node: 'eNB / gNB', state: 'Follow-up', rca_state: 'Root Cause',
     version: 'CDR Version',
@@ -35,24 +36,36 @@
   // Filters set by clicking the Progress View and the Root Cause Analysis; they have no select of their own.
   const EXTRA_FILTERS = ['nr_mode', 'call_type', 'period', 'age', 'root_pair', 'effective_domain', 'effective_cause', 'node',
     'state', 'rca_state'];
-  const HISTORY_LABELS = {status: 'Status', team: 'Team', assignee: 'Assignee', root_domain: 'Root Domain', root_cause: 'Root Cause'};
-  // The label of a changed field: a follow-up field or an analysis field ("field:key").
+  const HISTORY_LABELS = {status: 'Status', status_auto: 'Status (automatic)', status_mode: 'Status Set', team: 'Team',
+    assignee: 'Assignee', root_domain: 'Root Domain', root_category: 'Root Category', root_cause: 'Root Cause'};
+  // The label of a changed field: a follow-up field or a catalog field ("field:key").
   const historyLabel = (field) => (field.startsWith('field:')
     ? (state.fields.find((item) => item.key === field.slice(6))?.label || field.slice(6)) : (HISTORY_LABELS[field] || field));
   const NOT_CLASSIFIED = 'Not classified';
+  const NO_CAUSE = 'No cause';
+  // Whether the NQ Call Status follows the Status Rules or was chosen by hand.
+  const STATUS_MODE_LABELS = {auto: 'Automatic', manual: 'By hand'};
+  // The status selects offer this value to give the status back to the Status Rules.
+  const AUTO_STATUS = '__auto__';
+  // Where a catalog field takes its value from, as a short tag.
+  const SOURCE_TAGS = {user: 'Analyst', tracking: 'Follow-up', cdr: 'CDR', rca: 'RCA script', derived: 'Derived'};
+  const CONFIDENCE_LABELS = {high: 'High confidence', medium: 'Medium confidence', low: 'Low confidence'};
+  // The sections whose first list field is a phase of the follow-up.
+  const PHASE_SECTIONS = ['analysis', 'implementation', 'planning'];
   // Campaigns as the workspace Campaign Maps show them (campaign_labels.js); filters keep the full value.
   const campaignLabel = (value) => (globalThis.campaignLabel ? globalThis.campaignLabel(value) : String(value ?? ''));
-  // A root cause travels in selects as "domain||cause" (the cause may be empty).
+  // A field value travels in the bulk select as "key||value".
   const ROOT_SEPARATOR = '||';
   const REFRESH_INTERVAL_MS = 60000;
 
   const state = {
-    options: {statuses: [], teams: []}, rootCauses: {domains: [], require_to_close: false}, users: [],
+    options: {statuses: [], teams: []}, rootCauses: {domains: [], categories: [], causes: [], require_to_close: false}, users: [],
     user: {username: '', can_edit: false, can_moderate: false},
     unassigned: '__unassigned__', datasets: [], mainCities: [], sort: 'start_time', direction: 'desc', page: 1, pageSize: 50,
     result: null, selected: new Set(), detail: null, requestToken: 0, busy: false, extraFilters: {},
     fields: [], fieldTypes: {}, tableColumns: {builtin: [], cdr: []}, optionalColumns: {}, cdrColumns: [], versionLabels: {},
-    rateService: '',
+    rateService: '', sections: [], statusRules: [], conditionFields: {}, ruleOperators: {}, fieldSources: {}, trackingRefs: {},
+    rcaRefs: {}, callFields: [], rcaResults: {}, rcaSources: {}, matrixSource: 'script',
   };
 
   // -- helpers --------------------------------------------------------------
@@ -112,11 +125,25 @@
     const luminance = 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0);
     return luminance > 0.45 ? '#2a1a20' : '#fff';
   };
+  // A Root Category or Root Cause of the catalog, by name.
+  const rootItem = (kind, name) => (name ? (kind === 'root_category' ? state.rootCauses.categories : state.rootCauses.causes)
+    .find((item) => item.name.toLowerCase() === String(name).toLowerCase()) : null);
+  const domainColor = (name) => state.rootCauses.domains.find((item) => item.name === name)?.color || '';
+  // Root categories or causes grouped by domain, in the catalog order; a preferred domain first, those without one last.
+  const rootGroups = (items, preferred = '') => {
+    const names = state.rootCauses.domains.map((domain) => domain.name);
+    const order = [...(preferred && names.includes(preferred) ? [preferred] : []), ...names.filter((name) => name !== preferred), ''];
+    return order.map((domain) => [domain, items.filter((item) => (names.includes(item.domain) ? item.domain : '') === domain)])
+      .filter(([, group]) => group.length);
+  };
+  // Root categories and causes take the colour of their domain.
   const optionColor = (kind, name) => {
-    if (kind === 'root_domain' || kind === 'root_cause') return state.rootCauses.domains.find((item) => item.name === name)?.color || '';
+    if (kind === 'root_domain') return domainColor(name);
+    if (kind === 'root_category' || kind === 'root_cause') return rootItem(kind, name)?.color || '';
     const list = kind === 'status' ? state.options.statuses : state.options.teams;
     return list.find((item) => item.name === name)?.color || '';
   };
+  const sectionOf = (key) => state.sections.find((section) => section.key === key) || {key, label: key, color: '#7b8790'};
   const paintPill = (element, color) => {
     if (color) {
       element.style.setProperty('--nq-pill', color);
@@ -128,11 +155,26 @@
       element.classList.remove('is-colored');
     }
   };
+  // A root cause is outlined in the colour of its domain, so it reads apart from its category.
+  const outlinePill = (element, color) => {
+    paintPill(element, '');
+    if (color) element.style.setProperty('--nq-outline', color);
+    else element.style.removeProperty('--nq-outline');
+    element.classList.toggle('is-outlined', Boolean(color));
+  };
   const pill = (kind, name, emptyLabel = 'Unassigned') => {
     const element = node('span', name || emptyLabel, `nq-pill nq-pill-${kind}`);
-    paintPill(element, kind === 'assignee' ? '' : optionColor(kind, name));
+    if (kind === 'root_cause') outlinePill(element, optionColor(kind, name));
+    else paintPill(element, kind === 'assignee' ? '' : optionColor(kind, name));
     if (!name) element.classList.add('is-empty');
     return element;
+  };
+  // A small tag in the colour of a section (or of a source).
+  const sectionTag = (key) => {
+    const section = sectionOf(key);
+    const tag = node('span', section.label, 'nq-section-tag');
+    tag.style.setProperty('--nq-section', section.color);
+    return tag;
   };
   const initials = (name) => String(name || '?').split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
   const avatar = (name) => {
@@ -151,6 +193,9 @@
     && (state.user.can_moderate || comment.created_by.toLowerCase() === state.user.username.toLowerCase());
 
   // -- filters --------------------------------------------------------------
+  // The list and Yes / No fields chosen among their values: entered by the analysts or derived from the call.
+  const filterableFields = () => state.fields.filter((field) => ['list', 'yes_no'].includes(field.type)
+    && ['user', 'derived'].includes(field.source));
   const filterSelects = () => [...root.querySelectorAll('[data-nq-filter]')];
   const fillSelect = (select, entries) => {
     const previous = new Set([...select.selectedOptions].map((option) => option.value));
@@ -173,12 +218,14 @@
       team: [unassigned, ...state.options.teams.map((item) => [item.name, item.name])],
       assignee: [unassigned, ...[...new Set([...(values.assignee || []), ...state.users])].sort((a, b) => a.localeCompare(b)).map((name) => [name, name])],
       root_domain: [[state.unassigned, NOT_CLASSIFIED], ...state.rootCauses.domains.map((item) => [item.name, item.name])],
-      root_cause: [...new Set(state.rootCauses.domains.flatMap((item) => item.causes.map((cause) => cause.name)))].map((name) => [name, name]),
+      root_category: [[state.unassigned, NOT_CLASSIFIED], ...state.rootCauses.categories.map((item) => [item.name, item.name])],
+      root_cause: [[state.unassigned, NO_CAUSE], ...state.rootCauses.causes.map((item) => [item.name, item.name])],
+      status_mode: Object.entries(STATUS_MODE_LABELS),
       version: Object.entries(state.versionLabels),
     };
-    // A filter for every list and Yes / No analysis field, after the others.
+    // A filter for every list and Yes / No field of the Analysis Center, after the others.
     const fieldHost = $('nq-field-filters');
-    const filterable = state.fields.filter((field) => ['list', 'yes_no'].includes(field.type));
+    const filterable = filterableFields();
     const present = new Set(filterable.map((field) => `field:${field.key}`));
     fieldHost.querySelectorAll('[data-nq-filter]').forEach((select) => {
       if (!present.has(select.dataset.nqFilter)) select.closest('label').remove();
@@ -288,7 +335,7 @@
     if (field === 'dataset_id') field = 'datasets';
     const select = root.querySelector(`[data-nq-filter="${field}"]`);
     if (!select) return;
-    const target = ['team', 'assignee', 'root_domain'].includes(field) ? (value || state.unassigned) : value;
+    const target = ['team', 'assignee', 'root_domain', 'root_category', 'root_cause'].includes(field) ? (value || state.unassigned) : value;
     const chosen = [...select.selectedOptions].map((option) => option.value);
     const toggleOff = chosen.length === 1 && chosen[0] === target;
     [...select.options].forEach((option) => { option.selected = !toggleOff && option.value === target; });
@@ -427,26 +474,31 @@
         const field = breakdown.field;
         const label = field === 'service' ? (SERVICE_LABELS[item.value] || item.value)
           : field === 'campaign' && item.value ? campaignLabel(item.value)
-            : item.label || item.value || (field === 'team' ? 'Unassigned' : field.startsWith('field:') ? 'Empty' : NOT_CLASSIFIED);
+            : item.label || item.value || (field === 'team' ? 'Unassigned' : field.startsWith('field:') ? 'Empty'
+              : field === 'root_cause' ? NO_CAUSE : NOT_CLASSIFIED);
         const row = node('button', undefined, 'nq-bar');
         row.type = 'button';
         const isField = field.startsWith('field:');
-        const filterValue = ((['team', 'root_domain'].includes(field) || isField) && !item.value) ? state.unassigned : item.value;
+        // Only the fields with a filter of their own (lists and Yes / No of the analysts or derived) drill down.
+        const fieldFilter = isField && root.querySelector(`[data-nq-filter="${CSS.escape(field)}"]`);
+        const blankable = ['team', 'assignee', 'root_domain', 'root_category', 'root_cause'];
+        const filterValue = ((blankable.includes(field) || isField) && !item.value) ? state.unassigned : item.value;
         const chosen = filterValues(filters, field) || [];
         const active = chosen.length === 1 && chosen[0] === filterValue;
         row.classList.toggle('is-active', active);
-        row.title = active ? `Remove the ${FIELD_LABELS[field]} filter` : `Show only ${label}`;
+        row.title = isField && !fieldFilter ? label : active ? `Remove the ${FIELD_LABELS[field] || historyLabel(field)} filter` : `Show only ${label}`;
         const track = node('span', undefined, 'nq-bar-track');
         const fill = node('span', undefined, 'nq-bar-fill');
         fill.style.width = `${Math.max(2, (item.count / max) * 100)}%`;
         // The colours of the PowerPoint and Word: the status, team or domain colour, else the palette in order.
-        const color = (['status', 'team', 'root_domain'].includes(field) ? optionColor(field, item.value) : '')
+        const color = (['status', 'team', 'root_domain', 'root_category', 'root_cause'].includes(field) ? optionColor(field, item.value) : '')
           || breakdown.colors?.[item.value] || PALETTE[index % PALETTE.length];
         fill.style.background = color;
         track.append(fill);
         row.append(node('span', label, 'nq-bar-label'), track, node('span', number(item.count), 'nq-bar-count'));
         row.addEventListener('click', () => {
-          if (!item.value && !['team', 'assignee', 'root_domain'].includes(field) && !isField) return;
+          if (isField && !fieldFilter) return;
+          if (!item.value && !blankable.includes(field) && !isField) return;
           selectOnly(field, isField ? filterValue : item.value);
         });
         card.append(row);
@@ -505,25 +557,19 @@
     };
     let boxes;
     let headings = [];
-    if (field === 'root_cause') {
-      // Causes under their domain; a cause shared by two domains is the same value in both.
+    if (field === 'root_cause' || field === 'root_category') {
+      // The empty value first, then the categories or causes under their domain.
       const byValue = new Map(options.map((option) => [option.value, option]));
-      boxes = [];
-      state.rootCauses.domains.forEach((domain) => {
-        const causes = domain.causes.map((cause) => byValue.get(cause.name)).filter(Boolean);
-        if (!causes.length) return;
-        const heading = node('p', domain.name, 'nq-column-filter-group');
-        heading.style.setProperty('--nq-group', optionColor('root_domain', domain.name) || '#b8c0c6');
+      boxes = byValue.has(state.unassigned) ? [checkbox(byValue.get(state.unassigned))] : [];
+      rootGroups(field === 'root_category' ? state.rootCauses.categories : state.rootCauses.causes).forEach(([domain, items]) => {
+        const group = items.map((item) => byValue.get(item.name)).filter(Boolean);
+        if (!group.length) return;
+        const heading = node('p', domain || 'Other', 'nq-column-filter-group');
+        heading.style.setProperty('--nq-group', domainColor(domain) || '#b8c0c6');
         list.append(heading);
-        const group = causes.map(checkbox);
-        headings.push([heading, group]);
-        boxes.push(...group);
-      });
-      // Twin boxes of a shared cause follow each other.
-      list.addEventListener('change', (event) => {
-        const changed = event.target;
-        if (changed.type !== 'checkbox') return;
-        boxes.forEach(([, box]) => { if (box !== changed && box.value === changed.value) box.checked = changed.checked; });
+        const entries = group.map(checkbox);
+        headings.push([heading, entries]);
+        boxes.push(...entries);
       });
     } else {
       boxes = options.map(checkbox);
@@ -593,6 +639,24 @@
   window.addEventListener('resize', closeColumnFilter);
 
   // -- table ------------------------------------------------------------------
+  // Saves follow-up changes of one call and shows the call again.
+  const patchCall = async (call, changes, control, message) => {
+    if (control) control.disabled = true;
+    try {
+      const detail = await api(`/api/non-qualified-calls/calls/${encodeURIComponent(call.call_key)}`, {
+        method: 'PATCH', body: JSON.stringify({changes, version: call.version}),
+      });
+      Object.assign(call, detail.call);
+      if (state.detail?.call.call_key === call.call_key) renderDetail(detail);
+      toast(message);
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      if (control) control.disabled = false;
+      loadCalls({quiet: true});
+    }
+  };
+  const statusModeText = (call) => (call.status_mode === 'manual' ? 'Set by hand' : 'Automatic');
   const trackingSelect = (kind, call) => {
     const select = node('select', undefined, `nq-pill-select nq-pill-${kind}`);
     select.setAttribute('aria-label', `${HISTORY_LABELS[kind]} of the call`);
@@ -601,6 +665,8 @@
         : [['', 'Unassigned'], ...assignableUsers(call.team).map((name) => [name, name])];
     const current = call[kind] || '';
     if (current && !entries.some(([value]) => value === current)) entries.push([current, current]);
+    // A status set by hand can go back to the Status Rules.
+    if (kind === 'status' && call.status_mode === 'manual') entries.push([AUTO_STATUS, '↺ Back to automatic']);
     select.append(...entries.map(([value, label]) => {
       const option = node('option', label);
       option.value = value;
@@ -610,64 +676,41 @@
     const paint = () => {
       paintPill(select, kind === 'assignee' ? '' : optionColor(kind, select.value));
       select.classList.toggle('is-empty', !select.value);
-      select.title = `${HISTORY_LABELS[kind]}: ${select.value || 'Unassigned'}`;
+      select.title = kind === 'status' ? `Status: ${select.value} (${statusModeText(call).toLowerCase()})`
+        : `${HISTORY_LABELS[kind]}: ${select.value || 'Unassigned'}`;
     };
     paint();
-    select.addEventListener('change', async () => {
-      paint();
-      select.disabled = true;
-      try {
-        const detail = await api(`/api/non-qualified-calls/calls/${encodeURIComponent(call.call_key)}`, {
-          method: 'PATCH', body: JSON.stringify({changes: {[kind]: select.value}, version: call.version}),
-        });
-        Object.assign(call, detail.call);
-        if (state.detail?.call.call_key === call.call_key) renderDetail(detail);
-        toast(`${HISTORY_LABELS[kind]} updated.`);
-        loadCalls({quiet: true});
-      } catch (error) {
-        toast(error.message, 'error');
-        loadCalls({quiet: true});
-      } finally {
-        select.disabled = false;
-      }
+    select.addEventListener('change', () => {
+      const changes = select.value === AUTO_STATUS ? {status_mode: 'auto'} : {[kind]: select.value};
+      if (select.value !== AUTO_STATUS) paint();
+      patchCall(call, changes, select, select.value === AUTO_STATUS ? 'The status follows the Status Rules again.' : `${HISTORY_LABELS[kind]} updated.`);
     });
     select.addEventListener('click', (event) => event.stopPropagation());
     return select;
   };
-  const rootLabel = (domain, cause) => (domain ? [domain, cause].filter(Boolean).join(' · ') : NOT_CLASSIFIED);
-  const suggestionText = (suggestion) => `Suggested${suggestion.source === 'comments' ? ' from comments' : ''}: ${rootLabel(suggestion.domain, suggestion.cause)}`;
-  const rootEntries = () => state.rootCauses.domains.map((domain) => [domain.name, [
-    [`${domain.name}${ROOT_SEPARATOR}`, `${domain.name} (no cause)`],
-    ...domain.causes.map((cause) => [`${domain.name}${ROOT_SEPARATOR}${cause.name}`, cause.name]),
-  ]]);
-  const saveRootCause = async (call, changes, control) => {
-    if (control) control.disabled = true;
-    try {
-      const detail = await api(`/api/non-qualified-calls/calls/${encodeURIComponent(call.call_key)}`, {
-        method: 'PATCH', body: JSON.stringify({changes, version: call.version}),
-      });
-      Object.assign(call, detail.call);
-      if (state.detail?.call.call_key === call.call_key) renderDetail(detail);
-      toast('Root cause updated.');
-    } catch (error) {
-      toast(error.message, 'error');
-    } finally {
-      if (control) control.disabled = false;
-      loadCalls({quiet: true});
-    }
+  // Whether the status follows the Status Rules (Auto) or was chosen by hand.
+  const statusModeBadge = (call) => {
+    const manual = call.status_mode === 'manual';
+    const badge = node('span', manual ? 'By hand' : 'Auto', `nq-status-mode${manual ? ' is-manual' : ''}`);
+    badge.title = manual ? 'Chosen by hand: the Status Rules do not change it until it goes back to automatic'
+      : 'Set by the Status Rules from the fields of the call';
+    return badge;
   };
-  // The root cause of a call: a select grouped by domain, and the suggested root cause while it has none.
-  // Cause picker: the domains as coloured headings with their causes, like the column filters.
-  let causePicker = null;
-  const closeCausePicker = () => {
-    causePicker?.popover.remove();
-    causePicker = null;
+  const rootLabel = (category, cause) => [category, cause].filter(Boolean).join(' · ') || NOT_CLASSIFIED;
+  const recommendationOf = (call) => call.rca_recommendation?.recommendation || null;
+  const sourceNames = (names) => (names || []).map((name) => state.rcaSources[name] || name).join(', ');
+  // Root category and cause pickers: the catalog values grouped by domain, with the values the RCA
+  // sources propose first and, for a cause, the causes of the domain of the chosen category next.
+  let rootPicker = null;
+  const closeRootPicker = () => {
+    rootPicker?.popover.remove();
+    rootPicker = null;
   };
-  const placeCausePicker = () => {
-    if (!causePicker) return;
-    const rect = causePicker.anchor.getBoundingClientRect();
-    if (!causePicker.anchor.isConnected || rect.bottom < 0 || rect.top > window.innerHeight) { closeCausePicker(); return; }
-    const {popover} = causePicker;
+  const placeRootPicker = () => {
+    if (!rootPicker) return;
+    const rect = rootPicker.anchor.getBoundingClientRect();
+    if (!rootPicker.anchor.isConnected || rect.bottom < 0 || rect.top > window.innerHeight) { closeRootPicker(); return; }
+    const {popover} = rootPicker;
     const below = window.innerHeight - rect.bottom - 16;
     const above = rect.top - 16;
     // Open downwards, or upwards when there is clearly more room above.
@@ -676,137 +719,143 @@
     popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8))}px`;
     popover.style.top = up ? `${Math.max(8, rect.top - 4 - popover.offsetHeight)}px` : `${rect.bottom + 4}px`;
   };
-  const openCausePicker = (anchor, call, choose) => {
-    closeCausePicker();
+  // The values the RCA sources of a call propose for a root category or cause, the recommended one first.
+  const proposedValues = (call, kind) => {
+    const key = kind === 'root_category' ? 'category' : 'cause';
+    const recommendation = recommendationOf(call);
+    const names = [recommendation?.[key], ...(call.rca_recommendation?.sources || []).map((source) => source[key])].filter(Boolean);
+    return [...new Set(names)];
+  };
+  const openRootPicker = (anchor, kind, call, choose) => {
+    closeRootPicker();
+    const items = kind === 'root_category' ? state.rootCauses.categories : state.rootCauses.causes;
+    const current = call[kind] || '';
     const popover = node('div', undefined, 'nq-column-filter nq-cause-picker');
     popover.setAttribute('role', 'listbox');
-    popover.setAttribute('aria-label', 'Root cause');
+    popover.setAttribute('aria-label', FIELD_LABELS[kind]);
     popover.addEventListener('click', (event) => event.stopPropagation());
     const search = node('input');
     search.type = 'search';
-    search.placeholder = 'Search causes…';
+    search.placeholder = kind === 'root_category' ? 'Search root categories…' : 'Search root causes…';
     const list = node('div', undefined, 'nq-column-filter-list');
-    const groups = state.rootCauses.domains.map((domain) => {
-      const heading = node('p', domain.name, 'nq-column-filter-group');
-      heading.style.setProperty('--nq-group', domain.color || '#b8c0c6');
-      list.append(heading);
-      const items = [['', 'No cause'], ...domain.causes.map((cause) => [cause.name, cause.name])].map(([cause, text]) => {
-        const option = node('button', text, 'nq-cause-option');
-        option.type = 'button';
-        option.setAttribute('role', 'option');
-        const selected = domain.name === call.root_domain && cause === (call.root_cause || '');
-        option.classList.toggle('is-selected', selected);
-        option.classList.toggle('is-empty', !cause);
-        option.setAttribute('aria-selected', String(selected));
-        option.addEventListener('click', () => {
-          closeCausePicker();
-          if (!selected) choose(domain.name, cause);
-        });
-        list.append(option);
-        return [option, text, domain.name];
+    const options = [];
+    const option = (name, text, group) => {
+      const button = node('button', text, 'nq-cause-option');
+      button.type = 'button';
+      button.setAttribute('role', 'option');
+      const selected = name.toLowerCase() === current.toLowerCase();
+      button.classList.toggle('is-selected', selected);
+      button.classList.toggle('is-empty', !name);
+      button.setAttribute('aria-selected', String(selected));
+      button.addEventListener('click', () => {
+        closeRootPicker();
+        if (!selected) choose(name);
       });
-      return [heading, items];
+      list.append(button);
+      options.push([button, text, group]);
+      return button;
+    };
+    const groups = [];
+    const heading = (text, color, extra = '') => {
+      const element = node('p', text, `nq-column-filter-group${extra}`);
+      element.style.setProperty('--nq-group', color || '#b8c0c6');
+      list.append(element);
+      return element;
+    };
+    option('', kind === 'root_category' ? 'No root category' : 'No root cause', '');
+    const proposed = proposedValues(call, kind).map((name) => rootItem(kind, name)).filter(Boolean);
+    if (proposed.length) {
+      const element = heading('Proposed by the RCA sources', '#b0234f', ' is-proposed');
+      groups.push([element, proposed.map((item) => option(item.name, item.name, 'proposed'))]);
+    }
+    // A cause follows the domain of the chosen category; a category the domain of the chosen cause.
+    const affinity = kind === 'root_cause' ? rootItem('root_category', call.root_category)?.domain
+      : rootItem('root_cause', call.root_cause)?.domain;
+    rootGroups(items, affinity || '').forEach(([domain, group]) => {
+      const title = domain ? `${domain}${domain === affinity ? ' · same domain' : ''}` : 'Without a domain';
+      const element = heading(title, domainColor(domain));
+      groups.push([element, group.map((item) => option(item.name, item.name, domain))]);
     });
     search.addEventListener('input', () => {
       const text = search.value.trim().toLowerCase();
-      groups.forEach(([heading, items]) => {
-        items.forEach(([option, label, domain]) => {
-          option.hidden = Boolean(text) && !`${domain} ${label}`.toLowerCase().includes(text);
-        });
-        heading.hidden = items.every(([option]) => option.hidden);
+      options.forEach(([button, label, group]) => {
+        button.hidden = Boolean(text) && !`${group} ${label}`.toLowerCase().includes(text);
       });
+      groups.forEach(([element, buttons]) => { element.hidden = buttons.every((button) => button.hidden); });
     });
     search.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        list.querySelector('.nq-cause-option:not([hidden])')?.click();
+        list.querySelector('.nq-cause-option:not([hidden]):not(.is-empty)')?.click();
       }
     });
     popover.append(search, list);
     document.body.append(popover);
-    causePicker = {popover, anchor};
-    placeCausePicker();
-    // Show the current cause; only the list scrolls (scrollIntoView would also scroll the page).
-    const current = list.querySelector('.is-selected');
-    if (current) list.scrollTop = current.offsetTop - list.clientHeight / 2;
+    rootPicker = {popover, anchor};
+    placeRootPicker();
+    // Show the current value; only the list scrolls (scrollIntoView would also scroll the page).
+    const selected = list.querySelector('.is-selected');
+    if (selected) list.scrollTop = selected.offsetTop - list.clientHeight / 2;
     search.focus({preventScroll: true});
   };
-  document.addEventListener('click', (event) => { if (causePicker && !causePicker.popover.contains(event.target)) closeCausePicker(); });
+  document.addEventListener('click', (event) => { if (rootPicker && !rootPicker.popover.contains(event.target)) closeRootPicker(); });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && causePicker) { event.stopPropagation(); causePicker.anchor.focus(); closeCausePicker(); }
+    if (event.key === 'Escape' && rootPicker) { event.stopPropagation(); rootPicker.anchor.focus(); closeRootPicker(); }
   }, true);
   window.addEventListener('scroll', (event) => {
-    if (causePicker && !causePicker.popover.contains(event.target)) window.requestAnimationFrame(placeCausePicker);
+    if (rootPicker && !rootPicker.popover.contains(event.target)) window.requestAnimationFrame(placeRootPicker);
   }, {passive: true, capture: true});
-  window.addEventListener('resize', closeCausePicker);
-  // The root cause of a call: its domain above and the cause of that domain below, or the
-  // suggested root cause below while it has none.
+  window.addEventListener('resize', closeRootPicker);
+  // A picker button for the root category (filled with its domain colour) or cause (outlined).
+  const rootPickerButton = (kind, call) => {
+    const value = call[kind] || '';
+    const empty = kind === 'root_category' ? 'Root category…' : 'Root cause…';
+    const button = node('button', value || empty, 'nq-pill-select nq-root-select nq-cause-picker-button');
+    button.type = 'button';
+    button.setAttribute('aria-haspopup', 'listbox');
+    button.setAttribute('aria-label', `${FIELD_LABELS[kind]} of the call`);
+    if (kind === 'root_category') paintPill(button, optionColor(kind, value));
+    else outlinePill(button, optionColor(kind, value));
+    button.classList.toggle('is-empty', !value);
+    const domain = rootItem(kind, value)?.domain;
+    button.title = `${FIELD_LABELS[kind]}: ${value || 'none'}${domain ? ` (${domain})` : ''}`;
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (rootPicker?.anchor === button) { closeRootPicker(); return; }
+      openRootPicker(button, kind, call, (name) => patchCall(call, {[kind]: name}, button, `${FIELD_LABELS[kind]} updated.`));
+    });
+    return button;
+  };
+  // The recommended root category and cause of a call without them, to accept with one click.
+  const recommendationChip = (call) => {
+    const recommendation = recommendationOf(call);
+    if (!recommendation || call.root_category || call.root_cause) return null;
+    const text = rootLabel(recommendation.category, recommendation.cause);
+    const title = `Recommended: ${text}${recommendation.domain ? ` (${recommendation.domain})` : ''}\n`
+      + `${CONFIDENCE_LABELS[recommendation.confidence] || ''} · ${sourceNames(recommendation.sources)}`;
+    const chip = node(state.user.can_edit ? 'button' : 'span', undefined, `nq-root-suggestion is-${recommendation.confidence}`);
+    chip.append(node('span', '', 'nq-confidence-dot'), node('span', text));
+    chip.title = state.user.can_edit ? `${title}\nClick to accept it` : title;
+    if (state.user.can_edit) {
+      chip.type = 'button';
+      chip.addEventListener('click', (event) => {
+        event.stopPropagation();
+        patchCall(call, {root_category: recommendation.category, root_cause: recommendation.cause}, chip, 'Recommendation accepted.');
+      });
+    }
+    return chip;
+  };
+  // The root cause of a call: its root category above and its root cause below, each in the colour of its
+  // domain, and the recommended ones while it has none.
   const rootCauseControl = (call) => {
     const wrapper = node('div', undefined, 'nq-root-cell');
-    const suggestion = call.suggested_root_cause;
-    const suggestionNote = () => {
-      if (call.root_domain || !suggestion) return null;
-      if (!state.user.can_edit) return node('span', suggestionText(suggestion), 'nq-root-suggestion');
-      const apply = node('button', suggestionText(suggestion), 'nq-root-suggestion');
-      apply.type = 'button';
-      apply.title = `${suggestionText(suggestion)}\n${suggestion.source === 'comments'
-        ? 'Set this root cause, suggested by the comments of the call' : 'Set this root cause, suggested by the CDR failure classification'}`;
-      apply.addEventListener('click', (event) => {
-        event.stopPropagation();
-        saveRootCause(call, {root_domain: suggestion.domain, root_cause: suggestion.cause}, apply);
-      });
-      return apply;
-    };
-    if (!state.user.can_edit) {
-      const domain = pill('root_domain', call.root_domain, NOT_CLASSIFIED);
-      wrapper.append(domain);
-      if (call.root_domain) {
-        const cause = pill('root_cause', call.root_cause, 'No cause');
-        paintPill(cause, '');
-        wrapper.append(cause);
-      }
-      const note = suggestionNote();
-      if (note) wrapper.append(note);
-      return wrapper;
+    if (state.user.can_edit) wrapper.append(rootPickerButton('root_category', call), rootPickerButton('root_cause', call));
+    else {
+      wrapper.append(pill('root_category', call.root_category, NOT_CLASSIFIED));
+      if (call.root_cause) wrapper.append(pill('root_cause', call.root_cause, NO_CAUSE));
     }
-    const selectOf = (label, entries, current) => {
-      const select = node('select', undefined, 'nq-pill-select nq-root-select');
-      select.setAttribute('aria-label', label);
-      if (current && !entries.some(([value]) => value === current)) entries.push([current, current]);
-      select.append(...entries.map(([value, text]) => {
-        const option = node('option', text);
-        option.value = value;
-        return option;
-      }));
-      select.value = current;
-      select.addEventListener('click', (event) => event.stopPropagation());
-      return select;
-    };
-    const domainSelect = selectOf('Root domain of the call',
-      [['', NOT_CLASSIFIED], ...state.rootCauses.domains.map((item) => [item.name, item.name])], call.root_domain || '');
-    paintPill(domainSelect, optionColor('root_domain', call.root_domain));
-    domainSelect.classList.toggle('is-empty', !call.root_domain);
-    domainSelect.title = `Root Domain: ${call.root_domain || NOT_CLASSIFIED}`;
-    // A new domain starts without a cause: its causes are different.
-    domainSelect.addEventListener('change', () => saveRootCause(call, {root_domain: domainSelect.value, root_cause: ''}, domainSelect));
-    wrapper.append(domainSelect);
-    if (call.root_domain) {
-      // Every domain, in its colour, with its causes: a cause of another domain changes the domain too.
-      const picker = node('button', call.root_cause || 'No cause', 'nq-pill-select nq-root-select nq-cause-picker-button');
-      picker.type = 'button';
-      picker.setAttribute('aria-haspopup', 'listbox');
-      picker.setAttribute('aria-label', 'Root cause of the call');
-      picker.classList.toggle('is-empty', !call.root_cause);
-      picker.title = `Cause: ${rootLabel(call.root_domain, call.root_cause || 'No cause')}`;
-      picker.addEventListener('click', (event) => {
-        event.stopPropagation();
-        if (causePicker?.anchor === picker) { closeCausePicker(); return; }
-        openCausePicker(picker, call, (domain, cause) => saveRootCause(call, {root_domain: domain, root_cause: cause}, picker));
-      });
-      wrapper.append(picker);
-    }
-    const note = suggestionNote();
-    if (note) wrapper.append(note);
+    const chip = recommendationChip(call);
+    if (chip) wrapper.append(chip);
     return wrapper;
   };
   // A team with members is assigned to its members only.
@@ -819,7 +868,8 @@
     ...state.tableColumns.builtin.map((key) => ({key, label: state.optionalColumns[key] || key, sort: key})),
     ...state.tableColumns.cdr.map((name) => ({key: `cdr:${name}`, label: name, sort: `cdr:${name}`})),
   ];
-  const fieldColumns = () => state.fields.filter((field) => field.in_table);
+  // The catalog fields shown as columns; the follow-up ones (status, team, root cause…) have fixed columns.
+  const fieldColumns = () => state.fields.filter((field) => field.in_table && field.source !== 'tracking');
   // The filter of each optional column: CDR uses the CDRs filter, the others filter by their own values.
   const OWN_COLUMN_FILTERS = {cdr: 'datasets'};
   const columnFilterKey = (column) => OWN_COLUMN_FILTERS[column.key] || `column:${column.key}`;
@@ -839,7 +889,7 @@
     header.addEventListener('click', sort);
     header.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); sort(); } });
   };
-  const headerCell = (label, sortKey, filterKey = '') => {
+  const headerCell = (label, sortKey, filterKey = '', section = null) => {
     const cell = node('th', undefined, 'nq-sort-pair nq-dynamic-col');
     const item = node('span', undefined, 'nq-header-item');
     const name = node('span', label);
@@ -847,6 +897,12 @@
     if (filterKey) name.dataset.filter = filterKey;
     item.append(name);
     cell.append(item);
+    // A catalog field shows the colour of its section above its name.
+    if (section) {
+      cell.classList.add('nq-section-col');
+      cell.style.setProperty('--nq-section', section.color);
+      cell.title = `${section.label} · ${label}`;
+    }
     bindSort(name);
     return cell;
   };
@@ -966,37 +1022,24 @@
       anchor.after(cell);
       anchor = cell;
     });
-    anchor = after('root_cause');
+    anchor = after('root_category');
+    const filterable = new Set(filterableFields().map((field) => field.key));
     fieldColumns().forEach((field) => {
-      const filterable = ['list', 'yes_no'].includes(field.type) ? `field:${field.key}` : '';
-      const cell = headerCell(field.label, `field:${field.key}`, filterable);
+      const cell = headerCell(field.label, `field:${field.key}`, filterable.has(field.key) ? `field:${field.key}` : '', sectionOf(field.section));
       anchor.after(cell);
       anchor = cell;
     });
     naturalColumns = [...row.cells].map(columnKeyOf).filter(Boolean);
     applyColumnOrder();
   };
-  const saveFieldValue = async (call, key, value, control) => {
-    if (control) control.disabled = true;
-    try {
-      const detail = await api(`/api/non-qualified-calls/calls/${encodeURIComponent(call.call_key)}`, {
-        method: 'PATCH', body: JSON.stringify({changes: {fields: {[key]: value}}, version: call.version}),
-      });
-      Object.assign(call, detail.call);
-      if (state.detail?.call.call_key === call.call_key) renderDetail(detail);
-      toast(`${historyLabel(`field:${key}`)} updated.`);
-    } catch (error) {
-      toast(error.message, 'error');
-    } finally {
-      if (control) control.disabled = false;
-      loadCalls({quiet: true});
-    }
-  };
-  // A list or Yes / No field is chosen in the row; the other fields are shown and edited in the call.
+  const saveFieldValue = (call, key, value, control) => patchCall(call, {fields: {[key]: value}}, control,
+    `${historyLabel(`field:${key}`)} updated.`);
+  // A list or Yes / No field of the analysts is chosen in the row; the other fields are shown here and
+  // edited in the call; fields from the CDR, the RCA script or derived are read only.
   const fieldCell = (call, field) => {
     const cell = node('td', undefined, 'nq-tracking-cell nq-field-cell');
-    const value = call.fields?.[field.key] || '';
-    if (['list', 'yes_no'].includes(field.type) && state.user.can_edit) {
+    const value = String((field.source === 'user' ? call.fields?.[field.key] : call.values?.[field.key]) ?? '');
+    if (['list', 'yes_no'].includes(field.type) && field.source === 'user' && state.user.can_edit) {
       const select = node('select', undefined, 'nq-pill-select nq-field-select');
       select.setAttribute('aria-label', `${field.label} of the call`);
       const choices = field.type === 'yes_no' ? ['Yes', 'No'] : field.options.map((option) => option.name);
@@ -1109,8 +1152,8 @@
       // The status with the time (and author) of the last change of the call's follow-up.
       const status = tracking('status');
       status.classList.add('nq-tracking-stack');
-      const updated = node('span', call.updated_at ? `Updated ${relativeTime(call.updated_at)}${call.updated_by ? ` by ${call.updated_by}` : ''}` : 'Not followed up yet',
-        'nq-status-updated');
+      const updated = node('span', undefined, 'nq-status-updated');
+      updated.append(statusModeBadge(call), ` ${call.updated_at ? `Updated ${relativeTime(call.updated_at)}${call.updated_by ? ` by ${call.updated_by}` : ''}` : 'Not followed up yet'}`);
       updated.title = call.updated_at ? `Last follow-up by ${call.updated_by || '—'} · ${exactTime(call.updated_at)}` : 'Nobody has changed this call yet';
       status.append(updated);
       const comments = node('td', undefined, 'nq-comments-cell');
@@ -1235,12 +1278,32 @@
       }));
       select.options[0].value = '';
     };
-    fill('nq-bulk-status', 'Set status…', state.options.statuses.map((item) => [item.name, item.name]));
+    fill('nq-bulk-status', 'Set status…', [...state.options.statuses.map((item) => [item.name, item.name]),
+      [AUTO_STATUS, '↺ Back to automatic']]);
     fill('nq-bulk-team', 'Set team…', [[state.unassigned, 'Unassigned'], ...state.options.teams.map((item) => [item.name, item.name])]);
     fill('nq-bulk-assignee', 'Assign to…', [[state.unassigned, 'Unassigned'], ...state.users.map((name) => [name, name])]);
+    // Root categories and causes under their domain.
+    [['nq-bulk-category', 'Set root category…', NOT_CLASSIFIED, state.rootCauses.categories],
+      ['nq-bulk-root', 'Set root cause…', NO_CAUSE, state.rootCauses.causes]].forEach(([id, placeholder, empty, items]) => {
+      const select = $(id);
+      if (!select) return;
+      select.replaceChildren(node('option', placeholder), node('option', empty));
+      select.options[0].value = '';
+      select.options[1].value = state.unassigned;
+      rootGroups(items).forEach(([domain, group]) => {
+        const optgroup = node('optgroup');
+        optgroup.label = domain || 'Without a domain';
+        optgroup.append(...group.map((item) => {
+          const option = node('option', item.name);
+          option.value = item.name;
+          return option;
+        }));
+        select.append(optgroup);
+      });
+    });
     const fieldSelect = $('nq-bulk-field');
     if (fieldSelect) {
-      const choosable = state.fields.filter((field) => ['list', 'yes_no'].includes(field.type));
+      const choosable = state.fields.filter((field) => ['list', 'yes_no'].includes(field.type) && field.source === 'user');
       fieldSelect.hidden = !choosable.length;
       fieldSelect.replaceChildren(node('option', 'Set field…'));
       fieldSelect.options[0].value = '';
@@ -1254,22 +1317,6 @@
           return option;
         }));
         fieldSelect.append(group);
-      });
-    }
-    const root = $('nq-bulk-root');
-    if (root) {
-      root.replaceChildren(node('option', 'Set root cause…'), node('option', NOT_CLASSIFIED));
-      root.options[0].value = '';
-      root.options[1].value = state.unassigned;
-      rootEntries().forEach(([domain, entries]) => {
-        const group = node('optgroup');
-        group.label = domain;
-        group.append(...entries.map(([value, label]) => {
-          const option = node('option', label);
-          option.value = value;
-          return option;
-        }));
-        root.append(group);
       });
     }
   };
@@ -1334,7 +1381,9 @@
       renderPagination(result);
       renderBulk();
       void loadProgress();
+      void loadLifecycle();
       void loadRootCauses();
+      void loadSources();
       void loadRates();
       const first = result.total ? (result.page - 1) * result.page_size + 1 : 0;
       const last = Math.min(result.total, result.page * result.page_size);
@@ -1722,12 +1771,262 @@
   }
   $('nq-root-suggestions').addEventListener('change', () => loadRootCauses());
 
+  // -- lifecycle & phases (Analysis Center) ---------------------------------------------------
+  // A Status Rule in words: "Analysis Status is Finished and Planned Status is not Planned".
+  const conditionText = (condition) => {
+    const label = state.conditionFields[condition.field]?.label || condition.field;
+    const values = condition.values || [];
+    if (condition.op === 'empty') return `${label} is empty`;
+    if (condition.op === 'not_empty') return `${label} is not empty`;
+    const verb = condition.op === 'not_in' ? (values.length > 1 ? 'is not one of' : 'is not') : (values.length > 1 ? 'is one of' : 'is');
+    return `${label} ${verb} ${values.join(', ')}`;
+  };
+  const ruleItems = (rules) => {
+    const items = rules.map((rule, index) => {
+      const item = node('li');
+      item.append(node('span', `${index + 1}`, 'nq-rule-number'), pill('status', rule.status),
+        node('span', ` when ${rule.conditions.map(conditionText).join(' and ')}`));
+      return item;
+    });
+    const fallback = state.options.statuses[0]?.name;
+    if (fallback) {
+      const item = node('li', undefined, 'is-fallback');
+      item.append(node('span', '·', 'nq-rule-number'), pill('status', fallback), node('span', ' when no rule applies'));
+      items.push(item);
+    }
+    return items;
+  };
+  // A bar split in the share of each value, in its colour.
+  const stackedBar = (items, total) => {
+    const bar = node('div', undefined, 'nq-stacked-bar');
+    items.filter((item) => item.count).forEach((item) => {
+      const part = node('span');
+      part.style.flexGrow = String(item.count);
+      part.style.background = item.color || '#d9cfd3';
+      part.title = `${item.label}: ${number(item.count)} · ${percent(item.count, total)}`;
+      bar.append(part);
+    });
+    if (!total) bar.classList.add('is-empty');
+    return bar;
+  };
+  const renderLifecycle = (life) => {
+    const total = life.total;
+    const closed = life.pipeline.filter((item) => item.closed).reduce((sum, item) => sum + item.count, 0);
+    $('nq-life-kpis').replaceChildren(
+      drillCard(kpiCard('Calls', number(total), 'Non-Qualified Calls of the selection', 'total'), {clear: ['status_mode']}),
+      drillCard(kpiCard('Automatic Status', number(life.modes.auto), `${percent(life.modes.auto, total)} follow the Status Rules`, 'team'),
+        {pairs: [['status_mode', 'auto']]}),
+      drillCard(kpiCard('Status by Hand', number(life.modes.manual), `${percent(life.modes.manual, total)} chosen by an analyst`, 'commented'),
+        {pairs: [['status_mode', 'manual']]}),
+      drillCard(kpiCard('Open', number(total - closed), `${percent(total - closed, total)} still in follow-up`, 'open'), {pairs: [['open_only', true]]}),
+      drillCard(kpiCard('Closed', number(closed), `${percent(closed, total)} closed`, 'closed'), {pairs: [['state', 'closed']]}),
+      kpiCard('Stalled', number(life.stalled_total), `Open, no change for ${life.stalled_days}+ days`, 'attended'),
+    );
+    // The pipeline: the open statuses in order, then the closed ones.
+    const steps = [...life.pipeline.filter((item) => !item.closed), ...life.pipeline.filter((item) => item.closed)];
+    const pipeline = $('nq-life-pipeline');
+    pipeline.replaceChildren(stackedBar(steps.map((item) => ({label: item.status, count: item.count, color: item.color})), total));
+    const flow = node('div', undefined, 'nq-pipeline-steps');
+    steps.forEach((item, index) => {
+      if (index && !item.closed) flow.append(node('span', '→', 'nq-pipeline-arrow'));
+      if (item.closed && !steps[index - 1]?.closed && index) flow.append(node('span', '⇒', 'nq-pipeline-arrow is-closing'));
+      const step = node('button', undefined, `nq-pipeline-step${item.closed ? ' is-closed' : ''}`);
+      step.type = 'button';
+      step.style.setProperty('--nq-step', item.color || '#b8c0c6');
+      const filters = currentFilters();
+      step.classList.toggle('is-active', (filters.status || []).length === 1 && filters.status[0] === item.status);
+      step.append(node('span', item.status, 'nq-pipeline-name'), node('strong', number(item.count)),
+        node('span', `${percent(item.count, total)}${item.avg_age_days === null ? '' : ` · ${item.avg_age_days} d old on average`}`, 'nq-kpi-note'));
+      step.title = `Show only the calls ${item.status}`;
+      step.addEventListener('click', () => selectOnly('status', item.status));
+      flow.append(step);
+    });
+    pipeline.append(flow);
+    $('nq-life-rules').replaceChildren(...ruleItems(life.rules || []));
+    // One card per phase field: how its values split the calls.
+    $('nq-life-phases').replaceChildren(...life.phases.map((phase) => {
+      const section = sectionOf(phase.section);
+      const card = node('section', undefined, 'nq-phase-card');
+      card.style.setProperty('--nq-section', section.color);
+      const head = node('header');
+      head.append(sectionTag(phase.section), node('h3', phase.label));
+      const items = [...phase.items.map((item) => ({label: item.value, value: item.value, count: item.count, color: item.color})),
+        {label: 'Empty', value: '', count: phase.empty, color: '#e7dde1'}];
+      const field = `field:${phase.key}`;
+      const rows = node('div', undefined, 'nq-phase-values');
+      items.forEach((item) => {
+        const pairs = [[field, item.value || state.unassigned]];
+        const row = node('button', undefined, 'nq-phase-value');
+        row.type = 'button';
+        row.classList.toggle('is-active', isDrilled(pairs));
+        const swatch = node('span', '', 'nq-swatch');
+        swatch.style.background = item.color || '#d9cfd3';
+        row.append(swatch, node('span', item.label, 'nq-bar-label'), node('strong', number(item.count)),
+          node('span', percent(item.count, total), 'nq-muted'));
+        row.title = `Show only the calls with ${phase.label}: ${item.label}`;
+        row.addEventListener('click', () => drill(pairs));
+        rows.append(row);
+      });
+      card.append(head, stackedBar(items, total), rows);
+      return card;
+    }));
+    if (!life.phases.length) $('nq-life-phases').append(node('p', 'No list field in the Analysis, Implementation or Planning sections.', 'nq-muted'));
+    statsTable($('nq-life-times'), ['Status', 'Average Days', 'Calls Moved Out'],
+      life.time_in_status.map((item) => [item.status, item.avg_days.toFixed(1), number(item.moves)]),
+      {drillRow: (index) => [['status', life.time_in_status[index].status]]});
+    statsTable($('nq-life-moves'), ['From', 'To', 'Times'], life.moves.map((item) => [item.from, item.to, number(item.count)]));
+    $('nq-life-moves').querySelectorAll('tbody td:nth-child(2)').forEach((cell) => cell.classList.remove('nq-number'));
+    $('nq-life-stalled-title').textContent = `Stalled Open Calls · no change for ${life.stalled_days}+ days (${number(life.stalled_total)})`;
+    statsTable($('nq-life-stalled'), ['Status', 'Operator', 'Campaign', 'City', 'Days Without Change', 'Followed Up'],
+      life.stalled.map((item) => [item.status, item.operator || '—', campaignLabel(item.campaign) || '—', item.city || '—',
+        number(item.days), item.followed_up ? 'Yes' : 'Not yet']));
+    // Each stalled call opens on a click.
+    [...$('nq-life-stalled').tBodies[0].rows].forEach((row, index) => {
+      const item = life.stalled[index];
+      if (!item) return;
+      [...row.cells].forEach((cell, position) => { if (position && position !== 4) cell.classList.remove('nq-number'); });
+      row.classList.add('nq-drill-row');
+      row.tabIndex = 0;
+      row.title = 'Open this call';
+      row.addEventListener('click', () => openDetail(item.call_key));
+      row.addEventListener('keydown', (event) => { if (event.key === 'Enter') openDetail(item.call_key); });
+    });
+  };
+  let lifeToken = 0;
+  async function loadLifecycle() {
+    const token = ++lifeToken;
+    try {
+      const life = await api('/api/non-qualified-calls/lifecycle', {method: 'POST', body: JSON.stringify({filters: currentFilters()})});
+      if (token === lifeToken) renderLifecycle(life);
+    } catch (error) {
+      if (token === lifeToken) $('nq-life-kpis').replaceChildren(node('p', error.message, 'nq-muted'));
+    }
+  }
+
+  // -- root cause sources (Analysis Center) ---------------------------------------------------
+  // A category → cause tree of one source; the analysts' choices filter the calls.
+  const hierarchyCard = (title, note, groups, drillable) => {
+    const card = node('section', undefined, 'nq-breakdown nq-hierarchy');
+    card.append(node('h3', title), node('p', note, 'nq-muted nq-hierarchy-note'));
+    const max = Math.max(1, ...groups.map((group) => group.count));
+    if (!groups.length) card.append(node('p', 'No calls.', 'form-note'));
+    groups.forEach((group) => {
+      const category = group.category === '—' ? '' : group.category;
+      const color = drillable ? optionColor('root_category', category) : '';
+      const pairs = drillable ? [['root_category', category || state.unassigned]] : null;
+      card.append(hierarchyRow(group.category === '—' ? (drillable ? NOT_CLASSIFIED : 'No category') : group.category,
+        group.count, max, color, pairs, 'is-category'));
+      group.causes.forEach((item) => {
+        const cause = item.cause === '—' ? '' : item.cause;
+        const causePairs = drillable ? [...pairs, ['root_cause', cause || state.unassigned]] : null;
+        card.append(hierarchyRow(item.cause === '—' ? NO_CAUSE : item.cause, item.count, max, color, causePairs, 'is-cause'));
+      });
+    });
+    return card;
+  };
+  const hierarchyRow = (label, count, max, color, pairs, kind) => {
+    const row = node(pairs ? 'button' : 'div', undefined, `nq-bar nq-hierarchy-row ${kind}${pairs ? '' : ' nq-static-bar'}`);
+    if (pairs) {
+      row.type = 'button';
+      row.classList.toggle('is-active', isDrilled(pairs));
+      row.addEventListener('click', () => drill(pairs));
+      row.title = `${label}: show only these calls; click again to remove the filter`;
+    } else {
+      row.title = label;
+    }
+    const track = node('span', undefined, 'nq-bar-track');
+    const fill = node('span', undefined, 'nq-bar-fill');
+    fill.style.width = `${Math.max(2, (count / max) * 100)}%`;
+    if (color) fill.style.background = color;
+    track.append(fill);
+    row.append(node('span', label, 'nq-bar-label'), track, node('span', number(count), 'nq-bar-count'));
+    return row;
+  };
+  // How the categories one RCA source maps to relate to the Root Categories the analysts selected.
+  const renderMatrix = (insights) => {
+    const matrix = insights.confusion[state.matrixSource] || {rows: [], columns: [], cells: []};
+    const tabs = $('nq-sources-matrix-tabs');
+    tabs.replaceChildren(...[['script', 'RCA Script'], ['netcheck', 'NetCheck']].map(([source, label]) => {
+      const tab = node('button', label, 'nq-rate-tab');
+      tab.type = 'button';
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', String(source === state.matrixSource));
+      tab.classList.toggle('is-active', source === state.matrixSource);
+      tab.addEventListener('click', () => { state.matrixSource = source; renderMatrix(insights); });
+      return tab;
+    }));
+    const table = $('nq-sources-matrix');
+    const head = node('thead');
+    const headRow = node('tr');
+    headRow.append(node('th', `${state.matrixSource === 'script' ? 'RCA Script' : 'NetCheck'} ↓ · Selected →`));
+    matrix.columns.forEach((column) => headRow.append(node('th', column)));
+    head.append(headRow);
+    const body = node('tbody');
+    const highest = Math.max(1, ...matrix.cells.flat());
+    matrix.rows.forEach((name, rowIndex) => {
+      const row = node('tr');
+      row.append(node('th', name));
+      matrix.columns.forEach((column, columnIndex) => {
+        const count = matrix.cells[rowIndex][columnIndex];
+        const cell = node('td', count ? number(count) : '·', `nq-number nq-matrix-cell${name === column ? ' is-match' : ''}`);
+        if (count) cell.style.background = heat(count, highest)[0];
+        cell.title = `${name} → ${column}: ${number(count)} calls${name === column ? ' (the analysts agree)' : ''}`;
+        row.append(cell);
+      });
+      body.append(row);
+    });
+    if (!matrix.rows.length) {
+      const row = node('tr');
+      const cell = node('td', 'No call has both a proposal of this source and a selected root category yet.', 'nq-empty');
+      cell.colSpan = Math.max(2, matrix.columns.length + 1);
+      row.append(cell);
+      body.append(row);
+    }
+    table.replaceChildren(head, body);
+  };
+  const renderSources = (insights) => {
+    const {coverage, agreement} = insights;
+    const results = insights.rca_results || {};
+    $('nq-sources-results').textContent = results.total
+      ? `${number(results.total)} RCA script results · ${number(results.matched)} match calls` : 'No RCA script results imported yet';
+    const rate = (item) => (item.rate === null ? '—' : `${item.rate.toFixed(1)}%`);
+    $('nq-sources-kpis').replaceChildren(
+      kpiCard('Calls', number(coverage.total), 'Non-Qualified Calls of the selection', 'total'),
+      kpiCard('RCA Script', number(coverage.script), `${percent(coverage.script, coverage.total)} have script results`, 'attended'),
+      kpiCard('NetCheck RCA', number(coverage.netcheck), `${percent(coverage.netcheck, coverage.total)} classified by NetCheck`, 'team'),
+      kpiCard('Selected', number(coverage.selected), `${percent(coverage.selected, coverage.total)} have a root category or cause`, 'closed'),
+      kpiCard('Script ↔ Selected', rate(agreement.selected_script), `${number(agreement.selected_script.agree)} of ${number(agreement.selected_script.compared)} calls agree`, 'commented'),
+      kpiCard('NetCheck ↔ Selected', rate(agreement.selected_netcheck), `${number(agreement.selected_netcheck.agree)} of ${number(agreement.selected_netcheck.compared)} calls agree`, 'commented'),
+      kpiCard('Script ↔ NetCheck', rate(agreement.script_netcheck), `${number(agreement.script_netcheck.agree)} of ${number(agreement.script_netcheck.compared)} calls agree`, 'open'),
+    );
+    $('nq-sources-hierarchies').replaceChildren(
+      hierarchyCard('RCA Script', 'Suggested Category → Cause of the script', insights.hierarchies.script, false),
+      hierarchyCard('NetCheck RCA', 'Failure Category → Subcategory of the CDR', insights.hierarchies.netcheck, false),
+      hierarchyCard('Selected by the Analysts', 'Root Category → Root Cause; click to drill down', insights.hierarchies.selected, true),
+    );
+    $('nq-sources-domains').replaceChildren(staticBars('Selected Root Domains', insights.domains.map((item) => ({
+      label: item.domain, count: item.count, color: item.color,
+      pairs: [['root_domain', item.domain === NOT_CLASSIFIED ? state.unassigned : item.domain]],
+    }))));
+    renderMatrix(insights);
+  };
+  let sourcesToken = 0;
+  async function loadSources() {
+    const token = ++sourcesToken;
+    try {
+      const insights = await api('/api/non-qualified-calls/rca/insights', {method: 'POST', body: JSON.stringify({filters: currentFilters()})});
+      if (token === sourcesToken) renderSources(insights);
+    } catch (error) {
+      if (token === sourcesToken) $('nq-sources-kpis').replaceChildren(node('p', error.message, 'nq-muted'));
+    }
+  }
+
   async function loadState() {
     try {
       const payload = await api('/api/non-qualified-calls/state');
       state.options = payload.options;
       state.rootCauses = payload.root_causes || state.rootCauses;
-      state.rootCauseDefaults = payload.root_cause_defaults || [];
+      state.rootCauseDefaults = payload.root_cause_defaults || {domains: [], categories: [], causes: []};
       state.ruleFields = payload.root_cause_rule_fields || {};
       state.defaultRule = payload.default_root_cause_rule || null;
       state.users = payload.users || [];
@@ -1737,6 +2036,19 @@
       state.mainCities = payload.main_cities || [];
       state.fields = payload.fields || [];
       state.fieldTypes = payload.field_types || {};
+      state.fieldSources = payload.field_sources || {};
+      state.trackingRefs = payload.tracking_refs || {};
+      state.rcaRefs = payload.rca_refs || {};
+      state.callFields = payload.call_fields || [];
+      state.sections = payload.sections || [];
+      state.defaultSections = payload.default_sections || [];
+      state.statusRules = payload.status_rules || [];
+      state.defaultStatusRules = payload.default_status_rules || [];
+      state.ruleOperators = payload.rule_operators || {};
+      state.conditionFields = payload.condition_fields || {};
+      state.rcaResults = payload.rca_results || {};
+      state.rcaSources = payload.rca_sources || {};
+      buildDrawerTabs();
       state.tableColumns = payload.table_columns || {builtin: [], cdr: []};
       state.optionalColumns = payload.optional_columns || {};
       state.cdrColumns = payload.cdr_columns || [];
@@ -1891,12 +2203,40 @@
     state.detail = null;
   };
   const selectTab = (name) => {
+    if (!drawer.querySelector(`[data-nq-tab="${CSS.escape(name)}"]`)) name = 'general';
     drawer.querySelectorAll('[data-nq-tab]').forEach((tab) => {
       const active = tab.dataset.nqTab === name;
       tab.classList.toggle('is-active', active);
       tab.setAttribute('aria-selected', String(active));
     });
     drawer.querySelectorAll('[data-nq-panel]').forEach((panel) => { panel.hidden = panel.dataset.nqPanel !== name; });
+  };
+  // One tab per section of the Analysis Center, in its colour, then the call details; the General
+  // tab holds the activity of the call and every other section its own panel of fields.
+  const buildDrawerTabs = () => {
+    const tabs = $('nq-drawer-tabs');
+    const active = tabs.querySelector('.is-active')?.dataset.nqTab || 'general';
+    const tab = (key, label, color) => {
+      const button = node('button', undefined, 'nq-drawer-tab');
+      button.type = 'button';
+      button.setAttribute('role', 'tab');
+      button.dataset.nqTab = key;
+      if (color) button.style.setProperty('--nq-section', color);
+      button.append(node('span', label), node('small', '', 'nq-tab-badge'));
+      button.addEventListener('click', () => selectTab(key));
+      return button;
+    };
+    const sections = state.sections.length ? state.sections : [{key: 'general', label: 'General', color: ''}];
+    tabs.replaceChildren(...sections.map((section) => tab(section.key, section.label, section.color)), tab('details', 'Call Details', ''));
+    $('nq-section-panels').replaceChildren(...sections.filter((section) => section.key !== 'general').map((section) => {
+      const panel = node('section', undefined, 'nq-section-panel');
+      panel.dataset.nqPanel = section.key;
+      panel.hidden = true;
+      panel.style.setProperty('--nq-section', section.color);
+      panel.append(node('div', undefined, 'nq-section-fields'));
+      return panel;
+    }));
+    selectTab(active);
   };
   const timelineChange = (entry) => {
     const item = node('li', undefined, 'nq-event nq-event-change');
@@ -1905,15 +2245,19 @@
     const who = node('strong', entry.changed_by);
     if (entry.field === 'comment_edit') text.append(who, ' edited a comment');
     else if (entry.field === 'comment_delete') text.append(who, ' deleted a comment');
-    else {
+    else if (entry.field === 'status_mode') {
+      text.append(who, entry.new_value === 'auto' ? ' gave the status back to the Status Rules' : ' set the status by hand');
+    } else {
       const kind = entry.field;
-      const emptyLabel = kind.startsWith('root_') ? NOT_CLASSIFIED : 'Unassigned';
-      const historyPill = (value) => {
-        const element = pill(kind, value, emptyLabel);
-        if (kind === 'root_cause') paintPill(element, '');
-        return element;
-      };
-      if (kind.startsWith('field:')) {
+      const emptyLabel = kind === 'root_cause' ? NO_CAUSE : kind.startsWith('root_') ? NOT_CLASSIFIED : 'Unassigned';
+      const historyPill = (value) => pill(kind === 'status_auto' ? 'status' : kind, value, emptyLabel);
+      if (kind === 'status_auto') {
+        // The Status Rules moved the call after a change of its fields.
+        item.classList.add('is-automatic');
+        text.append('The status followed the Status Rules ');
+        if (entry.old_value) text.append('from ', historyPill(entry.old_value), ' ');
+        text.append('to ', historyPill(entry.new_value), ' after a change by ', who);
+      } else if (kind.startsWith('field:')) {
         const field = state.fields.find((item) => item.key === kind.slice(6));
         const fieldPill = (value) => {
           const element = node('span', value || 'empty', `nq-pill${value ? '' : ' is-empty'}`);
@@ -2040,6 +2384,9 @@
       toast(error.message, 'error');
     }
   };
+  // The first list field of a phase section (Analysis, Implementation, Planning) tells the phase of the call.
+  const phaseFields = () => PHASE_SECTIONS.map((key) => state.fields.find((field) => field.section === key && field.type === 'list'
+    && ['user', 'derived'].includes(field.source))).filter(Boolean);
   const renderTracking = (call) => {
     const host = $('nq-drawer-tracking');
     const field = (kind, label) => {
@@ -2048,11 +2395,35 @@
       wrapper.append(state.user.can_edit ? trackingSelect(kind, call) : pill(kind, call[kind]));
       return wrapper;
     };
+    const status = field('status', 'NQ Call Status');
+    status.querySelector('span').append(' ', statusModeBadge(call));
     const updated = node('p', call.updated_by
       ? `Last follow-up by ${call.updated_by} · ${exactTime(call.updated_at)}` : 'Not followed up yet.', 'nq-tracking-note');
-    const root = node('div', undefined, 'nq-tracking-field nq-tracking-root');
-    root.append(node('span', 'Root Cause'), rootCauseControl(call));
-    host.replaceChildren(field('status', 'Status'), field('team', 'Team'), field('assignee', 'Assignee'), root, updated);
+    const rootField = node('div', undefined, 'nq-tracking-field nq-tracking-root');
+    const domain = call.root_domain ? node('span', call.root_domain, 'nq-domain-tag') : null;
+    if (domain) domain.style.setProperty('--nq-section', domainColor(call.root_domain) || '#7b8790');
+    const title = node('span', 'Root Category · Root Cause');
+    if (domain) title.append(' ', domain);
+    rootField.append(title, rootCauseControl(call));
+    // The phases of the call, each in the colour of its section; a click opens the section.
+    const phases = node('div', undefined, 'nq-phase-strip');
+    phaseFields().forEach((phase, index) => {
+      const section = sectionOf(phase.section);
+      if (index) phases.append(node('span', '›', 'nq-phase-arrow'));
+      const value = String(call.values?.[phase.key] || '');
+      const step = node('button', undefined, `nq-phase-step${value ? '' : ' is-empty'}`);
+      step.type = 'button';
+      step.style.setProperty('--nq-section', section.color);
+      const valuePill = node('span', value || 'Not started', 'nq-pill');
+      paintPill(valuePill, optionColorOf(phase, value));
+      if (!value) valuePill.classList.add('is-empty');
+      step.append(node('span', section.label, 'nq-phase-name'), valuePill);
+      step.title = `${phase.label}: ${value || 'empty'} — open ${section.label}`;
+      step.addEventListener('click', () => selectTab(section.key));
+      phases.append(step);
+    });
+    host.replaceChildren(status, field('team', 'Team'), field('assignee', 'Assignee'), rootField,
+      ...(phases.childElementCount ? [phases] : []), updated);
   };
   const DETAIL_FIELDS = [
     ['Service', 'service_label'], ['Result', 'result'], ['Operator', 'operator'], ['Vendor', 'vendor'], ['Campaign', 'campaign'],
@@ -2061,8 +2432,8 @@
     ['Failure Phase', 'failure_phase'],
     ['Failure Technology', 'failure_technology'], ['Failure Classification', 'failure_classification'],
     ['Failure Category', 'failure_category'], ['Failure Subcategory', 'failure_subcategory'],
-    ['Failure Comment', 'failure_comment'], ['Cell ID', 'cell_id'], ['Root Domain', 'root_domain'], ['Root Cause', 'root_cause'],
-    ['JOIN_ID', 'join_id'], ['CDR', 'dataset_name'],
+    ['Failure Comment', 'failure_comment'], ['Cell ID', 'cell_id'], ['Root Domain', 'root_domain'], ['Root Category', 'root_category'],
+    ['Root Cause', 'root_cause'], ['JOIN_ID', 'join_id'], ['CDR', 'dataset_name'],
   ];
   const renderFields = () => {
     const filter = $('nq-field-search').value.trim().toLowerCase();
@@ -2081,7 +2452,7 @@
       $('nq-fields').append(row);
     }
   };
-  // The analysis fields of the call (or Speech sample), edited together and saved with its version.
+  // A field entered by the analysts, edited in its section and saved with the version of the call.
   const fieldInput = (field, value) => {
     let control;
     if (field.type === 'list' || field.type === 'yes_no') {
@@ -2102,7 +2473,7 @@
     } else if (field.type === 'long_text') {
       control = node('textarea');
       control.rows = 3;
-      control.maxLength = 2000;
+      control.maxLength = 20000;
       control.value = value;
     } else {
       control = node('input');
@@ -2117,54 +2488,213 @@
     control.setAttribute('aria-label', field.label);
     return control;
   };
-  const renderAnalysis = (detail) => {
-    const form = $('nq-analysis-form');
-    const call = detail.call;
-    if (!state.fields.length) {
-      form.replaceChildren(node('p', state.user.can_edit
-        ? 'No analysis fields yet: add the fields of your follow-up with Analysis Fields, above the table.'
-        : 'This workspace has no analysis fields.', 'form-note'));
+  // A field from the CDR, the RCA script, the follow-up or derived from the call: shown, never edited.
+  const readonlyValue = (field, value) => {
+    const box = node('div', undefined, 'nq-readonly-value');
+    const text = value === null || value === undefined ? '' : String(value);
+    if (['list', 'yes_no'].includes(field.type) && text) {
+      const element = node('span', text, 'nq-pill');
+      paintPill(element, optionColorOf(field, text));
+      box.append(element);
     } else {
-      const grid = node('div', undefined, 'nq-analysis-grid');
-      state.fields.forEach((field) => {
-        const wrapper = node('label', undefined, `nq-analysis-field is-${field.type}`);
-        const title = node('span', field.label);
-        if (field.required_to_close) title.append(node('small', ' · required to close', 'nq-muted'));
-        if (field.description) wrapper.title = field.description;
-        wrapper.append(title, fieldInput(field, call.fields?.[field.key] || ''));
-        grid.append(wrapper);
-      });
-      const actions = node('div', undefined, 'nq-composer-actions');
-      const note = node('span', '', 'nq-composer-note');
-      const save = node('button', 'Save Analysis', 'nq-primary-action');
-      save.type = 'submit';
-      save.hidden = !state.user.can_edit;
-      actions.append(note, save);
-      form.replaceChildren(grid, actions);
-      form.onsubmit = async (event) => {
-        event.preventDefault();
-        const changes = {};
-        form.querySelectorAll('[data-field-key]').forEach((control) => {
-          if (control.value !== control.dataset.original) changes[control.dataset.fieldKey] = control.value;
-        });
-        if (!Object.keys(changes).length) { note.textContent = 'Nothing to save.'; return; }
-        save.disabled = true;
-        try {
-          const updated = await api(`/api/non-qualified-calls/calls/${encodeURIComponent(call.call_key)}`, {
-            method: 'PATCH', body: JSON.stringify({changes: {fields: changes}, version: call.version}),
-          });
-          renderDetail(updated);
-          selectTab('analysis');
-          toast('Analysis saved.');
-          loadCalls({quiet: true});
-        } catch (error) {
-          note.textContent = '';
-          toast(error.message, 'error');
-        } finally {
-          save.disabled = false;
-        }
-      };
+      box.append(node('span', text || '—', text ? '' : 'nq-muted'));
     }
+    return box;
+  };
+  const changedFields = () => {
+    const changes = {};
+    drawer.querySelectorAll('[data-field-key]').forEach((control) => {
+      if (control.value !== control.dataset.original) changes[control.dataset.fieldKey] = control.value;
+    });
+    return changes;
+  };
+  // Every section tells how many of the fields of the call are still unsaved.
+  const syncUnsaved = () => {
+    const count = Object.keys(changedFields()).length;
+    drawer.querySelectorAll('.nq-section-form .nq-composer-note').forEach((note) => {
+      note.textContent = count ? `${count} unsaved change${count === 1 ? '' : 's'} (Save keeps those of every section)` : '';
+    });
+    drawer.classList.toggle('has-unsaved', count > 0);
+  };
+  const fieldBlock = (field, call) => {
+    const editable = field.source === 'user';
+    const wrapper = node(editable ? 'label' : 'div', undefined, `nq-analysis-field is-${field.type}${editable ? '' : ' is-readonly'}`);
+    const title = node('span', field.label, 'nq-field-title');
+    if (!editable) title.append(node('small', SOURCE_TAGS[field.source] || field.source, `nq-source-tag is-${field.source}`));
+    if (field.required_to_close) title.append(node('small', 'required to close', 'nq-required-tag'));
+    if (field.description) wrapper.title = field.description;
+    wrapper.append(title);
+    if (!editable) {
+      wrapper.append(readonlyValue(field, call.values?.[field.key]));
+      return wrapper;
+    }
+    const value = call.fields?.[field.key] || '';
+    const control = fieldInput(field, value);
+    wrapper.append(control);
+    // A value of the CDR proposed for the empty field (a list only proposes one of its values).
+    let proposal = call.proposals?.[field.key];
+    if (proposal && field.type === 'list') proposal = field.options.find((option) => option.name.toLowerCase() === proposal.toLowerCase())?.name;
+    if (proposal && state.user.can_edit && !value) {
+      const use = node('button', `Use the CDR value: ${proposal}`, 'nq-proposal');
+      use.type = 'button';
+      use.title = `Fill ${field.label} with the ${field.suggest_from} of the CDR; Save keeps it`;
+      use.addEventListener('click', (event) => {
+        event.preventDefault();
+        control.value = proposal;
+        control.dispatchEvent(new Event('change', {bubbles: true}));
+        use.remove();
+      });
+      wrapper.append(use);
+    }
+    return wrapper;
+  };
+  const saveFields = async (call, button) => {
+    const changes = changedFields();
+    if (!Object.keys(changes).length) { toast('Nothing to save.'); return; }
+    button.disabled = true;
+    try {
+      const updated = await api(`/api/non-qualified-calls/calls/${encodeURIComponent(call.call_key)}`, {
+        method: 'PATCH', body: JSON.stringify({changes: {fields: changes}, version: call.version}),
+      });
+      renderDetail(updated);
+      toast('Fields saved.');
+      loadCalls({quiet: true});
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  };
+  // The Root Cause Decision of the RCA section: the selected Root Category and Cause, the recommendation
+  // merged from every source, and what each source (RCA script, NetCheck, comments, previous decisions) proposes.
+  const rootDecisionCard = (call) => {
+    const card = node('section', undefined, 'nq-decision');
+    const head = node('header');
+    head.append(node('h3', 'Root Cause Decision'), node('p', 'The Root Category and Root Cause of the call, chosen independently from the catalog. Accept the recommendation, use what one source proposes or choose any other value.', 'form-note'));
+    const current = node('div', undefined, 'nq-decision-current');
+    const pickers = node('div', undefined, 'nq-root-cell');
+    if (state.user.can_edit) pickers.append(rootPickerButton('root_category', call), rootPickerButton('root_cause', call));
+    else pickers.append(pill('root_category', call.root_category, NOT_CLASSIFIED), pill('root_cause', call.root_cause, NO_CAUSE));
+    current.append(node('span', 'Selected', 'nq-decision-label'), pickers);
+    if (call.root_domain) {
+      const domain = node('span', call.root_domain, 'nq-domain-tag');
+      domain.style.setProperty('--nq-section', domainColor(call.root_domain) || '#7b8790');
+      domain.title = 'The domain of the root category (else of the root cause)';
+      current.append(domain);
+    }
+    card.append(head, current);
+    const recommendation = recommendationOf(call);
+    if (recommendation) {
+      const chosen = (recommendation.category || '') === (call.root_category || '') && (recommendation.cause || '') === (call.root_cause || '');
+      const banner = node('div', undefined, `nq-recommendation is-${recommendation.confidence}${chosen ? ' is-chosen' : ''}`);
+      const body = node('div');
+      const values = node('p');
+      values.append(node('strong', 'Recommended: '), recommendation.category ? pill('root_category', recommendation.category) : '',
+        ' ', recommendation.cause ? pill('root_cause', recommendation.cause) : '');
+      body.append(values, node('span', `${CONFIDENCE_LABELS[recommendation.confidence] || ''} · ${sourceNames(recommendation.sources)}`, 'nq-muted'));
+      banner.append(node('span', '★', 'nq-recommendation-icon'), body);
+      if (chosen) banner.append(node('span', 'Selected', 'nq-recommendation-state'));
+      else if (state.user.can_edit) {
+        const accept = node('button', 'Accept', 'nq-primary-action');
+        accept.type = 'button';
+        accept.addEventListener('click', () => patchCall(call, {root_category: recommendation.category, root_cause: recommendation.cause},
+          accept, 'Recommendation accepted.'));
+        banner.append(accept);
+      }
+      card.append(banner);
+    }
+    const sources = call.rca_recommendation?.sources || [];
+    const cards = node('div', undefined, 'nq-source-cards');
+    sources.forEach((source) => {
+      const item = node('article', undefined, `nq-source-card is-${source.source}`);
+      const title = node('header');
+      title.append(node('strong', source.label || state.rcaSources[source.source] || source.source));
+      if (source.count) title.append(node('span', `${number(source.count)} earlier calls`, 'nq-muted'));
+      item.append(title);
+      if (source.raw_category || source.raw_cause) {
+        item.append(node('p', [source.raw_category, source.raw_cause].filter(Boolean).join(' → '), 'nq-source-raw'));
+      }
+      const mapped = node('p', undefined, 'nq-source-mapped');
+      if (source.category || source.cause) {
+        if (source.category) mapped.append(pill('root_category', source.category));
+        if (source.cause) mapped.append(' ', pill('root_cause', source.cause));
+      } else {
+        mapped.append(node('span', source.domain ? `${source.domain} (no category or cause matches)` : 'Not in the catalog yet: add keywords to map it', 'nq-muted'));
+      }
+      item.append(mapped);
+      const changes = {};
+      if (source.category) changes.root_category = source.category;
+      if (source.cause) changes.root_cause = source.cause;
+      const same = Object.entries(changes).every(([key, value]) => (call[key] || '') === value);
+      if (state.user.can_edit && Object.keys(changes).length && !same) {
+        const use = node('button', 'Use', 'nq-secondary-action');
+        use.type = 'button';
+        use.title = `Set ${Object.values(changes).join(' · ')}`;
+        use.addEventListener('click', () => patchCall(call, changes, use, `${source.label} applied.`));
+        item.append(use);
+      }
+      cards.append(item);
+    });
+    if (!sources.length) cards.append(node('p', 'No RCA source proposes a root cause for this call yet: import the RCA script results or choose the values by hand.', 'form-note'));
+    card.append(node('h4', 'What each source proposes'), cards);
+    // Other columns of the RCA script file.
+    const extras = Object.entries(call.rca || {}).filter(([key, value]) => key.startsWith('extra:') && value);
+    if (extras.length) {
+      const list = node('dl', undefined, 'nq-detail-grid nq-rca-extra');
+      extras.forEach(([key, value]) => list.append(node('dt', key.slice(6)), node('dd', String(value))));
+      card.append(node('h4', 'Other RCA script columns'), list);
+    }
+    return card;
+  };
+  // The fields of every section, each one in its tab; the tabs count the fields filled in.
+  const renderSections = (detail) => {
+    const call = detail.call;
+    state.sections.forEach((section) => {
+      const host = section.key === 'general' ? $('nq-general-fields')
+        : drawer.querySelector(`[data-nq-panel="${CSS.escape(section.key)}"] .nq-section-fields`);
+      if (!host) return;
+      const fields = state.fields.filter((field) => field.section === section.key && field.source !== 'tracking');
+      const editable = fields.filter((field) => field.source === 'user');
+      const parts = section.key === 'rca' ? [rootDecisionCard(call)] : [];
+      if (fields.length) {
+        const form = node('form', undefined, 'nq-analysis-form nq-section-form');
+        if (section.key === 'rca') form.append(node('h4', 'Values of the RCA sources'));
+        const grid = node('div', undefined, 'nq-analysis-grid');
+        grid.append(...fields.map((field) => fieldBlock(field, call)));
+        form.append(grid);
+        if (editable.length && state.user.can_edit) {
+          const actions = node('div', undefined, 'nq-composer-actions');
+          const save = node('button', `Save ${section.label}`, 'nq-primary-action');
+          save.type = 'submit';
+          actions.append(node('span', '', 'nq-composer-note'), save);
+          form.append(actions);
+          form.onsubmit = (event) => { event.preventDefault(); saveFields(call, save); };
+        }
+        parts.push(form);
+      } else if (!['general', 'rca'].includes(section.key)) {
+        parts.push(node('p', state.user.can_edit ? 'No fields in this section yet: add them in Analysis Center › Fields & Sections.'
+          : 'No fields in this section.', 'form-note'));
+      }
+      host.replaceChildren(...parts);
+      const badge = drawer.querySelector(`[data-nq-tab="${CSS.escape(section.key)}"] .nq-tab-badge`);
+      if (!badge) return;
+      let text = '';
+      let complete = false;
+      if (section.key === 'rca') {
+        complete = Boolean(call.root_category || call.root_cause);
+        text = complete ? '✓' : recommendationOf(call) ? '★' : '';
+      } else if (editable.length) {
+        const filled = editable.filter((field) => call.fields?.[field.key]).length;
+        text = `${filled}/${editable.length}`;
+        complete = filled === editable.length;
+      }
+      badge.textContent = text;
+      badge.hidden = !text;
+      badge.classList.toggle('is-complete', complete);
+    });
+    syncUnsaved();
+  };
+  const renderSamples = (detail) => {
     const samples = detail.samples || [];
     $('nq-samples').hidden = !samples.length;
     $('nq-sample-list').replaceChildren(...samples.map((sample) => {
@@ -2177,7 +2707,7 @@
       const failure = node('span', [sample.failure_classification, sample.failure_category].filter(Boolean).join(' · ') || 'Not classified',
         'nq-sample-failure');
       const tracking = node('span', undefined, 'nq-sample-tracking');
-      tracking.append(pill('status', sample.status), node('span', rootLabel(sample.root_domain, sample.root_cause), 'nq-muted'),
+      tracking.append(pill('status', sample.status), node('span', rootLabel(sample.root_category, sample.root_cause), 'nq-muted'),
         node('span', `${number(sample.comment_count)} comments`, 'nq-muted'));
       button.append(head, failure, tracking);
       button.addEventListener('click', () => openDetail(sample.call_key, {keepTab: false}));
@@ -2218,7 +2748,8 @@
     $('nq-drawer-title').textContent = [call.operator, call.campaign && campaignLabel(call.campaign)].filter(Boolean).join(' · ') || 'Call details';
     $('nq-drawer-meta').textContent = [cdrTime(call.start_time), call.city, call.technology, call.test_name].filter((value) => value && value !== '—').join(' · ');
     renderTracking(call);
-    renderAnalysis(detail);
+    renderSections(detail);
+    renderSamples(detail);
     renderVersions(detail);
     const events = [
       ...detail.comments.map((comment) => ({time: comment.created_at, item: timelineComment(comment)})),
@@ -2251,7 +2782,7 @@
     drawer.classList.add('is-open');
     drawer.setAttribute('aria-hidden', 'false');
     backdrop.hidden = false;
-    if (!keepTab) selectTab('activity');
+    if (!keepTab) selectTab('general');
     if (state.detail?.call.call_key !== callKey) {
       $('nq-timeline').replaceChildren(node('li', 'Loading…', 'nq-empty-timeline'));
       $('nq-comment-body').value = '';
@@ -2439,29 +2970,6 @@
     if (state.result) renderRows(state.result);
     renderBulk();
   });
-  [['nq-bulk-status', 'status'], ['nq-bulk-team', 'team'], ['nq-bulk-assignee', 'assignee']].forEach(([id, kind]) => {
-    $(id)?.addEventListener('change', async (event) => {
-      const value = event.target.value;
-      if (!value) return;
-      const target = value === state.unassigned ? '' : value;
-      const label = target || 'Unassigned';
-      event.target.value = '';
-      const count = state.selected.size;
-      const accepted = typeof window.showConfirmDialog === 'function'
-        ? await window.showConfirmDialog(`Set ${HISTORY_LABELS[kind]} to “${label}” for ${number(count)} selected calls?`, {title: 'Change selected calls', confirmLabel: 'Apply'})
-        : window.confirm(`Set ${HISTORY_LABELS[kind]} to “${label}” for ${count} selected calls?`);
-      if (!accepted) return;
-      try {
-        const result = await api('/api/non-qualified-calls/calls/bulk', {
-          method: 'POST', body: JSON.stringify({call_keys: [...state.selected], changes: {[kind]: target}}),
-        });
-        toast(`${number(result.changed)} calls updated.`);
-        loadCalls({quiet: true});
-      } catch (error) {
-        toast(error.message, 'error');
-      }
-    });
-  });
   const confirmBulk = async (message) => (typeof window.showConfirmDialog === 'function'
     ? window.showConfirmDialog(message, {title: 'Change selected calls', confirmLabel: 'Apply'}) : window.confirm(message));
   const bulkChange = async (changes) => {
@@ -2475,13 +2983,24 @@
       toast(error.message, 'error');
     }
   };
-  $('nq-bulk-root')?.addEventListener('change', async (event) => {
-    const value = event.target.value;
-    if (!value) return;
-    event.target.value = '';
-    const [domain = '', cause = ''] = value === state.unassigned ? [] : value.split(ROOT_SEPARATOR);
-    if (!await confirmBulk(`Set the root cause to “${rootLabel(domain, cause)}” for ${number(state.selected.size)} selected calls?`)) return;
-    bulkChange({root_domain: domain, root_cause: cause});
+  // Status (or back to the Status Rules), team, assignee, root category and root cause of the selected calls.
+  [['nq-bulk-status', 'status'], ['nq-bulk-team', 'team'], ['nq-bulk-assignee', 'assignee'], ['nq-bulk-category', 'root_category'],
+    ['nq-bulk-root', 'root_cause']].forEach(([id, kind]) => {
+    $(id)?.addEventListener('change', async (event) => {
+      const value = event.target.value;
+      if (!value) return;
+      event.target.value = '';
+      const count = number(state.selected.size);
+      if (value === AUTO_STATUS) {
+        if (!await confirmBulk(`Give the status of the ${count} selected calls back to the Status Rules?`)) return;
+        bulkChange({status_mode: 'auto'});
+        return;
+      }
+      const target = value === state.unassigned ? '' : value;
+      const empty = kind === 'root_cause' ? NO_CAUSE : kind === 'root_category' ? NOT_CLASSIFIED : 'Unassigned';
+      if (!await confirmBulk(`Set ${HISTORY_LABELS[kind]} to “${target || empty}” for ${count} selected calls?`)) return;
+      bulkChange({[kind]: target});
+    });
   });
   $('nq-bulk-field')?.addEventListener('change', async (event) => {
     const value = event.target.value;
@@ -2505,8 +3024,8 @@
       `Delete the whole history of the ${number(count)} selected calls? Their follow-up and comments stay; the history cannot be recovered.`);
   });
   $('nq-bulk-suggest')?.addEventListener('click', async () => {
-    if (!await confirmBulk(`Label the ${number(state.selected.size)} selected calls without a root cause with their suggested root cause?`)) return;
-    bulkChange({apply_suggestion: true});
+    if (!await confirmBulk(`Give the ${number(state.selected.size)} selected calls without a root category and cause the ones recommended by their RCA sources?`)) return;
+    bulkChange({apply_recommendation: true});
   });
   // Executive Summary and Progress Status of the filtered calls, as on the page, in PowerPoint or Word.
   document.querySelectorAll('[data-nq-document-export]').forEach((button) => button.addEventListener('click', async () => {
@@ -2578,10 +3097,12 @@
   $('nq-drawer-close').addEventListener('click', closeDrawer);
   backdrop.addEventListener('click', closeDrawer);
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && drawer.classList.contains('is-open') && !optionsDialog?.open && !$('nq-root-dialog')?.open
-      && !$('nq-rule-dialog')?.open && !$('nq-fields-dialog')?.open && !$('nq-columns-dialog')?.open) closeDrawer();
+    if (event.key === 'Escape' && drawer.classList.contains('is-open') && !document.querySelector('dialog[open]')) closeDrawer();
   });
   drawer.querySelectorAll('[data-nq-tab]').forEach((tab) => tab.addEventListener('click', () => selectTab(tab.dataset.nqTab)));
+  ['input', 'change'].forEach((type) => drawer.addEventListener(type, (event) => {
+    if (event.target.matches?.('[data-field-key]')) syncUnsaved();
+  }));
   $('nq-field-search').addEventListener('input', renderFields);
   const composer = $('nq-composer');
   const composerBody = $('nq-comment-body');
@@ -2699,74 +3220,137 @@
     input.setAttribute('aria-label', placeholder);
     return input;
   };
-  const causeRow = (cause = {name: '', keywords: []}) => {
-    const row = node('li', undefined, 'nq-option-row nq-root-cause');
-    row.dataset.previous = cause.name || '';
-    row.append(textInput(cause.name, 'Cause name', 'nq-root-name'), textInput((cause.keywords || []).join(', '), 'Keywords', 'nq-root-keywords'));
-    iconButtons(row, row, () => row.remove());
-    return row;
+  // The domains of the catalog being edited, with the name each one had when the dialog opened.
+  const catalogDomains = () => [...$('nq-root-domains').children].map((row) => ({
+    name: row.querySelector('.nq-root-name').value.trim(), color: row.querySelector('input[type="color"]').value,
+  })).filter((domain) => domain.name);
+  // A select of the domains, painted in the colour of the chosen one.
+  const domainSelect = (current) => {
+    const select = node('select', undefined, 'nq-domain-select nq-pill-select');
+    select.setAttribute('aria-label', 'Domain');
+    select.dataset.current = current || '';
+    const paint = () => paintPill(select, catalogDomains().find((domain) => domain.name === select.value)?.color || '');
+    select.addEventListener('change', () => { select.dataset.current = select.value; paint(); });
+    select.refresh = () => {
+      const names = catalogDomains().map((domain) => domain.name);
+      const value = select.dataset.current;
+      select.replaceChildren(node('option', 'No domain'), ...names.map((name) => {
+        const option = node('option', name);
+        option.value = name;
+        return option;
+      }));
+      select.options[0].value = '';
+      select.value = names.includes(value) ? value : '';
+      paint();
+    };
+    return select;
   };
-  const domainBlock = (domain = {name: '', color: '#6a63c9', keywords: [], causes: []}) => {
-    const block = node('li', undefined, 'nq-root-domain');
-    block.dataset.previous = domain.name || '';
-    const row = node('div', undefined, 'nq-option-row');
+  const refreshDomainSelects = () => rootDialog.querySelectorAll('.nq-domain-select').forEach((select) => select.refresh());
+  const domainRow = (domain = {name: '', color: '#6a63c9', keywords: []}) => {
+    const row = node('li', undefined, 'nq-option-row nq-catalog-row');
+    row.dataset.previous = domain.name || '';
+    row.dataset.current = domain.name || '';
     const color = node('input');
     color.type = 'color';
     color.value = domain.color || '#6a63c9';
     color.setAttribute('aria-label', 'Colour');
-    row.append(color, textInput(domain.name, 'Domain name', 'nq-root-name'), textInput((domain.keywords || []).join(', '), 'Keywords', 'nq-root-keywords'));
-    iconButtons(row, block, () => block.remove());
-    const causes = node('ul', undefined, 'nq-root-causes');
-    causes.append(...(domain.causes || []).map((cause) => causeRow(cause)));
-    const add = node('button', 'Add Cause', 'nq-secondary-action');
-    add.type = 'button';
-    add.addEventListener('click', () => {
-      const cause = causeRow();
-      causes.append(cause);
-      cause.querySelector('input').focus();
+    const name = textInput(domain.name, 'Domain name', 'nq-root-name');
+    // Renaming a domain renames it in the categories and causes of the dialog.
+    name.addEventListener('change', () => {
+      const before = row.dataset.current;
+      const after = name.value.trim();
+      rootDialog.querySelectorAll('.nq-domain-select').forEach((select) => { if (before && select.dataset.current === before) select.dataset.current = after; });
+      row.dataset.current = after;
+      refreshDomainSelects();
     });
-    block.append(row, causes, add);
-    return block;
+    color.addEventListener('input', refreshDomainSelects);
+    row.append(color, name, textInput((domain.keywords || []).join(', '), 'Keywords', 'nq-root-keywords'));
+    iconButtons(row, row, () => { row.remove(); refreshDomainSelects(); countCatalog(); });
+    return row;
   };
-  const collectRootCauses = () => [...$('nq-root-domains').children].map((block) => {
-    const row = block.querySelector(':scope > .nq-option-row');
-    return {
-      name: row.querySelector('.nq-root-name').value.trim(), previous: block.dataset.previous,
-      color: row.querySelector('input[type="color"]').value, keywords: row.querySelector('.nq-root-keywords').value,
-      causes: [...block.querySelectorAll('.nq-root-cause')].map((cause) => ({
-        name: cause.querySelector('.nq-root-name').value.trim(), previous: cause.dataset.previous,
-        keywords: cause.querySelector('.nq-root-keywords').value,
-      })),
-    };
+  const entryRow = (kind, item = {name: '', domain: '', keywords: []}) => {
+    const row = node('li', undefined, 'nq-option-row nq-catalog-row');
+    row.dataset.previous = item.name || '';
+    const select = domainSelect(item.domain);
+    row.append(textInput(item.name, kind === 'categories' ? 'Root category name' : 'Root cause name', 'nq-root-name'), select,
+      textInput((item.keywords || []).join(', '), 'Keywords', 'nq-root-keywords'));
+    iconButtons(row, row, () => { row.remove(); countCatalog(); });
+    return row;
+  };
+  const CATALOG_LISTS = {domains: 'nq-root-domains', categories: 'nq-root-categories', causes: 'nq-root-causes'};
+  const CATALOG_ADD = {domains: 'Add Domain', categories: 'Add Root Category', causes: 'Add Root Cause'};
+  let catalogTab = 'categories';
+  const countCatalog = () => rootDialog.querySelectorAll('[data-nq-catalog-tab]').forEach((tab) => {
+    tab.querySelector('small').textContent = `(${$(CATALOG_LISTS[tab.dataset.nqCatalogTab]).children.length})`;
   });
+  const selectCatalogTab = (name) => {
+    catalogTab = name;
+    rootDialog.querySelectorAll('[data-nq-catalog-tab]').forEach((tab) => {
+      const active = tab.dataset.nqCatalogTab === name;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', String(active));
+    });
+    Object.entries(CATALOG_LISTS).forEach(([key, id]) => { $(id).hidden = key !== name; });
+    $('nq-root-add').textContent = CATALOG_ADD[name];
+    filterCatalog();
+  };
+  const filterCatalog = () => {
+    const query = $('nq-root-search').value.trim().toLowerCase();
+    $(CATALOG_LISTS[catalogTab]).querySelectorAll(':scope > li').forEach((row) => {
+      const text = [...row.querySelectorAll('input[type="text"], select')].map((control) => control.value).join(' ').toLowerCase();
+      row.hidden = Boolean(query) && !text.includes(query);
+    });
+  };
+  const collectCatalogRows = (kind) => [...$(CATALOG_LISTS[kind]).children].map((row) => ({
+    name: row.querySelector('.nq-root-name').value.trim(), previous: row.dataset.previous,
+    keywords: row.querySelector('.nq-root-keywords').value,
+    ...(kind === 'domains' ? {color: row.querySelector('input[type="color"]').value}
+      : {domain: row.querySelector('.nq-domain-select').value}),
+  }));
+  const fillCatalog = (catalog) => {
+    $('nq-root-domains').replaceChildren(...catalog.domains.map((domain) => domainRow(domain)));
+    $('nq-root-categories').replaceChildren(...catalog.categories.map((item) => entryRow('categories', item)));
+    $('nq-root-causes').replaceChildren(...catalog.causes.map((item) => entryRow('causes', item)));
+    refreshDomainSelects();
+    countCatalog();
+  };
   if (rootDialog) {
     $('nq-root-open').addEventListener('click', () => {
       $('nq-root-rule-text').textContent = ruleText(state.rootCauses.rule);
-      $('nq-root-domains').replaceChildren(...state.rootCauses.domains.map((domain) => domainBlock(domain)));
+      fillCatalog(state.rootCauses);
       $('nq-root-require').checked = Boolean(state.rootCauses.require_to_close);
       $('nq-root-error').textContent = '';
+      $('nq-root-search').value = '';
+      selectCatalogTab('categories');
       rootDialog.showModal();
     });
+    rootDialog.querySelectorAll('[data-nq-catalog-tab]').forEach((tab) => tab.addEventListener('click', () => selectCatalogTab(tab.dataset.nqCatalogTab)));
+    $('nq-root-search').addEventListener('input', filterCatalog);
     $('nq-root-cancel').addEventListener('click', () => rootDialog.close());
-    // Adds the default domains and causes that are missing; existing ones keep their keywords.
+    // Adds the default domains, root categories and root causes that are missing; existing ones keep their keywords.
     $('nq-root-defaults').addEventListener('click', () => {
-      const list = $('nq-root-domains');
-      const nameOf = (element) => element.querySelector('.nq-root-name').value.trim().toLowerCase();
+      const defaults = state.rootCauseDefaults || {domains: [], categories: [], causes: []};
       let added = 0;
-      (state.rootCauseDefaults || []).forEach((domain) => {
-        const block = [...list.children].find((item) => nameOf(item.querySelector(':scope > .nq-option-row')) === domain.name.toLowerCase());
-        if (!block) { list.append(domainBlock(domain)); added += 1 + domain.causes.length; return; }
-        const causes = block.querySelector('.nq-root-causes');
-        const names = new Set([...causes.children].map(nameOf));
-        domain.causes.filter((cause) => !names.has(cause.name.toLowerCase())).forEach((cause) => { causes.append(causeRow(cause)); added += 1; });
+      Object.entries(CATALOG_LISTS).forEach(([kind, id]) => {
+        const list = $(id);
+        const names = new Set([...list.querySelectorAll('.nq-root-name')].map((input) => input.value.trim().toLowerCase()));
+        (defaults[kind] || []).filter((item) => !names.has(item.name.toLowerCase())).forEach((item) => {
+          list.append(kind === 'domains' ? domainRow(item) : entryRow(kind, item));
+          added += 1;
+        });
       });
+      refreshDomainSelects();
+      countCatalog();
+      filterCatalog();
       $('nq-root-error').style.color = 'var(--nq-muted)';
-      $('nq-root-error').textContent = added ? `${added} default values added: review them and Save.` : 'Every default domain and cause is already in the list.';
+      $('nq-root-error').textContent = added ? `${added} default values added: review them and Save.` : 'Every default value is already in the catalog.';
     });
     $('nq-root-add').addEventListener('click', () => {
-      const block = domainBlock();
-      $('nq-root-domains').append(block);
-      block.querySelector('.nq-root-name').focus();
+      const row = catalogTab === 'domains' ? domainRow() : entryRow(catalogTab);
+      $(CATALOG_LISTS[catalogTab]).append(row);
+      if (catalogTab !== 'domains') row.querySelector('.nq-domain-select').refresh();
+      countCatalog();
+      row.querySelector('.nq-root-name').focus();
     });
     $('nq-root-form').addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -2774,10 +3358,11 @@
       save.disabled = true;
       try {
         await api('/api/non-qualified-calls/root-causes', {
-          method: 'PUT', body: JSON.stringify({domains: collectRootCauses(), require_to_close: $('nq-root-require').checked}),
+          method: 'PUT', body: JSON.stringify({domains: collectCatalogRows('domains'), categories: collectCatalogRows('categories'),
+            causes: collectCatalogRows('causes'), require_to_close: $('nq-root-require').checked}),
         });
         rootDialog.close();
-        toast('Root causes saved.');
+        toast('Root cause catalog saved.');
         await loadState();
         if (state.detail) openDetail(state.detail.call.call_key, {keepTab: true});
       } catch (error) {
@@ -2788,9 +3373,16 @@
       }
     });
   }
-  // -- analysis fields dialog ---------------------------------------------------------------
+  // -- fields & sections dialog ---------------------------------------------------------------
   const fieldsDialog = $('nq-fields-dialog');
-  const fieldValueRow = (option = {name: '', color: ''}) => {
+  let fieldSection = '';
+  // The sections as edited in the dialog (name and colour), in their fixed order.
+  const editedSections = () => [...$('nq-sections-editor').querySelectorAll('[data-section-key]')].map((row) => ({
+    key: row.dataset.sectionKey, label: row.querySelector('input[type="text"]').value.trim() || row.dataset.sectionKey,
+    color: row.querySelector('input[type="color"]').value,
+  }));
+  const editedSection = (key) => editedSections().find((section) => section.key === key) || sectionOf(key);
+  const fieldValueRow = (option = {name: '', color: '', keywords: []}, withKeywords = false) => {
     const row = node('li', undefined, 'nq-option-row nq-field-value');
     row.dataset.previous = option.name || '';
     const color = node('input');
@@ -2800,87 +3392,283 @@
     color.title = 'Colour of the value';
     color.addEventListener('input', () => { color.dataset.chosen = '1'; });
     row.append(color, textInput(option.name, 'Value', 'nq-root-name'));
+    if (withKeywords) {
+      const keywords = textInput((option.keywords || []).join(', '), 'Keywords found in the call values', 'nq-root-keywords');
+      keywords.title = 'The call gets this value when one of these keywords is in the call values the field reads ("a+b" needs both)';
+      row.append(keywords);
+    }
     iconButtons(row, row, () => row.remove());
     return row;
   };
-  const fieldDefinition = (field = {key: '', label: '', type: 'list', options: [], in_table: false, in_summary: false,
-    required_to_close: false, description: ''}) => {
+  // Moves a field past the next visible one, so a filtered list moves as it is shown.
+  const moveVisible = (item, offset) => {
+    let sibling = offset < 0 ? item.previousElementSibling : item.nextElementSibling;
+    while (sibling && sibling.hidden) sibling = offset < 0 ? sibling.previousElementSibling : sibling.nextElementSibling;
+    if (sibling) (offset < 0 ? sibling.before(item) : sibling.after(item));
+  };
+  const selectOf = (className, label, entries, value) => {
+    const select = node('select', undefined, className);
+    select.setAttribute('aria-label', label);
+    select.append(...entries.map(([key, text]) => {
+      const option = node('option', text);
+      option.value = key;
+      return option;
+    }));
+    select.value = value;
+    return select;
+  };
+  const flagToggle = (name, label, checked, title) => {
+    const wrapper = node('label', undefined, 'nq-toggle nq-flag');
+    const box = node('input');
+    box.type = 'checkbox';
+    box.dataset.flag = name;
+    box.checked = Boolean(checked);
+    wrapper.title = title;
+    wrapper.append(box, ` ${label}`);
+    return wrapper;
+  };
+  // Where a field of each source reads its value: call fields, CDR columns or RCA script columns.
+  const refChoices = (source) => (source === 'rca' ? Object.entries(state.rcaRefs)
+    : source === 'cdr' ? [...state.callFields.map((name) => [name, name]), ...state.cdrColumns.map((name) => [`column:${name}`, `CDR column ${name}`])]
+      : source === 'derived' ? state.callFields.map((name) => [name, name]) : []);
+  const fieldDefinition = (field = {key: '', label: '', type: 'list', source: 'user', source_ref: '', section: fieldSection || 'analysis',
+    options: [], in_table: false, in_export: true, in_summary: false, required_to_close: false, suggest_from: '', description: ''}) => {
     const block = node('li', undefined, 'nq-root-domain nq-field-def');
     block.dataset.key = field.key || '';
+    const tracking = field.source === 'tracking';
     const row = node('div', undefined, 'nq-option-row');
-    const type = node('select', undefined, 'nq-field-type');
-    type.setAttribute('aria-label', 'Type');
-    Object.entries(state.fieldTypes).forEach(([value, label]) => {
-      const option = node('option', label);
-      option.value = value;
-      type.append(option);
+    const name = textInput(field.label, 'Field name', 'nq-root-name');
+    const section = selectOf('nq-field-section nq-pill-select', 'Section', editedSections().map((item) => [item.key, item.label]), field.section);
+    const sources = tracking ? [['tracking', `Follow-up: ${state.trackingRefs[field.source_ref] || field.source_ref}`]]
+      : Object.entries(state.fieldSources).filter(([key]) => key !== 'tracking');
+    const source = selectOf('nq-field-source', 'Source of the value', sources, field.source);
+    // A saved field keeps its source; a new one chooses it.
+    source.disabled = tracking || Boolean(field.key);
+    source.title = source.disabled ? 'Where the value comes from (fixed once the field is saved)' : 'Where the value comes from';
+    const type = selectOf('nq-field-type', 'Type', Object.entries(state.fieldTypes), field.type || 'text');
+    type.disabled = tracking;
+    row.append(name, section, source, type);
+    // Every field moves; only the follow-up fields stay.
+    [['↑', 'Move up', () => moveVisible(block, -1)], ['↓', 'Move down', () => moveVisible(block, 1)],
+      ['×', tracking ? 'The follow-up fields cannot be removed' : 'Remove', () => block.remove()]].forEach(([label, title, action], index) => {
+      const button = node('button', label, 'nq-icon-action');
+      button.type = 'button';
+      button.title = title;
+      button.setAttribute('aria-label', title);
+      button.disabled = tracking && index === 2;
+      button.addEventListener('click', action);
+      row.append(button);
     });
-    type.value = field.type || 'text';
-    row.append(textInput(field.label, 'Field name', 'nq-root-name'), type);
-    iconButtons(row, block, () => block.remove());
+    const flags = node('div', undefined, 'nq-field-flags');
+    flags.append(
+      flagToggle('in_table', 'Table column', tracking || field.in_table, tracking ? 'Always a column of the table' : 'Show the field as a column of the Calls table'),
+      flagToggle('in_export', 'Excel', field.in_export !== false, 'Export the field to Excel, in the order of this list'),
+      flagToggle('in_summary', 'Summary breakdown', field.in_summary, 'Count the calls of each value in the Summary (lists and Yes / No)'),
+      flagToggle('required_to_close', 'Required to close', field.required_to_close, 'A call cannot move to a closed status while this field is empty'),
+    );
+    flags.querySelector('[data-flag="in_table"]').disabled = tracking;
+    const more = node('details', undefined, 'nq-field-more');
+    const summary = node('summary', 'Values and settings');
+    const ref = node('label', undefined, 'nq-field-setting nq-field-ref');
+    const refInput = textInput(field.source_ref, 'Value from', 'nq-field-ref-input');
+    const listId = `nq-ref-list-${Math.random().toString(36).slice(2, 9)}`;
+    const datalist = node('datalist');
+    datalist.id = listId;
+    refInput.setAttribute('list', listId);
+    ref.append(node('span', 'Value from'), refInput, datalist);
+    const suggest = node('label', undefined, 'nq-field-setting');
+    suggest.append(node('span', 'Propose the CDR value of'), selectOf('nq-field-suggest', 'Propose the CDR value of',
+      [['', 'Nothing'], ...state.callFields.map((item) => [item, item])], field.suggest_from || ''));
     const values = node('div', undefined, 'nq-field-values');
     const list = node('ul', undefined, 'nq-root-causes');
-    list.append(...(field.options || []).map((option) => fieldValueRow(option)));
     const add = node('button', 'Add Value', 'nq-secondary-action');
     add.type = 'button';
     add.addEventListener('click', () => {
-      const item = fieldValueRow();
+      const item = fieldValueRow(undefined, source.value === 'derived');
       list.append(item);
       item.querySelector('.nq-root-name').focus();
     });
     values.append(list, add);
-    const flags = node('div', undefined, 'nq-field-flags');
-    const flag = (name, label, checked, title) => {
-      const wrapper = node('label', undefined, 'nq-toggle');
-      const box = node('input');
-      box.type = 'checkbox';
-      box.dataset.flag = name;
-      box.checked = Boolean(checked);
-      wrapper.title = title;
-      wrapper.append(box, ` ${label}`);
-      return wrapper;
-    };
-    flags.append(
-      flag('in_table', 'Column in the table', field.in_table, 'Show the field as a column of the Calls table'),
-      flag('in_summary', 'Breakdown in the Summary', field.in_summary, 'Count the calls of each value in the Summary (lists and Yes / No)'),
-      flag('required_to_close', 'Required to close', field.required_to_close, 'A call cannot move to a closed status while this field is empty'),
-    );
     const description = textInput(field.description, 'Description (shown when hovering the field)', 'nq-field-description');
+    more.append(summary, ref, suggest, values, description);
     const sync = () => {
-      values.hidden = type.value !== 'list';
-      const summary = flags.querySelector('[data-flag="in_summary"]');
-      summary.disabled = !['list', 'yes_no'].includes(type.value);
-      if (summary.disabled) summary.checked = false;
+      const kind = source.value;
+      if (kind === 'derived') type.value = 'list';
+      type.disabled = tracking || kind === 'derived';
+      ref.hidden = tracking || kind === 'user';
+      ref.querySelector('span').textContent = kind === 'derived' ? 'Call values read (comma separated)' : kind === 'rca' ? 'RCA script column' : 'CDR value';
+      datalist.replaceChildren(...refChoices(kind).map(([value, text]) => {
+        const option = node('option', text);
+        option.value = value;
+        return option;
+      }));
+      suggest.hidden = kind !== 'user';
+      const lists = type.value === 'list' && ['user', 'derived'].includes(kind);
+      values.hidden = !lists;
+      const keywords = kind === 'derived';
+      // The value rows show keywords only for derived lists.
+      [...list.children].forEach((item) => {
+        if (Boolean(item.querySelector('.nq-root-keywords')) !== keywords) {
+          const option = {name: item.querySelector('.nq-root-name').value, keywords: item.querySelector('.nq-root-keywords')?.value.split(',') || [],
+            color: item.querySelector('input[type="color"]').dataset.chosen ? item.querySelector('input[type="color"]').value : ''};
+          const replacement = fieldValueRow(option, keywords);
+          replacement.dataset.previous = item.dataset.previous;
+          item.replaceWith(replacement);
+        }
+      });
+      const summaryBox = flags.querySelector('[data-flag="in_summary"]');
+      summaryBox.disabled = !['list', 'yes_no'].includes(type.value);
+      if (summaryBox.disabled) summaryBox.checked = false;
+      const required = flags.querySelector('[data-flag="required_to_close"]');
+      required.disabled = kind !== 'user';
+      if (required.disabled) required.checked = false;
+      const count = list.children.length;
+      summary.textContent = lists ? `Values (${count}) and settings` : 'Settings';
+      const color = editedSection(section.value).color;
+      block.style.setProperty('--nq-section', color);
+      paintPill(section, color);
+      block.dataset.section = section.value;
+      block.dataset.source = kind;
     };
-    type.addEventListener('change', sync);
+    list.append(...(field.options || []).map((option) => fieldValueRow(option, field.source === 'derived')));
+    [type, source, section].forEach((control) => control.addEventListener('change', () => { sync(); filterFieldDefs(); }));
+    list.addEventListener('click', () => window.requestAnimationFrame(sync));
+    add.addEventListener('click', () => window.requestAnimationFrame(sync));
     sync();
-    block.append(row, values, flags, description);
+    // New fields open their settings at once.
+    more.open = !field.key;
+    block.append(row, flags, more);
     return block;
   };
   const collectFields = () => [...$('nq-field-defs').children].map((block) => ({
     key: block.dataset.key || '',
     label: block.querySelector(':scope > .nq-option-row .nq-root-name').value.trim(),
+    section: block.querySelector('.nq-field-section').value,
+    source: block.querySelector('.nq-field-source').value,
+    source_ref: block.querySelector('.nq-field-ref-input').value.trim(),
     type: block.querySelector('.nq-field-type').value,
     options: [...block.querySelectorAll('.nq-field-value')].map((row) => {
       const color = row.querySelector('input[type="color"]');
       return {name: row.querySelector('.nq-root-name').value.trim(), color: color.dataset.chosen ? color.value : '',
-        previous: row.dataset.previous};
+        previous: row.dataset.previous, keywords: row.querySelector('.nq-root-keywords')?.value || ''};
     }).filter((option) => option.name),
     in_table: block.querySelector('[data-flag="in_table"]').checked,
+    in_export: block.querySelector('[data-flag="in_export"]').checked,
     in_summary: block.querySelector('[data-flag="in_summary"]').checked,
     required_to_close: block.querySelector('[data-flag="required_to_close"]').checked,
+    suggest_from: block.querySelector('.nq-field-suggest').value,
     description: block.querySelector('.nq-field-description').value.trim(),
   }));
+  // The section chips and the text filter show part of the fields; the order stays the order of every field.
+  const filterFieldDefs = () => {
+    const query = $('nq-field-filter').value.trim().toLowerCase();
+    const blocks = [...$('nq-field-defs').children];
+    blocks.forEach((block) => {
+      const label = block.querySelector('.nq-root-name').value.toLowerCase();
+      block.hidden = Boolean(fieldSection && block.dataset.section !== fieldSection) || Boolean(query && !label.includes(query));
+    });
+    const counts = {};
+    blocks.forEach((block) => { counts[block.dataset.section] = (counts[block.dataset.section] || 0) + 1; });
+    $('nq-field-section-chips').replaceChildren(...[{key: '', label: 'All', color: ''}, ...editedSections()].map((section) => {
+      const chip = node('button', `${section.label} (${section.key ? counts[section.key] || 0 : blocks.length})`, 'nq-section-chip');
+      chip.type = 'button';
+      chip.setAttribute('role', 'tab');
+      chip.setAttribute('aria-selected', String(fieldSection === section.key));
+      chip.classList.toggle('is-active', fieldSection === section.key);
+      if (section.color) chip.style.setProperty('--nq-section', section.color);
+      chip.addEventListener('click', () => { fieldSection = section.key; filterFieldDefs(); });
+      return chip;
+    }));
+  };
+  const fillSectionsEditor = (sections) => {
+    $('nq-sections-editor').replaceChildren(...sections.map((section) => {
+      const row = node('div', undefined, 'nq-option-row nq-section-row');
+      row.dataset.sectionKey = section.key;
+      const color = node('input');
+      color.type = 'color';
+      color.value = section.color;
+      color.setAttribute('aria-label', `Colour of ${section.label}`);
+      const name = textInput(section.label, 'Section name');
+      name.maxLength = 40;
+      row.append(color, name);
+      // Renamed or recoloured sections show at once in the fields.
+      [color, name].forEach((control) => control.addEventListener('input', () => {
+        $('nq-field-defs').querySelectorAll('.nq-field-section').forEach((select) => {
+          const option = [...select.options].find((item) => item.value === section.key);
+          if (option) option.textContent = name.value.trim() || section.key;
+          select.dispatchEvent(new Event('change'));
+        });
+        filterFieldDefs();
+      }));
+      return row;
+    }));
+  };
+  const fillFieldsDialog = () => {
+    fillSectionsEditor(state.sections);
+    $('nq-field-defs').replaceChildren(...state.fields.map((field) => fieldDefinition(field)));
+    $('nq-field-filter').value = '';
+    filterFieldDefs();
+  };
+  // A catalog workbook is previewed first; Import applies it.
+  let catalogFile = null;
+  const previewList = (label, names) => (names.length ? `${label}: ${names.slice(0, 12).join(', ')}${names.length > 12 ? ` +${names.length - 12}` : ''}` : '');
+  const showCatalogPreview = (preview) => {
+    const host = $('nq-catalog-preview');
+    const lines = [
+      `${preview.format === 'meeting' ? 'Field list of the meeting workbook' : 'Catalog workbook'} with ${number(preview.fields)} fields after the import.`,
+      previewList('New fields', preview.added), previewList('Changed fields', preview.changed),
+      previewList('New domains', preview.root_added.domains), previewList('New root categories', preview.root_added.categories),
+      previewList('New root causes', preview.root_added.causes), previewList('New statuses', preview.statuses_added),
+      previewList('New teams', preview.teams_added), preview.rules ? `${number(preview.rules)} Status Rules replace the current ones.` : '',
+      preview.sections ? 'The section names and colours of the workbook are taken.' : '',
+    ].filter(Boolean);
+    const list = node('ul');
+    list.append(...lines.map((line) => node('li', line)));
+    const actions = node('div', undefined, 'nq-composer-actions');
+    const cancel = node('button', 'Cancel', 'nq-secondary-action');
+    const apply = node('button', 'Import', 'nq-primary-action');
+    cancel.type = apply.type = 'button';
+    cancel.addEventListener('click', () => { host.hidden = true; catalogFile = null; });
+    apply.addEventListener('click', async () => {
+      if (!catalogFile) return;
+      apply.disabled = true;
+      try {
+        const body = new FormData();
+        body.append('workbook', catalogFile);
+        const response = await fetch('/api/non-qualified-calls/catalog/import', {method: 'POST', credentials: 'same-origin', body});
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : 'The catalog could not be imported.');
+        host.hidden = true;
+        catalogFile = null;
+        toast('Catalog imported.');
+        await loadState();
+        fillFieldsDialog();
+      } catch (error) {
+        $('nq-fields-error').style.color = '';
+        $('nq-fields-error').textContent = error.message;
+      } finally {
+        apply.disabled = false;
+      }
+    });
+    actions.append(cancel, apply);
+    host.replaceChildren(node('strong', `Import ${catalogFile?.name || 'the workbook'}?`), list, actions);
+    host.hidden = false;
+  };
   if (fieldsDialog) {
     $('nq-fields-open').addEventListener('click', () => {
-      $('nq-field-defs').replaceChildren(...state.fields.map((field) => fieldDefinition(field)));
+      fieldSection = '';
+      fillFieldsDialog();
+      $('nq-catalog-preview').hidden = true;
       $('nq-fields-error').textContent = '';
       fieldsDialog.showModal();
     });
     $('nq-fields-cancel').addEventListener('click', () => fieldsDialog.close());
+    $('nq-field-filter').addEventListener('input', filterFieldDefs);
+    $('nq-field-defs').addEventListener('input', (event) => { if (event.target.matches('.nq-root-name')) filterFieldDefs(); });
     $('nq-fields-add').addEventListener('click', () => {
       const block = fieldDefinition();
       $('nq-field-defs').append(block);
+      filterFieldDefs();
       block.querySelector('.nq-root-name').focus();
     });
     $('nq-fields-workbook').addEventListener('change', async (event) => {
@@ -2893,14 +3681,13 @@
       try {
         const body = new FormData();
         body.append('workbook', file);
-        const response = await fetch('/api/non-qualified-calls/fields/from-excel', {method: 'POST', credentials: 'same-origin', body});
+        body.append('preview', '1');
+        const response = await fetch('/api/non-qualified-calls/catalog/import', {method: 'POST', credentials: 'same-origin', body});
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : 'The workbook could not be read.');
-        const present = new Set(collectFields().map((field) => field.label.toLowerCase()));
-        const added = (payload.fields || []).filter((field) => !present.has(field.label.toLowerCase()));
-        added.forEach((field) => $('nq-field-defs').append(fieldDefinition(field)));
-        const skipped = payload.skipped?.length ? ` Left out (they come from the CDR or a script): ${payload.skipped.join(', ')}.` : '';
-        message.textContent = `${added.length} fields added from ${file.name}: review their types and values, then Save.${skipped}`;
+        catalogFile = file;
+        message.textContent = '';
+        showCatalogPreview(payload);
       } catch (error) {
         message.style.color = '';
         message.textContent = error.message;
@@ -2911,9 +3698,13 @@
       const save = $('nq-fields-save');
       save.disabled = true;
       try {
+        const sections = editedSections();
+        if (JSON.stringify(sections) !== JSON.stringify(state.sections.map(({key, label, color}) => ({key, label, color})))) {
+          await api('/api/non-qualified-calls/sections', {method: 'PUT', body: JSON.stringify({sections})});
+        }
         await api('/api/non-qualified-calls/fields', {method: 'PUT', body: JSON.stringify({fields: collectFields()})});
         fieldsDialog.close();
-        toast('Analysis fields saved.');
+        toast('Fields and sections saved.');
         await loadState();
         if (state.detail) openDetail(state.detail.call.call_key, {keepTab: true});
       } catch (error) {
@@ -2952,6 +3743,19 @@
       };
       $('nq-columns-builtin').replaceChildren(...Object.entries(state.optionalColumns).map(([key, label]) => checkbox(key, label,
         state.tableColumns.builtin.includes(key))));
+      // The catalog fields under their section; the follow-up ones always have their column.
+      $('nq-columns-fields').replaceChildren(...state.sections.map((section) => {
+        const fields = state.fields.filter((field) => field.section === section.key && field.source !== 'tracking');
+        if (!fields.length) return null;
+        const group = node('div', undefined, 'nq-columns-field-group');
+        group.style.setProperty('--nq-section', section.color);
+        group.append(sectionTag(section.key), ...fields.map((field) => {
+          const option = checkbox(field.key, field.label, field.in_table);
+          option.title = `${SOURCE_TAGS[field.source] || field.source} · ${field.description || field.label}`;
+          return option;
+        }));
+        return group;
+      }).filter(Boolean));
       const inTable = new Set(state.tableColumns.cdr);
       const inExcel = new Set(state.tableColumns.export_cdr || []);
       const names = [...new Set([...state.tableColumns.cdr, ...(state.tableColumns.export_cdr || []), ...state.cdrColumns])];
@@ -2995,6 +3799,15 @@
           export_cdr: [...$('nq-columns-cdr').querySelectorAll('input[data-target="excel"]:checked')]
             .filter((box) => !box.closest('.nq-cdr-column-row').querySelector('input[data-target="table"]').checked).map((box) => box.value),
         })});
+        // The catalog fields chosen as columns are saved with the field catalog.
+        const shown = new Set([...$('nq-columns-fields').querySelectorAll('input:checked')].map((box) => box.value));
+        const listed = new Set([...$('nq-columns-fields').querySelectorAll('input')].map((box) => box.value));
+        if (state.fields.some((field) => listed.has(field.key) && field.in_table !== shown.has(field.key))) {
+          await api('/api/non-qualified-calls/fields', {method: 'PUT', body: JSON.stringify({fields: state.fields.map((field) => ({
+            ...field, in_table: listed.has(field.key) ? shown.has(field.key) : field.in_table,
+            options: field.options.map((option) => ({...option, previous: option.name})),
+          }))})});
+        }
         columnsDialog.close();
         toast('Additional columns saved.');
         await loadState();
@@ -3063,13 +3876,290 @@
       saveRule(rule);
     });
   }
+  // -- Analysis Center menu -------------------------------------------------------------------
+  const configMenu = $('nq-config-menu');
+  const closeConfigMenu = () => {
+    if (!configMenu || configMenu.hidden) return;
+    configMenu.hidden = true;
+    $('nq-config-toggle').setAttribute('aria-expanded', 'false');
+  };
+  if (configMenu) {
+    $('nq-config-toggle').addEventListener('click', (event) => {
+      event.stopPropagation();
+      configMenu.hidden = !configMenu.hidden;
+      $('nq-config-toggle').setAttribute('aria-expanded', String(!configMenu.hidden));
+      if (!configMenu.hidden) configMenu.querySelector('button')?.focus();
+    });
+    // Every entry opens its dialog and closes the menu.
+    configMenu.addEventListener('click', () => window.setTimeout(closeConfigMenu));
+    document.addEventListener('click', (event) => { if (!configMenu.contains(event.target)) closeConfigMenu(); });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !configMenu.hidden) { closeConfigMenu(); $('nq-config-toggle').focus(); }
+    });
+  }
+
+  // -- status rules dialog --------------------------------------------------------------------
+  const statusRulesDialog = $('nq-status-rules-dialog');
+  // The values a condition chooses among: list values, Yes / No, teams, users, root categories or causes.
+  const conditionValues = (field) => {
+    if (field === '@team') return state.options.teams.map((item) => item.name);
+    if (field === '@assignee') return state.users;
+    if (field === '@root_category') return state.rootCauses.categories.map((item) => item.name);
+    if (field === '@root_cause') return state.rootCauses.causes.map((item) => item.name);
+    return state.conditionFields[field]?.values || [];
+  };
+  const conditionColor = (field, name) => (field === '@team' ? optionColor('team', name)
+    : field === '@root_category' ? optionColor('root_category', name) : field === '@root_cause' ? optionColor('root_cause', name)
+      : optionColorOf(state.fields.find((item) => item.key === field) || {}, name));
+  const conditionRow = (condition = {field: Object.keys(state.conditionFields)[0] || '', op: 'in', values: []}) => {
+    const row = node('li', undefined, 'nq-condition');
+    const field = selectOf('nq-condition-field', 'Field', Object.entries(state.conditionFields).map(([key, item]) => [key, item.label]),
+      condition.field);
+    const op = selectOf('nq-condition-op', 'Condition', Object.entries(state.ruleOperators), condition.op || 'in');
+    const values = node('div', undefined, 'nq-condition-values');
+    const fill = (chosen) => {
+      const selected = new Set(chosen);
+      const names = [...new Set([...conditionValues(field.value), ...chosen])];
+      values.replaceChildren(...names.map((name) => {
+        const label = node('label', undefined, 'nq-toggle nq-condition-value');
+        const box = node('input');
+        box.type = 'checkbox';
+        box.value = name;
+        box.checked = selected.has(name);
+        const color = conditionColor(field.value, name);
+        if (color) label.style.setProperty('--nq-chip', color);
+        label.append(box, ` ${name}`);
+        return label;
+      }));
+      if (!names.length) values.append(node('span', 'No values to choose.', 'nq-muted'));
+      values.hidden = ['empty', 'not_empty'].includes(op.value);
+    };
+    field.addEventListener('change', () => fill([]));
+    op.addEventListener('change', () => { values.hidden = ['empty', 'not_empty'].includes(op.value); });
+    const remove = node('button', '×', 'nq-icon-action');
+    remove.type = 'button';
+    remove.title = 'Remove this condition';
+    remove.setAttribute('aria-label', remove.title);
+    remove.addEventListener('click', () => row.remove());
+    row.append(field, op, remove, values);
+    fill(condition.values || []);
+    return row;
+  };
+  const statusRuleBlock = (rule = {status: state.options.statuses[1]?.name || state.options.statuses[0]?.name || '', conditions: [undefined]}) => {
+    const block = node('li', undefined, 'nq-root-domain nq-status-rule');
+    const head = node('div', undefined, 'nq-option-row');
+    const status = selectOf('nq-rule-status nq-pill-select', 'Status', state.options.statuses.map((item) => [item.name, item.name]), rule.status);
+    const paint = () => paintPill(status, optionColor('status', status.value));
+    status.addEventListener('change', paint);
+    paint();
+    head.append(node('span', 'Set the status', 'nq-rule-word'), status, node('span', 'when every condition holds', 'nq-rule-word'));
+    iconButtons(head, block, () => block.remove());
+    const conditions = node('ul', undefined, 'nq-conditions');
+    conditions.append(...(rule.conditions || []).map((condition) => conditionRow(condition)));
+    const add = node('button', 'Add Condition', 'nq-link-action');
+    add.type = 'button';
+    add.addEventListener('click', () => conditions.append(conditionRow()));
+    block.append(head, conditions, add);
+    return block;
+  };
+  const collectStatusRules = () => [...$('nq-status-rules').children].filter((block) => block.matches('.nq-status-rule')).map((block) => ({
+    status: block.querySelector('.nq-rule-status').value,
+    conditions: [...block.querySelectorAll('.nq-condition')].map((row) => ({
+      field: row.querySelector('.nq-condition-field').value, op: row.querySelector('.nq-condition-op').value,
+      values: [...row.querySelectorAll('.nq-condition-values input:checked')].map((box) => box.value),
+    })),
+  }));
+  const fillStatusRules = (rules) => {
+    $('nq-status-rules').replaceChildren(...rules.map((rule) => statusRuleBlock(rule)));
+  };
+  if (statusRulesDialog) {
+    document.querySelectorAll('[data-nq-status-rules-open]').forEach((button) => button.addEventListener('click', () => {
+      fillStatusRules(state.statusRules);
+      $('nq-status-rules-error').textContent = '';
+      statusRulesDialog.showModal();
+    }));
+    $('nq-status-rules-cancel').addEventListener('click', () => statusRulesDialog.close());
+    $('nq-status-rules-add').addEventListener('click', () => {
+      const block = statusRuleBlock();
+      $('nq-status-rules').append(block);
+      block.querySelector('select').focus();
+    });
+    // The default rules, for the fields and statuses this workspace still has.
+    $('nq-status-rules-default').addEventListener('click', () => {
+      const statuses = new Set(state.options.statuses.map((item) => item.name));
+      const rules = (state.defaultStatusRules || []).filter((rule) => statuses.has(rule.status))
+        .map((rule) => ({...rule, conditions: rule.conditions.filter((condition) => state.conditionFields[condition.field])}))
+        .filter((rule) => rule.conditions.length);
+      fillStatusRules(rules);
+      $('nq-status-rules-error').style.color = 'var(--nq-muted)';
+      $('nq-status-rules-error').textContent = 'The default rules are shown: review them and Save.';
+    });
+    $('nq-status-rules-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const save = $('nq-status-rules-save');
+      save.disabled = true;
+      try {
+        await api('/api/non-qualified-calls/status-rules', {method: 'PUT', body: JSON.stringify({rules: collectStatusRules()})});
+        statusRulesDialog.close();
+        toast('Status Rules saved: the automatic statuses follow them.');
+        await loadState();
+        if (state.detail) openDetail(state.detail.call.call_key, {keepTab: true});
+      } catch (error) {
+        $('nq-status-rules-error').style.color = '';
+        $('nq-status-rules-error').textContent = error.message;
+      } finally {
+        save.disabled = false;
+      }
+    });
+  }
+
+  // -- RCA script results dialog ----------------------------------------------------------------
+  const rcaDialog = $('nq-rca-dialog');
+  let rcaFile = null;
+  const smallTable = (headers, rows) => {
+    const wrap = node('div', undefined, 'nq-table-wrap');
+    const table = node('table', undefined, 'nq-table nq-stats-table');
+    const head = node('thead');
+    const headRow = node('tr');
+    headRow.append(...headers.map((header) => node('th', header)));
+    head.append(headRow);
+    const body = node('tbody');
+    rows.forEach((values) => {
+      const row = node('tr');
+      row.append(...values.map((value) => node('td', value)));
+      body.append(row);
+    });
+    table.append(head, body);
+    wrap.append(table);
+    return wrap;
+  };
+  const renderRcaCurrent = (summary) => {
+    const files = summary.files || [];
+    const host = $('nq-rca-current');
+    host.replaceChildren(node('h3', 'Imported results'), node('p', summary.total
+      ? `${number(summary.total)} results by JOIN_ID; ${number(summary.matched)} match a Non-Qualified Call of this workspace.`
+      : 'No result imported yet.', 'form-note'));
+    if (files.length) {
+      host.append(smallTable(['File', 'Results', 'Imported', 'By'], files.map((file) => [file.name, number(file.rows), exactTime(file.imported_at), file.imported_by])));
+    }
+    $('nq-rca-clear').hidden = !summary.total;
+  };
+  const renderRcaPreview = (preview) => {
+    const host = $('nq-rca-preview');
+    const facts = [
+      `${number(preview.rows)} results by JOIN_ID: ${number(preview.matched)} match a call of this workspace and ${number(preview.unmatched)} do not (yet).`,
+      $('nq-rca-replace').checked ? 'Every result imported before is forgotten.'
+        : `${number(preview.new)} of them are new; the others replace the results of their JOIN_ID.`,
+      `RCA columns: ${preview.columns.join(', ')}.`,
+      preview.extra.length ? `Other columns kept with the call: ${preview.extra.join(', ')}.` : '',
+      preview.skipped ? `${number(preview.skipped)} ${preview.skipped === 1 ? 'row' : 'rows'} without a JOIN_ID left out.` : '',
+      preview.duplicates ? `${number(preview.duplicates)} repeated JOIN_IDs: the last row of each wins.` : '',
+    ].filter(Boolean);
+    const list = node('ul');
+    list.append(...facts.map((fact) => node('li', fact)));
+    const keys = Object.keys(state.rcaRefs).filter((key) => preview.preview.some((row) => row[key]));
+    host.replaceChildren(node('h3', `Preview of ${preview.file_name}`), list,
+      smallTable(['JOIN_ID', ...keys.map((key) => state.rcaRefs[key])], preview.preview.map((row) => [row.join_id, ...keys.map((key) => row[key] || '—')])));
+    host.hidden = false;
+  };
+  const rcaRequest = async (preview) => {
+    const body = new FormData();
+    body.append('file', rcaFile);
+    if ($('nq-rca-replace').checked) body.append('replace', '1');
+    if (preview) body.append('preview', '1');
+    const response = await fetch('/api/non-qualified-calls/rca/import', {method: 'POST', credentials: 'same-origin', body});
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : 'The RCA file could not be read.');
+    return payload;
+  };
+  if (rcaDialog) {
+    document.querySelectorAll('[data-nq-rca-open]').forEach((button) => button.addEventListener('click', async () => {
+      rcaFile = null;
+      $('nq-rca-format').textContent = state.rcaResults.format || '';
+      $('nq-rca-preview').hidden = true;
+      $('nq-rca-import').disabled = true;
+      $('nq-rca-replace').checked = false;
+      $('nq-rca-error').textContent = '';
+      renderRcaCurrent(state.rcaResults);
+      rcaDialog.showModal();
+      try {
+        state.rcaResults = await api('/api/non-qualified-calls/rca');
+        renderRcaCurrent(state.rcaResults);
+      } catch (_error) {
+        // The summary of the page stays.
+      }
+    }));
+    $('nq-rca-cancel').addEventListener('click', () => rcaDialog.close());
+    // The preview tells what replacing the previous results means.
+    $('nq-rca-replace').addEventListener('change', async () => {
+      if (!rcaFile) return;
+      try {
+        renderRcaPreview(await rcaRequest(true));
+      } catch (error) {
+        $('nq-rca-error').textContent = error.message;
+      }
+    });
+    $('nq-rca-file').addEventListener('change', async (event) => {
+      rcaFile = event.target.files?.[0] || null;
+      event.target.value = '';
+      if (!rcaFile) return;
+      $('nq-rca-error').style.color = 'var(--nq-muted)';
+      $('nq-rca-error').textContent = `Reading ${rcaFile.name}…`;
+      $('nq-rca-import').disabled = true;
+      try {
+        renderRcaPreview(await rcaRequest(true));
+        $('nq-rca-error').textContent = '';
+        $('nq-rca-import').disabled = false;
+      } catch (error) {
+        rcaFile = null;
+        $('nq-rca-preview').hidden = true;
+        $('nq-rca-error').style.color = '';
+        $('nq-rca-error').textContent = error.message;
+      }
+    });
+    $('nq-rca-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!rcaFile) return;
+      const button = $('nq-rca-import');
+      button.disabled = true;
+      try {
+        const result = await rcaRequest(false);
+        toast(`${number(result.rows)} RCA results imported; ${number(result.matched)} match calls.`);
+        rcaFile = null;
+        $('nq-rca-preview').hidden = true;
+        state.rcaResults = await api('/api/non-qualified-calls/rca');
+        renderRcaCurrent(state.rcaResults);
+        loadCalls({quiet: true});
+        if (state.detail) openDetail(state.detail.call.call_key, {keepTab: true});
+      } catch (error) {
+        $('nq-rca-error').style.color = '';
+        $('nq-rca-error').textContent = error.message;
+        button.disabled = false;
+      }
+    });
+    $('nq-rca-clear').addEventListener('click', async () => {
+      const message = 'Delete every imported RCA script result? The calls lose their script values and recommendations from the script; their selected root cause stays.';
+      const accepted = typeof window.showConfirmDialog === 'function'
+        ? await window.showConfirmDialog(message, {title: 'Delete RCA results', confirmLabel: 'Delete'}) : window.confirm(message);
+      if (!accepted) return;
+      try {
+        const result = await api('/api/non-qualified-calls/rca', {method: 'DELETE'});
+        toast(`${number(result.deleted)} RCA results deleted.`);
+        state.rcaResults = result.rca_results;
+        renderRcaCurrent(state.rcaResults);
+        loadCalls({quiet: true});
+      } catch (error) {
+        $('nq-rca-error').textContent = error.message;
+      }
+    });
+  }
   // Keep the shared follow-up current while the page stays open.
   window.setInterval(() => {
     if (document.visibilityState !== 'visible' || state.busy) return;
     const active = document.activeElement;
     if (active && active.closest?.('#nq-table select, #nq-drawer textarea, #nq-drawer select, #nq-drawer input, .nq-comment-editor')) return;
-    if ([...document.querySelectorAll('#nq-analysis-form [data-field-key]')].some((control) => control.value !== control.dataset.original)) return;
-    if (causePicker) return;
+    if (Object.keys(changedFields()).length) return;
+    if (rootPicker || document.querySelector('dialog[open]')) return;
     loadCalls({quiet: true});
     if (state.detail && !composerBody.value.trim() && !drawer.querySelector('.nq-comment-editor')) openDetail(state.detail.call.call_key, {keepTab: true});
   }, REFRESH_INTERVAL_MS);

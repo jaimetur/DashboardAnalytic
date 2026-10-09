@@ -37,6 +37,7 @@ import re
 import tempfile
 import time
 import uuid
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from io import BytesIO
@@ -47,6 +48,12 @@ from src.modules.cdr_stage import CDR_STAGE_LABELS, dataset_cdr_stage
 from src.modules.column_names import campaign_sort_key, column_identity
 from src.modules.value_maps import ValueMapper, field_kind
 from src.modules.mapping_order import dimension_order_key, mapping_group
+from src.modules import nq_catalog
+from src.modules.nq_catalog import (
+    ATTENDED_FIELD, FIELD_TYPES, MAX_LONG_TEXT, YES_NO, evaluate_status, keyword_found, keywords as _keywords,
+    normalized_text as _normalized_text,
+)
+from src.modules import nq_rca
 
 NQ_CALLS_TABLE = 'nq_calls'
 NQ_CALL_SOURCES_TABLE = 'nq_call_sources'
@@ -55,7 +62,8 @@ NQ_CALL_COMMENTS_TABLE = 'nq_call_comments'
 NQ_CALL_HISTORY_TABLE = 'nq_call_history'
 NQ_CALL_OPTIONS_TABLE = 'nq_call_options'
 NQ_TEAM_MEMBERS_TABLE = 'nq_team_members'
-NQ_ROOT_CAUSES_TABLE = 'nq_root_causes'
+NQ_ROOT_CATALOG_TABLE = 'nq_root_catalog'
+NQ_RCA_RESULTS_TABLE = 'nq_rca_results'
 NQ_CALL_POPULATION_TABLE = 'nq_call_population'
 NQ_CALL_VERSIONS_TABLE = 'nq_call_versions'
 NQ_FIELDS_TABLE = 'nq_analysis_fields'
@@ -69,7 +77,8 @@ NQ_TABLE_TITLES = {
     NQ_CALL_HISTORY_TABLE: 'NQ Call History',
     NQ_CALL_OPTIONS_TABLE: 'NQ Call Options',
     NQ_TEAM_MEMBERS_TABLE: 'NQ Team Members',
-    NQ_ROOT_CAUSES_TABLE: 'NQ Root Causes',
+    NQ_ROOT_CATALOG_TABLE: 'NQ Root Catalog',
+    NQ_RCA_RESULTS_TABLE: 'NQ RCA Results',
     NQ_CALL_POPULATION_TABLE: 'NQ Call Population',
     NQ_CALL_VERSIONS_TABLE: 'NQ Call Versions',
     NQ_FIELDS_TABLE: 'NQ Analysis Fields',
@@ -84,65 +93,25 @@ INDEX_VERSION = 4
 KEY_SCHEME = '3'
 KEY_SCHEME_STATE_KEY = 'nq_calls_key_scheme'
 TRACKING_FORMAT = 'nq-call-tracking'
-TRACKING_FORMAT_VERSION = 2
+TRACKING_FORMAT_VERSION = 3
 UNASSIGNED = '__unassigned__'
 MAX_COMMENT_LENGTH = 5000
 PAGE_SIZES = (25, 50, 100, 200)
 OPTION_KINDS = ('status', 'team')
 COLOR_PATTERN = re.compile(r'#[0-9a-fA-F]{6}')
-DEFAULT_STATUSES = (
-    ('Open', '#d14a68', False),
-    ('Under Investigation', '#e08a1e', False),
-    ('Pending Information', '#6a63c9', False),
-    ('Resolved', '#2e8b57', True),
-    ('Not Applicable', '#7b8790', True),
-)
-DEFAULT_TEAMS = (
-    ('RAN Optimisation', '#0f6f7d'),
-    ('Core Network', '#6941a4'),
-    ('IMS / VoLTE', '#b85b20'),
-    ('Transport', '#245a96'),
-    ('Device & Test Setup', '#5b6b2e'),
-)
-# Root cause taxonomy: (domain, colour, keywords, causes); each cause is (name, keywords).
-# Domain keywords are looked for in the CDR Failure_Classification and cause keywords in
-# its Failure_Category, Failure_Subcategory and Failure_Comment.
-DEFAULT_ROOT_CAUSES = (
-    # Interference is DL or UL only when the CDR says so (for example the subcategory
-    # "DL interference problems"); otherwise the call keeps the RF domain alone.
-    ('RF', '#c8102e', ('rf',), (
-        ('DL interference', ('dl interference', 'downlink interference')),
-        ('UL interference', ('ul interference', 'uplink interference')),
-        ('Coverage', ('coverage',)), ('BLER', ('bler',)),
-    )),
-    ('RAN', '#e08a1e', ('ran', 'paging'), (
-        ('Handover failure', ('handover',)), ('RRC layer', ('rrc',)), ('Inter-RAT transition', ('inter-rat',)),
-        ('Low throughput', ('low throughput',)), ('Paging', ('paging',)),
-    )),
-    ('Core 2G/4G/5G', '#6941a4', ('core', 'gsm'), (
-        ('EPS bearer deactivation', ('bearer deactivation', 'eps mobility management')), ('TAU reject', ('tracking area update', 'tau ')),
-        ('NAS mobility management', ('nnas', 'nas ')), ('WhatsApp session in GSM', ('session in gsm',)),
-    )),
-    ('Core EPSFB', '#245a96', ('epsfb', 'eps fallback'), (
-        ('EPS fallback failure', ('epsfb', 'eps fallback')),
-    )),
-    ('IMS/E2E', '#b85b20', ('volte', 'ims'), (
-        ('No QCI1 established', ('qci1', 'qci 1')), ('VoLTE core', ('volte core',)), ('E2E trace required', ('e2e',)),
-    )),
-    ('AAA', '#2e8b57', ('aaa',), (
-        ('Authentication/Authorization', ('authentication', 'authorization')),
-    )),
-    ('Protocol', '#0f6f7d', ('protocol',), (
-        ('Packet loss', ('packet loss',)), ('TCP connection errors', ('tcp',)), ('DNS', ('dns',)), ('HTTP', ('http',)),
-        ('Data transfer timeout', ('timeout',)), ('No DL packets', ('no dl packets',)), ('Latency', ('latency',)),
-    )),
-    ('Device', '#7b8790', ('device',), (
-        ('Device or test setup', ('device', 'modem')),
-    )),
-)
+DEFAULT_STATUSES = nq_catalog.DEFAULT_STATUSES
+DEFAULT_TEAMS = nq_catalog.DEFAULT_TEAMS
+# The statuses and teams of the first version: replaced by the Analysis Center ones while unchanged.
+_FIRST_STATUSES = ('Open', 'Under Investigation', 'Pending Information', 'Resolved', 'Not Applicable')
+_FIRST_STATUS_MOVES = {'under investigation': 'Under Analysis', 'pending information': 'Open', 'resolved': 'Closed',
+                       'not applicable': 'Closed'}
+_FIRST_TEAMS = ('RAN Optimisation', 'Core Network', 'IMS / VoLTE', 'Transport', 'Device & Test Setup')
 ROOT_CAUSE_SETTINGS_STATE_KEY = 'nq_calls_root_cause_settings'
-ROOT_CAUSE_DEFAULTS_STATE_KEY = 'nq_calls_root_cause_defaults_version'
 ROOT_CAUSE_RULE_STATE_KEY = 'nq_calls_root_cause_rule'
+SECTIONS_STATE_KEY = 'nq_calls_sections'
+STATUS_RULES_STATE_KEY = 'nq_calls_status_rules'
+# Set once the Analysis Center catalog, statuses, teams and rules have been added to the workspace.
+ANALYSIS_CENTER_STATE_KEY = 'nq_analysis_center_v1'
 # Indexed call fields that the suggestion rule can read, with their labels.
 RULE_FIELDS = {
     'failure_classification': 'Failure Classification', 'failure_category': 'Failure Category',
@@ -156,13 +125,6 @@ DEFAULT_ROOT_CAUSE_RULE = {
     'cause_fields': ['failure_category', 'failure_subcategory', 'failure_comment'],
     'causes_in_domain': True, 'comments': True, 'comment_domain': True, 'match': 'words',
 }
-ROOT_CAUSE_DEFAULTS_VERSION = 2
-# Rows of the first defaults that version 2 corrects, only while they are unchanged:
-# interference is DL or UL only when the CDR says so, and "E2E Trace Required" is no domain.
-_ROOT_CAUSE_DEFAULT_UPGRADES = (
-    ('RF', 'DL interference', ['interference'], ['dl interference', 'downlink interference']),
-    ('IMS/E2E', '', ['volte', 'ims', 'e2e'], ['volte', 'ims']),
-)
 NOT_CLASSIFIED = 'Not classified'
 
 # Indexed field -> CDR columns, in order of preference.
@@ -209,10 +171,10 @@ FIELD_FILTERS = (
     'service', 'campaign', 'operator', 'operator_vendor', 'vendor_operator', 'vendor', 'region', 'cluster', 'city',
     'technology', 'test_name', 'result', 'failure_classification', 'failure_category',
 )
-TRACKING_FILTERS = ('status', 'team', 'assignee', 'root_domain', 'root_cause')
+TRACKING_FILTERS = ('status', 'team', 'assignee', 'root_domain', 'root_category', 'root_cause', 'status_mode')
 # Filters typed as a list of values rather than chosen among them (a JOIN_ID has too many values to list).
 TYPED_FILTERS = ('join_id',)
-TRACKING_FIELDS = ('status', 'team', 'assignee', 'root_domain', 'root_cause')
+TRACKING_FIELDS = ('status', 'team', 'assignee', 'root_domain', 'root_category', 'root_cause', 'status_mode')
 # Filters set by clicking the Progress View and Root Cause Analysis: NR mode, call type
 # (Classic, WhatsApp, Data), a timeline period ("month:2026-07"), the age of open calls,
 # a labelled root cause ("RF||Coverage"), the root domain or cause counting the suggested
@@ -231,7 +193,8 @@ SORT_COLUMNS = {
     'service': 'service', 'start_time': 'start_time', 'operator': 'operator', 'operator_vendor': 'operator_vendor', 'vendor': 'vendor',
     'campaign': 'campaign', 'city': 'city', 'technology': 'technology', 'test_name': 'test_name',
     'result': 'result', 'failure': 'failure_classification', 'status': 'status', 'team': 'team',
-    'assignee': 'assignee', 'root_cause': 'root_domain', 'cause': 'root_cause', 'comments': 'comment_count',
+    'assignee': 'assignee', 'root_cause': 'root_domain', 'root_category': 'root_category', 'cause': 'root_cause',
+    'comments': 'comment_count',
     'updated_at': 'updated_at', 'join_id': 'join_id', 'region': 'region', 'cluster': 'cluster', 'nr_mode': 'nr_mode',
     'cell_id': 'cell_id', 'direction': 'direction', 'session_type': 'session_type', 'end_time': 'end_time', 'cdr': 'dataset_id',
     'version': 'version_state',
@@ -239,7 +202,8 @@ SORT_COLUMNS = {
 # The breakdowns of the Summary, in the order of the page and of the one-slide Executive Summary.
 BREAKDOWNS = (
     ('service', 'By Service'), ('result', 'By Result'), ('status', 'By Status'), ('team', 'By Team'),
-    ('root_domain', 'By Root Domain'), ('failure_classification', 'By Failure Classification'),
+    ('root_domain', 'By Root Domain'), ('root_category', 'By Root Category'), ('root_cause', 'By Root Cause'),
+    ('failure_classification', 'By Failure Classification'),
     ('campaign', 'By Campaign'), ('operator', 'By Operator'), ('vendor', 'By Vendor'), ('region', 'By Region'),
     ('cluster', 'By Cluster'), ('city', 'By City'),
 )
@@ -313,7 +277,12 @@ CREATE TABLE IF NOT EXISTS {NQ_FIELDS_TABLE} (
     in_table INTEGER NOT NULL DEFAULT 0,
     in_summary INTEGER NOT NULL DEFAULT 0,
     required_to_close INTEGER NOT NULL DEFAULT 0,
-    description TEXT NOT NULL DEFAULT ''
+    description TEXT NOT NULL DEFAULT '',
+    section TEXT NOT NULL DEFAULT 'analysis',
+    source TEXT NOT NULL DEFAULT 'user',
+    source_ref TEXT NOT NULL DEFAULT '',
+    in_export INTEGER NOT NULL DEFAULT 1,
+    suggest_from TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS {NQ_FIELD_VALUES_TABLE} (
     call_key TEXT NOT NULL,
@@ -332,6 +301,8 @@ CREATE TABLE IF NOT EXISTS {NQ_CALL_TRACKING_TABLE} (
     root_domain TEXT NOT NULL DEFAULT '',
     root_cause TEXT NOT NULL DEFAULT '',
     version INTEGER NOT NULL DEFAULT 0,
+    root_category TEXT NOT NULL DEFAULT '',
+    status_mode TEXT NOT NULL DEFAULT 'auto',
     updated_by TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT ''
 );
@@ -372,13 +343,22 @@ CREATE TABLE IF NOT EXISTS {NQ_TEAM_MEMBERS_TABLE} (
     username TEXT NOT NULL COLLATE NOCASE,
     PRIMARY KEY (team, username)
 );
-CREATE TABLE IF NOT EXISTS {NQ_ROOT_CAUSES_TABLE} (
-    domain TEXT NOT NULL COLLATE NOCASE,
-    cause TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+CREATE TABLE IF NOT EXISTS {NQ_ROOT_CATALOG_TABLE} (
+    kind TEXT NOT NULL CHECK(kind IN ('domain', 'category', 'cause')),
+    name TEXT NOT NULL COLLATE NOCASE,
+    domain TEXT NOT NULL DEFAULT '',
     color TEXT NOT NULL DEFAULT '',
     keywords TEXT NOT NULL DEFAULT '[]',
     position INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (domain, cause)
+    PRIMARY KEY (kind, name)
+);
+CREATE TABLE IF NOT EXISTS {NQ_RCA_RESULTS_TABLE} (
+    join_id TEXT PRIMARY KEY,
+    original_join_id TEXT NOT NULL,
+    values_json TEXT NOT NULL DEFAULT '{{}}',
+    source_file TEXT NOT NULL DEFAULT '',
+    imported_by TEXT NOT NULL DEFAULT '',
+    imported_at TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -418,20 +398,34 @@ def _number(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+_LEGACY_ROOT_CAUSES_TABLE = 'nq_root_causes'
+
+
+def _columns_of(connection: Any, table: str) -> set[str]:
+    return {str(row[1]) for row in connection.execute(f'PRAGMA table_info({table})').fetchall()}
+
+
 def ensure_nq_tables(task_repository: Any) -> None:
-    """Create the module tables and seed the default statuses and teams once."""
+    """Create the module tables, add the columns of later versions and seed the defaults once."""
     with task_repository.connection() as connection:
         existed = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (NQ_CALL_OPTIONS_TABLE,),
         ).fetchone()
-        root_causes_existed = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (NQ_ROOT_CAUSES_TABLE,),
+        catalog_existed = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (NQ_ROOT_CATALOG_TABLE,),
         ).fetchone()
-        tracking = {str(row[1]) for row in connection.execute(f'PRAGMA table_info({NQ_CALL_TRACKING_TABLE})').fetchall()}
-        for column in ('root_domain', 'root_cause'):
+        tracking = _columns_of(connection, NQ_CALL_TRACKING_TABLE)
+        for column, definition in (('root_domain', "TEXT NOT NULL DEFAULT ''"), ('root_cause', "TEXT NOT NULL DEFAULT ''"),
+                                   ('root_category', "TEXT NOT NULL DEFAULT ''"), ('status_mode', "TEXT NOT NULL DEFAULT 'auto'")):
             if tracking and column not in tracking:
-                connection.execute(f"ALTER TABLE {NQ_CALL_TRACKING_TABLE} ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
-        indexed = {str(row[1]) for row in connection.execute(f'PRAGMA table_info({NQ_CALLS_TABLE})').fetchall()}
+                connection.execute(f'ALTER TABLE {NQ_CALL_TRACKING_TABLE} ADD COLUMN {column} {definition}')
+        definitions = _columns_of(connection, NQ_FIELDS_TABLE)
+        for column, definition in (('section', "TEXT NOT NULL DEFAULT 'analysis'"), ('source', "TEXT NOT NULL DEFAULT 'user'"),
+                                   ('source_ref', "TEXT NOT NULL DEFAULT ''"), ('in_export', 'INTEGER NOT NULL DEFAULT 1'),
+                                   ('suggest_from', "TEXT NOT NULL DEFAULT ''")):
+            if definitions and column not in definitions:
+                connection.execute(f'ALTER TABLE {NQ_FIELDS_TABLE} ADD COLUMN {column} {definition}')
+        indexed = _columns_of(connection, NQ_CALLS_TABLE)
         if indexed and not set(CALL_FIELDS) <= indexed:
             # The index is rebuilt from the CDRs whenever its fields change.
             connection.execute(f'DROP TABLE {NQ_CALLS_TABLE}')
@@ -442,7 +436,7 @@ def ensure_nq_tables(task_repository: Any) -> None:
                                    ('sample_id', "TEXT NOT NULL DEFAULT ''"), ('extra_json', "TEXT NOT NULL DEFAULT '{}'")):
             if indexed and column not in indexed:
                 connection.execute(f'ALTER TABLE {NQ_CALLS_TABLE} ADD COLUMN {column} {definition}')
-        sources = {str(row[1]) for row in connection.execute(f'PRAGMA table_info({NQ_CALL_SOURCES_TABLE})').fetchall()}
+        sources = _columns_of(connection, NQ_CALL_SOURCES_TABLE)
         for column, definition in (('stage_rank', 'INTEGER NOT NULL DEFAULT 1'), ('data_date', "TEXT NOT NULL DEFAULT ''"),
                                    ('population_count', 'INTEGER NOT NULL DEFAULT 0')):
             if sources and column not in sources:
@@ -457,43 +451,116 @@ def ensure_nq_tables(task_repository: Any) -> None:
                 f"INSERT OR IGNORE INTO {NQ_CALL_OPTIONS_TABLE} (kind, name, color, position, is_closed) VALUES ('team', ?, ?, ?, 0)",
                 [(name, color, index) for index, (name, color) in enumerate(DEFAULT_TEAMS)],
             )
-        if not root_causes_existed:
-            _write_root_causes(connection, default_root_causes())
-    if not root_causes_existed:
-        task_repository.set_workspace_state(ROOT_CAUSE_DEFAULTS_STATE_KEY, str(ROOT_CAUSE_DEFAULTS_VERSION))
-    elif str(task_repository.get_workspace_state(ROOT_CAUSE_DEFAULTS_STATE_KEY) or '1') != str(ROOT_CAUSE_DEFAULTS_VERSION):
-        _upgrade_default_root_causes(task_repository)
+        if not catalog_existed:
+            _write_root_catalog(connection, _initial_root_catalog(connection))
+    if not task_repository.get_workspace_state(ANALYSIS_CENTER_STATE_KEY):
+        _install_analysis_center(task_repository, fresh=not existed)
 
 
-def default_root_causes() -> list[dict[str, Any]]:
-    return [{'name': domain, 'color': color, 'keywords': list(keywords),
-             'causes': [{'name': cause, 'keywords': list(cause_keywords)} for cause, cause_keywords in causes]}
-            for domain, color, keywords, causes in DEFAULT_ROOT_CAUSES]
+def _initial_root_catalog(connection: Any) -> dict[str, list[dict[str, Any]]]:
+    """The default root cause catalog, merged with the domains and causes of the first version's taxonomy."""
+    catalog = nq_catalog.default_root_catalog()
+    if not connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                              (_LEGACY_ROOT_CAUSES_TABLE,)).fetchone():
+        return catalog
+    rows = connection.execute(
+        f'SELECT domain, cause, color, keywords FROM {_LEGACY_ROOT_CAUSES_TABLE} ORDER BY position, cause COLLATE NOCASE').fetchall()
+    domains = {item['name'].casefold(): item for item in catalog['domains']}
+    causes = {item['name'].casefold(): item for item in catalog['causes']}
+    for row in rows:
+        name, cause = str(row['domain']), str(row['cause'] or '')
+        words = _keywords(json.loads(row['keywords'] or '[]'))
+        if not cause:
+            # The workspace's own domains keep their colour and keywords.
+            target = domains.get(name.casefold())
+            if target is None:
+                target = {'name': name, 'color': str(row['color'] or '#7b8790'), 'keywords': words}
+                catalog['domains'].append(target)
+                domains[name.casefold()] = target
+            else:
+                target.update(color=str(row['color'] or target['color']), keywords=words)
+        elif cause.casefold() in causes:
+            causes[cause.casefold()].update(domain=name, keywords=words)
+        else:
+            item = {'name': cause, 'domain': name, 'keywords': words}
+            catalog['causes'].append(item)
+            causes[cause.casefold()] = item
+    connection.execute(f'DROP TABLE {_LEGACY_ROOT_CAUSES_TABLE}')
+    return catalog
 
 
-def _upgrade_default_root_causes(task_repository: Any) -> None:
-    """Correct, once, the rows of the first default root causes that nobody edited, and add UL interference."""
+def _install_analysis_center(task_repository: Any, fresh: bool) -> None:
+    """Add the Analysis Center to a workspace once: its fields, statuses, teams and status rules.
+
+    Fields with the name of a default field keep their key and values and take its section and
+    place. The statuses and teams of the first version are replaced (and their calls moved to the
+    new statuses) while nobody changed them; otherwise the missing defaults are added.
+    """
+    current = list_fields(task_repository)
+    by_label = {field['label'].casefold(): field for field in current}
+    by_key = {field['key']: field for field in current}
+    merged: list[dict[str, Any]] = []
+    used: set[str] = set()
+    for default in nq_catalog.default_fields():
+        existing = by_key.get(default['key']) or by_label.get(default['label'].casefold())
+        if existing is not None and existing['source'] == 'user' and default['source'] == 'user' and existing['type'] == default['type']:
+            merged.append({**default, 'key': existing['key'], 'options': existing['options'] or default['options'],
+                           'in_table': existing['in_table'] or default['in_table'],
+                           'in_summary': existing['in_summary'] or default['in_summary'],
+                           'required_to_close': existing['required_to_close']})
+            used.add(existing['key'])
+        elif default['key'] in by_key:
+            merged.append(by_key[default['key']])
+            used.add(default['key'])
+        else:
+            merged.append(default)
+    merged += [field for field in current if field['key'] not in used]
+    _store_fields(task_repository, nq_catalog.normalize_fields(merged, by_key, CALL_FIELDS))
+    options = list_options(task_repository)
+    names = [item['name'] for item in options['statuses']]
     with task_repository.connection() as connection:
-        for domain, cause, old, new in _ROOT_CAUSE_DEFAULT_UPGRADES:
-            row = connection.execute(
-                f'SELECT keywords FROM {NQ_ROOT_CAUSES_TABLE} WHERE domain = ? AND cause = ?', (domain, cause),
-            ).fetchone()
-            if row is not None and _keywords(json.loads(row['keywords'] or '[]')) == old:
-                connection.execute(f'UPDATE {NQ_ROOT_CAUSES_TABLE} SET keywords = ? WHERE domain = ? AND cause = ?',
-                                   (json.dumps(new), domain, cause))
-        dl = connection.execute(
-            f"SELECT position FROM {NQ_ROOT_CAUSES_TABLE} WHERE domain = 'RF' AND cause = 'DL interference'").fetchone()
-        ul = connection.execute(
-            f"SELECT 1 FROM {NQ_ROOT_CAUSES_TABLE} WHERE domain = 'RF' AND cause = 'UL interference'").fetchone()
-        if dl is not None and ul is None:
-            # UL interference goes right after DL interference.
-            connection.execute(f"UPDATE {NQ_ROOT_CAUSES_TABLE} SET position = position + 1 "
-                               f"WHERE domain = 'RF' AND cause <> '' AND position > ?", (dl['position'],))
-            connection.execute(
-                f'INSERT OR IGNORE INTO {NQ_ROOT_CAUSES_TABLE} (domain, cause, color, keywords, position) VALUES (?, ?, ?, ?, ?)',
-                ('RF', 'UL interference', '', json.dumps(['ul interference', 'uplink interference']), dl['position'] + 1),
-            )
-    task_repository.set_workspace_state(ROOT_CAUSE_DEFAULTS_STATE_KEY, str(ROOT_CAUSE_DEFAULTS_VERSION))
+        if fresh or [name.casefold() for name in names] == [name.casefold() for name in _FIRST_STATUSES]:
+            for old, new in _FIRST_STATUS_MOVES.items():
+                connection.execute(f'UPDATE {NQ_CALL_TRACKING_TABLE} SET status = ? WHERE status = ? COLLATE NOCASE', (new, old))
+            connection.execute(f"DELETE FROM {NQ_CALL_OPTIONS_TABLE} WHERE kind = 'status'")
+            connection.executemany(
+                f"INSERT INTO {NQ_CALL_OPTIONS_TABLE} (kind, name, color, position, is_closed) VALUES ('status', ?, ?, ?, ?)",
+                [(name, color, index, int(closed)) for index, (name, color, closed) in enumerate(DEFAULT_STATUSES)])
+        else:
+            known = {name.casefold() for name in names}
+            missing = [entry for entry in DEFAULT_STATUSES if entry[0].casefold() not in known]
+            if missing and missing[0][0] == DEFAULT_STATUSES[0][0]:
+                connection.execute(f"UPDATE {NQ_CALL_OPTIONS_TABLE} SET position = position + 1 WHERE kind = 'status'")
+                connection.execute(f"INSERT INTO {NQ_CALL_OPTIONS_TABLE} (kind, name, color, position, is_closed) VALUES ('status', ?, ?, 0, ?)",
+                                   (missing[0][0], missing[0][1], int(missing[0][2])))
+                missing = missing[1:]
+            position = len(names) + 1
+            for name, color, closed in missing:
+                connection.execute(f"INSERT INTO {NQ_CALL_OPTIONS_TABLE} (kind, name, color, position, is_closed) VALUES ('status', ?, ?, ?, ?)",
+                                   (name, color, position, int(closed)))
+                position += 1
+        teams = [item['name'] for item in options['teams']]
+        teams_used = connection.execute(f"SELECT COUNT(*) FROM {NQ_CALL_TRACKING_TABLE} WHERE team <> ''").fetchone()[0]
+        if fresh or ([name.casefold() for name in teams] == [name.casefold() for name in _FIRST_TEAMS] and not teams_used):
+            connection.execute(f"DELETE FROM {NQ_CALL_OPTIONS_TABLE} WHERE kind = 'team'")
+            connection.execute(f'DELETE FROM {NQ_TEAM_MEMBERS_TABLE}')
+            connection.executemany(
+                f"INSERT INTO {NQ_CALL_OPTIONS_TABLE} (kind, name, color, position, is_closed) VALUES ('team', ?, ?, ?, 0)",
+                [(name, color, index) for index, (name, color) in enumerate(DEFAULT_TEAMS)])
+        # The follow-up of the first version was chosen by hand: it stays as it is, except the first status.
+        connection.execute(f"UPDATE {NQ_CALL_TRACKING_TABLE} SET status_mode = CASE WHEN status IN ('', ?, 'Open') "
+                           "THEN 'auto' ELSE 'manual' END", (DEFAULT_STATUSES[0][0],))
+    statuses = [item['name'] for item in list_options(task_repository)['statuses']]
+    fields = list_fields(task_repository)
+    rules = []
+    known = nq_catalog.condition_fields(fields)
+    for rule in nq_catalog.default_status_rules():
+        conditions = [condition for condition in rule['conditions'] if condition['field'] in known]
+        if rule['status'] in statuses and conditions:
+            rules.append({**rule, 'conditions': conditions})
+    task_repository.set_workspace_state(STATUS_RULES_STATE_KEY, json.dumps(rules, ensure_ascii=False))
+    task_repository.set_workspace_state(ANALYSIS_CENTER_STATE_KEY, '1')
+    recompute_statuses(task_repository, 'system')
 
 
 # ---------------------------------------------------------------------------
@@ -541,7 +608,7 @@ TABLE_COLUMNS_STATE_KEY = 'nq_calls_table_columns'
 # Optional columns of the Calls table, with their labels.
 OPTIONAL_COLUMNS = {
     'join_id': 'JOIN_ID', 'nr_mode': 'NR Mode', 'cell_id': 'Cell ID',
-    'direction': 'Direction', 'session_type': 'Session Type', 'end_time': 'End Time', 'cdr': 'CDR',
+    'direction': 'Direction', 'session_type': 'Session Type (CDR)', 'end_time': 'End Time', 'cdr': 'CDR',
 }
 MAX_CDR_COLUMNS = 12
 # CDR columns exported to Excel besides those of the table.
@@ -578,9 +645,14 @@ def table_columns(repository: Any) -> dict[str, list[str]]:
 
 
 def indexed_cdr_columns(repository: Any) -> list[str]:
-    """The CDR columns kept with every call: those of the table, then those only exported to Excel."""
+    """The CDR columns kept with every call: those of the table, those only exported to Excel and those of the catalog."""
     columns = table_columns(repository)
-    return [*columns['cdr'], *columns['export_cdr']]
+    try:
+        catalog = [field['source_ref'][7:] for field in list_fields(repository)
+                   if field['source'] == 'cdr' and field['source_ref'].startswith('column:')]
+    except Exception:  # noqa: BLE001 - the catalog table may not exist yet while the module tables are created.
+        catalog = []
+    return list(dict.fromkeys([*columns['cdr'], *columns['export_cdr'], *catalog]))
 
 
 def save_table_columns(repository: Any, builtin: Any, cdr: Any, username: str, export_cdr: Any = ()) -> dict[str, list[str]]:
@@ -1049,6 +1121,13 @@ def save_options(
             team['members'] = [known[member.casefold()] for member in team['members']]
     if not lists['status']:
         raise ValueError('Keep at least one status.')
+    existing_statuses = {item['name'].casefold() for item in current['statuses']}
+    renamed_statuses = {item['previous'].casefold(): item['name'] for item in lists['status']
+                        if item['previous'] and item['previous'].casefold() in existing_statuses}
+    try:
+        stored_rules = json.loads(task_repository.get_workspace_state(STATUS_RULES_STATE_KEY) or '[]')
+    except (TypeError, ValueError):
+        stored_rules = []
     with task_repository.connection() as connection:
         for kind, column in (('status', 'status'), ('team', 'team')):
             existing = {item['name'].casefold(): item['name'] for item in current['statuses' if kind == 'status' else 'teams']}
@@ -1086,33 +1165,26 @@ def save_options(
                 connection.executemany(
                     f'INSERT OR IGNORE INTO {NQ_TEAM_MEMBERS_TABLE} (team, username) VALUES (?, ?)', rows,
                 )
+    # The status rules follow renamed statuses and forget removed ones.
+    if isinstance(stored_rules, list):
+        rules = nq_catalog.rules_after_status_changes(
+            [rule for rule in stored_rules if isinstance(rule, dict) and rule.get('status')], renamed_statuses,
+            [item['name'] for item in lists['status']])
+        task_repository.set_workspace_state(STATUS_RULES_STATE_KEY, json.dumps(rules, ensure_ascii=False))
+    recompute_statuses(task_repository, username)
     if hasattr(task_repository, 'try_add_log'):
         task_repository.try_add_log(username, 'nq_call_options', 'Non-Qualified Calls statuses and teams updated.')
     return list_options(task_repository)
 
 
 # ---------------------------------------------------------------------------
-# Analysis fields: the workspace's own follow-up fields
+# The field catalog: every field of the Analysis Center, in its section
 # ---------------------------------------------------------------------------
-FIELD_TYPES = {
-    'list': 'List', 'text': 'Text', 'long_text': 'Long text', 'number': 'Number', 'date': 'Date', 'yes_no': 'Yes / No',
-}
-MAX_FIELDS = 60
-MAX_FIELD_TEXT = 2000
-YES_NO = ('Yes', 'No')
-_FIELD_KEY = re.compile(r'[^a-z0-9]+')
-
-
-def _field_key(label: str, taken: set[str]) -> str:
-    base = _FIELD_KEY.sub('_', label.casefold()).strip('_')[:40] or 'field'
-    key, index = base, 2
-    while key in taken:
-        key, index = f'{base}_{index}', index + 1
-    return key
+MAX_FIELDS = nq_catalog.MAX_FIELDS
 
 
 def list_fields(task_repository: Any) -> list[dict[str, Any]]:
-    """The analysis fields of the workspace, in order, with their options."""
+    """The fields of the workspace catalog, in order, with their section, source and options."""
     with task_repository.connection() as connection:
         rows = connection.execute(f'SELECT * FROM {NQ_FIELDS_TABLE} ORDER BY position, label COLLATE NOCASE').fetchall()
     fields = []
@@ -1121,71 +1193,52 @@ def list_fields(task_repository: Any) -> list[dict[str, Any]]:
             options = json.loads(row['options_json'] or '[]')
         except (TypeError, ValueError):
             options = []
+        keys = row.keys()
         fields.append({
             'key': str(row['field_key']), 'label': str(row['label']), 'type': str(row['field_type']),
-            'options': [{'name': str(item.get('name') or ''), 'color': str(item.get('color') or '')}
+            'options': [{'name': str(item.get('name') or ''), 'color': str(item.get('color') or ''),
+                         'keywords': _keywords(item.get('keywords'))}
                         for item in options if isinstance(item, dict) and item.get('name')],
             'in_table': bool(row['in_table']), 'in_summary': bool(row['in_summary']),
             'required_to_close': bool(row['required_to_close']), 'description': str(row['description'] or ''),
+            'section': str(row['section'] if 'section' in keys else 'analysis') or 'analysis',
+            'source': str(row['source'] if 'source' in keys else 'user') or 'user',
+            'source_ref': str(row['source_ref'] if 'source_ref' in keys else '') or '',
+            'in_export': bool(row['in_export'] if 'in_export' in keys else 1),
+            'suggest_from': str(row['suggest_from'] if 'suggest_from' in keys else '') or '',
         })
     return fields
 
 
-def _normalize_fields(items: Any, existing: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    if not isinstance(items, list):
-        raise ValueError('The analysis field list is invalid.')
-    if len(items) > MAX_FIELDS:
-        raise ValueError(f'Keep at most {MAX_FIELDS} analysis fields.')
-    normalized: list[dict[str, Any]] = []
-    labels: set[str] = set()
-    taken = set(existing)
-    for item in items:
-        if not isinstance(item, dict):
-            raise ValueError('The analysis field list is invalid.')
-        label = re.sub(r'\s+', ' ', str(item.get('label') or '')).strip()[:60]
-        if not label:
-            raise ValueError('Every analysis field needs a name.')
-        if label.casefold() in labels:
-            raise ValueError(f'The analysis field "{label}" is repeated.')
-        labels.add(label.casefold())
-        field_type = str(item.get('type') or 'text')
-        if field_type not in FIELD_TYPES:
-            raise ValueError(f'Choose a type for "{label}".')
-        key = str(item.get('key') or '')
-        if key in taken and key not in existing:
-            key = ''
-        if key not in existing and not re.fullmatch(r'[a-z0-9_]{1,40}', key):
-            # New fields get a key from their name; imported fields keep theirs.
-            key = _field_key(label, taken)
-        taken.add(key)
-        options: list[dict[str, str]] = []
-        if field_type == 'list':
-            names: set[str] = set()
-            for option in item.get('options') or []:
-                if not isinstance(option, dict):
-                    raise ValueError(f'The values of "{label}" are invalid.')
-                name = re.sub(r'\s+', ' ', str(option.get('name') or '')).strip()[:80]
-                if not name or name.casefold() in names:
-                    continue
-                names.add(name.casefold())
-                color = str(option.get('color') or '').strip()
-                options.append({'name': name, 'color': color if COLOR_PATTERN.fullmatch(color) else '',
-                                'previous': re.sub(r'\s+', ' ', str(option.get('previous') or '')).strip()})
-            if not options:
-                raise ValueError(f'Add at least one value to the list "{label}".')
-        normalized.append({
-            'key': key, 'label': label, 'type': field_type, 'options': options,
-            'in_table': bool(item.get('in_table')), 'in_summary': bool(item.get('in_summary')) and field_type in {'list', 'yes_no'},
-            'required_to_close': bool(item.get('required_to_close')),
-            'description': str(item.get('description') or '').strip()[:300],
-        })
-    return normalized
+def _store_fields(task_repository: Any, fields: list[dict[str, Any]]) -> None:
+    with task_repository.connection() as connection:
+        connection.execute(f'DELETE FROM {NQ_FIELDS_TABLE}')
+        connection.executemany(
+            f'INSERT INTO {NQ_FIELDS_TABLE} (field_key, label, field_type, options_json, position, in_table, in_summary, '
+            'required_to_close, description, section, source, source_ref, in_export, suggest_from) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [(field['key'], field['label'], field['type'],
+              json.dumps([{'name': option['name'], 'color': option.get('color', ''),
+                           **({'keywords': option['keywords']} if option.get('keywords') else {})}
+                          for option in field['options']], ensure_ascii=False),
+              index, int(field['in_table']), int(field['in_summary']), int(field['required_to_close']), field['description'],
+              field['section'], field['source'], field['source_ref'], int(field.get('in_export', True)), field.get('suggest_from', ''))
+             for index, field in enumerate(fields)],
+        )
 
 
 def save_fields(task_repository: Any, items: Any, username: str) -> list[dict[str, Any]]:
-    """Replace the analysis fields; renamed list values follow on every call, values in use cannot be removed."""
+    """Replace the field catalog; renamed list values follow on every call and in the status rules, values in use
+    cannot be removed, and the follow-up fields (status, team, assignee…) stay."""
     existing = {field['key']: field for field in list_fields(task_repository)}
-    normalized = _normalize_fields(items, existing)
+    if not isinstance(items, list):
+        raise ValueError('The field list is invalid.')
+    # The follow-up fields (status, team, assignee…) cannot be removed: those left out keep their place at the end.
+    given = {str(item.get('source_ref')) for item in items if isinstance(item, dict) and item.get('source') == 'tracking'}
+    given |= {str(existing[str(item.get('key'))]['source_ref']) for item in items
+              if isinstance(item, dict) and str(item.get('key')) in existing and existing[str(item.get('key'))]['source'] == 'tracking'}
+    items = [*items, *(field for field in existing.values() if field['source'] == 'tracking' and field['source_ref'] not in given)]
+    normalized = nq_catalog.normalize_fields(items, existing, CALL_FIELDS)
     kept = {field['key'] for field in normalized}
     with task_repository.connection() as connection:
         def used(key: str, value: str | None = None) -> int:
@@ -1197,19 +1250,19 @@ def save_fields(task_repository: Any, items: Any, username: str) -> list[dict[st
             return int(connection.execute(sql, params).fetchone()[0])
 
         for key, field in existing.items():
-            if key not in kept and used(key):
-                raise ValueError(f'The analysis field "{field["label"]}" has values; clear them before removing it.')
+            if key not in kept and field['source'] == 'user' and used(key):
+                raise ValueError(f'The field "{field["label"]}" has values; clear them before removing it.')
         for field in normalized:
             previous = existing.get(field['key'])
-            if previous is None:
+            if previous is None or previous['source'] != 'user':
                 continue
-            if previous['type'] != field['type'] and used(field['key']):
-                raise ValueError(f'"{field["label"]}" has values: its type cannot change.')
+            if (previous['type'] != field['type'] or field['source'] != 'user') and used(field['key']):
+                raise ValueError(f'"{field["label"]}" has values: its type and source cannot change.')
             if field['type'] != 'list' or previous['type'] != 'list':
                 continue
             old = {option['name'].casefold(): option['name'] for option in previous['options']}
             renamed = {option['previous'].casefold(): option['name'] for option in field['options']
-                       if option['previous'] and option['previous'].casefold() in old}
+                       if option.get('previous') and option['previous'].casefold() in old}
             names = {option['name'].casefold() for option in field['options']} | set(renamed)
             for key, name in old.items():
                 if key not in names and used(field['key'], name):
@@ -1219,25 +1272,39 @@ def save_fields(task_repository: Any, items: Any, username: str) -> list[dict[st
                     connection.execute(
                         f'UPDATE {NQ_FIELD_VALUES_TABLE} SET value = ? WHERE field_key = ? AND value = ? COLLATE NOCASE',
                         (name, field['key'], old[key]))
-        connection.execute(f'DELETE FROM {NQ_FIELDS_TABLE}')
-        connection.executemany(
-            f'INSERT INTO {NQ_FIELDS_TABLE} (field_key, label, field_type, options_json, position, in_table, in_summary, '
-            'required_to_close, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [(field['key'], field['label'], field['type'],
-              json.dumps([{'name': option['name'], 'color': option['color']} for option in field['options']], ensure_ascii=False),
-              index, int(field['in_table']), int(field['in_summary']), int(field['required_to_close']), field['description'])
-             for index, field in enumerate(normalized)],
-        )
+    rules = nq_catalog.rules_after_field_changes(status_rules(task_repository), list(existing.values()), normalized)
+    _store_fields(task_repository, normalized)
+    task_repository.set_workspace_state(STATUS_RULES_STATE_KEY, json.dumps(rules, ensure_ascii=False))
+    recompute_statuses(task_repository, username)
     if hasattr(task_repository, 'try_add_log'):
-        task_repository.try_add_log(username, 'nq_analysis_fields', 'Non-Qualified Calls analysis fields updated.')
+        task_repository.try_add_log(username, 'nq_analysis_fields', 'Non-Qualified Calls field catalog updated.')
     return list_fields(task_repository)
 
 
+def list_sections(task_repository: Any) -> list[dict[str, str]]:
+    """The six sections with the names and colours of the workspace."""
+    try:
+        stored = json.loads(task_repository.get_workspace_state(SECTIONS_STATE_KEY) or '[]')
+    except (TypeError, ValueError):
+        stored = []
+    return nq_catalog.normalize_sections(stored if isinstance(stored, list) else [])
+
+
+def save_sections(task_repository: Any, items: Any, username: str) -> list[dict[str, str]]:
+    sections = nq_catalog.normalize_sections(items if isinstance(items, list) else [])
+    task_repository.set_workspace_state(SECTIONS_STATE_KEY, json.dumps(sections, ensure_ascii=False))
+    if hasattr(task_repository, 'try_add_log'):
+        task_repository.try_add_log(username, 'nq_sections', 'Non-Qualified Calls sections updated.')
+    return sections
+
+
 def _field_value(field: dict[str, Any], value: Any) -> str:
-    """A valid value of an analysis field ('' clears it)."""
+    """A valid value of a field entered by the analysts ('' clears it)."""
     text = str(value if value is not None else '').strip()
     if not text:
         return ''
+    if field['source'] != 'user':
+        raise ValueError(f'{field["label"]} is set automatically.')
     kind = field['type']
     if kind == 'list':
         names = {option['name'].casefold(): option['name'] for option in field['options']}
@@ -1253,13 +1320,13 @@ def _field_value(field: dict[str, Any], value: Any) -> str:
         number = _number(text.replace(',', '.'))
         if number is None:
             raise ValueError(f'{field["label"]} is a number.')
-        return str(int(number)) if number.is_integer() else str(number)
+        return str(int(number)) if number.is_integer() else repr(number)
     if kind == 'date':
         try:
             return datetime.strptime(text[:10], '%Y-%m-%d').strftime('%Y-%m-%d')
         except ValueError as exc:
             raise ValueError(f'{field["label"]} is a date (YYYY-MM-DD).') from exc
-    limit = MAX_FIELD_TEXT if kind == 'long_text' else 300
+    limit = MAX_LONG_TEXT if kind == 'long_text' else 300
     if len(text) > limit:
         raise ValueError(f'{field["label"]} accepts up to {limit} characters.')
     return text if kind == 'long_text' else re.sub(r'\s+', ' ', text)
@@ -1277,83 +1344,216 @@ def field_values(connection: Any, keys: list[str]) -> dict[str, dict[str, str]]:
     return values
 
 
-_SKIPPED_HINTS = ('python', 'from cdr', 'taken from cdr', 'value to be taken', 'will come')
+def derived_value(field: dict[str, Any], call: Any) -> str:
+    """The value of a derived list: the first option whose keywords appear in the call values it reads."""
+    text = ' '.join(_normalized_text(_call_value(call, name)) for name in field['source_ref'].split(','))
+    return next((option['name'] for option in field['options'] if keyword_found(option.get('keywords') or [], text, 'text')), '')
 
 
-def fields_from_workbook(content: bytes) -> dict[str, Any]:
-    """Analysis fields proposed by a workbook whose first row names the fields and the rows below list their values.
+def _call_value(call: Any, key: str) -> Any:
+    key = key.strip()
+    try:
+        if key.startswith('column:'):
+            extra = call['extra'] if isinstance(call, dict) and 'extra' in call else json.loads(call['extra_json'] or '{}')
+            return (extra or {}).get(key[7:], '')
+        return call[key]
+    except (KeyError, IndexError, TypeError, ValueError):
+        return ''
 
-    A column of values becomes a list; Yes and No a Yes / No field; "User Define" a text (a
-    date or number when the name says so); values that come from the CDR or a script are left
-    out (the CDR fields are in the call details).
-    """
-    from openpyxl import load_workbook
 
-    workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
-    sheet = workbook.worksheets[0]
-    rows = list(sheet.iter_rows(values_only=True))
-    if not rows:
-        raise ValueError('The workbook is empty.')
-    proposed: list[dict[str, Any]] = []
-    skipped: list[str] = []
-    labels: set[str] = set()
-    for index, header in enumerate(rows[0]):
-        label = re.sub(r'\s+', ' ', str(header or '')).strip()[:60]
-        if not label or label.casefold() in labels:
+def catalog_value(field: dict[str, Any], call: Any, rca: dict[str, str] | None = None, stored: dict[str, str] | None = None) -> Any:
+    """The value of a catalog field for a call: entered, followed up, from the CDR, the RCA script or derived."""
+    source, ref = field['source'], field['source_ref']
+    if source == 'user':
+        return (stored or {}).get(field['key'], '')
+    if source == 'tracking':
+        return _call_value(call, 'comment_count' if ref == 'comments' else ref)
+    if source == 'cdr':
+        return _call_value(call, ref)
+    if source == 'rca':
+        return (rca or {}).get(ref, '')
+    if source == 'derived':
+        return derived_value(field, call)
+    return ''
+
+
+def field_sql(field: dict[str, Any]) -> str:
+    """The SQL value of a catalog field in the calls query (``calls`` rows of ``_base_sql``)."""
+    source, ref = field['source'], field['source_ref']
+    if source == 'user':
+        return f"COALESCE(json_extract(field_values_json, '$.\"{field['key']}\"'), '')"
+    if source == 'tracking':
+        return {'comments': 'comment_count', 'updated_at': "substr(updated_at, 1, 10)"}.get(ref, ref) \
+            if ref in nq_catalog.TRACKING_REFS else "''"
+    if source == 'cdr':
+        if ref in CALL_FIELDS:
+            return f"COALESCE(CAST({ref} AS TEXT), '')"
+        name = ref[7:].replace('"', '').replace("'", '') if ref.startswith('column:') else ref
+        return f"COALESCE(CAST(json_extract(extra_json, '$.\"{name}\"') AS TEXT), '')"
+    if source == 'rca':
+        name = ref.replace('"', '').replace("'", '')
+        return f"COALESCE(json_extract(rca_json, '$.\"{name}\"'), '')"
+    if source == 'derived':
+        names = [name.strip() for name in ref.split(',') if name.strip() in CALL_FIELDS]
+        if not names:
+            return "''"
+        text = "lower(' ' || " + " || ' ' || ".join(f"COALESCE({name}, '')" for name in names) + " || ' ')"
+        text = f"replace({text}, '_', ' ')"
+        cases = []
+        for option in field['options']:
+            tests = []
+            for keyword in option.get('keywords') or []:
+                parts = [part.replace("'", "''") for part in keyword.split('+')]
+                tests.append('(' + ' AND '.join(f"instr({text}, '{part}') > 0" for part in parts) + ')')
+            if tests:
+                cases.append(f"WHEN {' OR '.join(tests)} THEN '{option['name'].replace(chr(39), chr(39) * 2)}'")
+        return f"(CASE {' '.join(cases)} ELSE '' END)" if cases else "''"
+    return "''"
+
+
+def catalog_document(task_repository: Any) -> bytes:
+    """The whole catalog of the workspace as an Excel workbook, to edit and import again."""
+    options = list_options(task_repository)
+    root = list_root_causes(task_repository)
+    return nq_catalog.catalog_workbook(list_sections(task_repository), list_fields(task_repository), options['statuses'],
+                                       options['teams'], root, status_rules(task_repository))
+
+
+def _merged_catalog(task_repository: Any, incoming: dict[str, Any]) -> dict[str, Any]:
+    """The catalog after an import: incoming entries first (matched by key or name), then the current ones it leaves out."""
+    current_fields = list_fields(task_repository)
+    by_key = {field['key']: field for field in current_fields}
+    by_label = {field['label'].casefold(): field for field in current_fields}
+    fields: list[dict[str, Any]] = []
+    used: set[str] = set()
+    for item in incoming.get('fields') or []:
+        existing = by_key.get(str(item.get('key') or '')) or by_label.get(str(item.get('label') or '').casefold())
+        if existing is not None:
+            if existing['key'] in used:
+                continue
+            item = {**existing, **{key: value for key, value in item.items() if value not in (None, '')}, 'key': existing['key']}
+            if existing['source'] != 'user':
+                item.update(source=existing['source'], source_ref=existing['source_ref'], type=existing['type'])
+            if not item.get('options'):
+                item['options'] = existing['options']
+            used.add(existing['key'])
+        elif item.get('source') == 'tracking' and item.get('source_ref') in {field['source_ref'] for field in current_fields
+                                                                             if field['source'] == 'tracking'}:
             continue
-        labels.add(label.casefold())
-        values: list[str] = []
-        seen: set[str] = set()
-        for row in rows[1:]:
-            text = re.sub(r'\s+', ' ', str(row[index] if index < len(row) and row[index] is not None else '')).strip()
-            if text and text.casefold() not in seen:
-                seen.add(text.casefold())
-                values.append(text)
-        lowered = [value.casefold() for value in values]
-        name = label.casefold()
-        if any(hint in value for value in lowered for hint in _SKIPPED_HINTS):
-            skipped.append(label)
+        fields.append(item)
+    fields += [field for field in current_fields if field['key'] not in used]
+    options = list_options(task_repository)
+    statuses, teams = options['statuses'], options['teams']
+    for plural, items in (('statuses', incoming.get('statuses')), ('teams', incoming.get('teams'))):
+        if not items:
             continue
-        if lowered and set(lowered) <= {'yes', 'no'}:
-            field_type, options = 'yes_no', []
-        elif not values or lowered == ['user define']:
-            field_type = 'date' if 'date' in name else 'number' if any(word in name for word in ('latitude', 'longitude')) else \
-                'long_text' if any(word in name for word in ('finding', 'comment', 'measure')) else 'text'
-            options = []
+        current = statuses if plural == 'statuses' else teams
+        names = {item['name'].casefold(): item for item in current}
+        ordered = []
+        for item in items:
+            name = str(item.get('name') or '').strip()
+            if not name:
+                continue
+            base = names.get(name.casefold(), {})
+            ordered.append({**base, **{key: value for key, value in item.items() if value not in (None, '')},
+                            'previous': base.get('name', ''), **({'members': base.get('members', [])} if plural == 'teams' and not item.get('members') else {})})
+        chosen = {item['name'].casefold() for item in ordered}
+        ordered += [{**item, 'previous': item['name']} for item in current if item['name'].casefold() not in chosen]
+        if plural == 'statuses':
+            statuses = ordered
         else:
-            field_type = 'list'
-            options = [{'name': value[:80], 'color': ''} for value in values if value.casefold() != 'user define']
-        proposed.append({'label': label, 'type': field_type, 'options': options, 'in_table': False, 'in_summary': False,
-                         'required_to_close': False, 'description': ''})
-    return {'fields': proposed, 'skipped': skipped}
+            teams = ordered
+    root = list_root_causes(task_repository)
+    catalog = {plural: [dict(item, previous=item['name']) for item in root[plural]] for plural in ('domains', 'categories', 'causes')}
+    for plural, items in (incoming.get('root') or {}).items():
+        names = {item['name'].casefold(): item for item in catalog.get(plural, [])}
+        for item in items:
+            name = str(item.get('name') or '').strip()
+            if not name:
+                continue
+            if name.casefold() in names:
+                names[name.casefold()].update({key: value for key, value in item.items() if value not in (None, '', [])})
+            else:
+                catalog[plural].append(dict(item))
+    return {'sections': incoming.get('sections'), 'fields': fields, 'statuses': statuses, 'teams': teams, 'root': catalog,
+            'rules': incoming.get('rules'), 'require_to_close': root['require_to_close']}
+
+
+def preview_catalog(task_repository: Any, content: bytes) -> dict[str, Any]:
+    """What importing a catalog workbook would change, without changing anything."""
+    incoming = nq_catalog.read_catalog_workbook(content)
+    merged = _merged_catalog(task_repository, incoming)
+    current_fields = {field['key']: field for field in list_fields(task_repository)}
+    normalized = nq_catalog.normalize_fields(merged['fields'], current_fields, CALL_FIELDS)
+    added = [field['label'] for field in normalized if field['key'] not in current_fields]
+    changed = [field['label'] for field in normalized if field['key'] in current_fields and any(
+        field[key] != current_fields[field['key']].get(key) for key in ('label', 'section', 'type', 'in_table', 'in_export'))
+        or (field['key'] in current_fields and [option['name'] for option in field['options']]
+            != [option['name'] for option in current_fields[field['key']]['options']])]
+    root = list_root_causes(task_repository)
+    root_added = {plural: [item['name'] for item in merged['root'][plural]
+                           if item['name'].casefold() not in {entry['name'].casefold() for entry in root[plural]}]
+                  for plural in ('domains', 'categories', 'causes')}
+    options = list_options(task_repository)
+    return {
+        'format': incoming.get('format'), 'fields': len(normalized), 'added': added, 'changed': changed,
+        'root_added': root_added, 'sections': bool(incoming.get('sections')),
+        'statuses_added': [item['name'] for item in merged['statuses']
+                           if item['name'].casefold() not in {entry['name'].casefold() for entry in options['statuses']}],
+        'teams_added': [item['name'] for item in merged['teams']
+                        if item['name'].casefold() not in {entry['name'].casefold() for entry in options['teams']}],
+        'rules': len(incoming.get('rules') or []),
+    }
+
+
+def import_catalog(task_repository: Any, content: bytes, username: str, users: set[str] | None = None) -> dict[str, Any]:
+    """Import a catalog workbook: the new fields, list values, catalog entries, statuses and teams are added, and the
+    sections and status rules it has are taken. Nothing is removed."""
+    incoming = nq_catalog.read_catalog_workbook(content)
+    merged = _merged_catalog(task_repository, incoming)
+    if merged['sections']:
+        save_sections(task_repository, merged['sections'], username)
+    save_options(task_repository, merged['statuses'], merged['teams'], username, users)
+    save_root_causes(task_repository, merged['root'], merged['require_to_close'], username)
+    save_fields(task_repository, merged['fields'], username)
+    if merged['rules']:
+        save_status_rules(task_repository, merged['rules'], username)
+    return {'fields': list_fields(task_repository), 'sections': list_sections(task_repository),
+            'root_causes': list_root_causes(task_repository), 'options': list_options(task_repository),
+            'status_rules': status_rules(task_repository)}
 
 
 # ---------------------------------------------------------------------------
-# Root causes: a domain and a cause inside it
+# Root cause catalog: domains, root categories and root causes
 # ---------------------------------------------------------------------------
-def _keywords(values: Any) -> list[str]:
-    if isinstance(values, str):
-        values = re.split(r'[,;\n]', values)
-    if not isinstance(values, list):
-        return []
-    return list(dict.fromkeys(text for value in values if (text := _normalized_text(value))))[:30]
-
-
-def _normalized_text(value: Any) -> str:
-    """Lower-case text with underscores and non-breaking spaces as spaces, for keyword matching."""
-    return re.sub(r'\s+', ' ', str(value or '').replace('_', ' ').replace('\xa0', ' ')).strip().casefold()
-
-
-def _write_root_causes(connection: Any, domains: list[dict[str, Any]]) -> None:
-    connection.execute(f'DELETE FROM {NQ_ROOT_CAUSES_TABLE}')
-    rows = []
-    for position, domain in enumerate(domains):
-        rows.append((domain['name'], '', domain.get('color') or '#7b8790', json.dumps(_keywords(domain.get('keywords'))), position))
-        rows.extend((domain['name'], cause['name'], '', json.dumps(_keywords(cause.get('keywords'))), index)
-                    for index, cause in enumerate(domain.get('causes') or []))
+def _write_root_catalog(connection: Any, catalog: dict[str, list[dict[str, Any]]]) -> None:
+    connection.execute(f'DELETE FROM {NQ_ROOT_CATALOG_TABLE}')
+    rows = [('domain', item['name'], '', item.get('color') or '#7b8790', json.dumps(_keywords(item.get('keywords'))), index)
+            for index, item in enumerate(catalog['domains'])]
+    for kind, plural in (('category', 'categories'), ('cause', 'causes')):
+        rows += [(kind, item['name'], item.get('domain') or '', '', json.dumps(_keywords(item.get('keywords'))), index)
+                 for index, item in enumerate(catalog[plural])]
     connection.executemany(
-        f'INSERT INTO {NQ_ROOT_CAUSES_TABLE} (domain, cause, color, keywords, position) VALUES (?, ?, ?, ?, ?)', rows,
-    )
+        f'INSERT INTO {NQ_ROOT_CATALOG_TABLE} (kind, name, domain, color, keywords, position) VALUES (?, ?, ?, ?, ?, ?)', rows)
+
+
+def _read_root_catalog(connection: Any) -> dict[str, list[dict[str, Any]]]:
+    rows = connection.execute(
+        f'SELECT kind, name, domain, color, keywords FROM {NQ_ROOT_CATALOG_TABLE} ORDER BY position, name COLLATE NOCASE').fetchall()
+    catalog: dict[str, list[dict[str, Any]]] = {'domains': [], 'categories': [], 'causes': []}
+    plural = {'domain': 'domains', 'category': 'categories', 'cause': 'causes'}
+    for row in rows:
+        item = {'name': str(row['name']), 'keywords': _keywords(json.loads(row['keywords'] or '[]'))}
+        if row['kind'] == 'domain':
+            item['color'] = str(row['color'] or '#7b8790')
+        else:
+            item['domain'] = str(row['domain'] or '')
+        catalog[plural[str(row['kind'])]].append(item)
+    colors = {item['name']: item['color'] for item in catalog['domains']}
+    for plural_name in ('categories', 'causes'):
+        for item in catalog[plural_name]:
+            item['color'] = colors.get(item['domain'], '')
+    return catalog
 
 
 def root_cause_settings(repository: Any) -> dict[str, Any]:
@@ -1409,190 +1609,66 @@ def save_root_cause_rule(repository: Any, rule: Any, username: str) -> dict[str,
     return root_cause_rule(repository)
 
 
-def _current_root_causes(connection: Any) -> list[dict[str, Any]]:
-    """The taxonomy read inside an open transaction (for the tracking import)."""
-    rows = connection.execute(
-        f'SELECT domain, cause, color, keywords, position FROM {NQ_ROOT_CAUSES_TABLE} ORDER BY position, cause COLLATE NOCASE'
-    ).fetchall()
-    domains = {str(row['domain']).casefold(): {'name': str(row['domain']), 'color': str(row['color']), 'causes': [],
-                                               'keywords': _keywords(json.loads(row['keywords'] or '[]'))}
-               for row in rows if not row['cause']}
-    for row in rows:
-        if row['cause'] and str(row['domain']).casefold() in domains:
-            domains[str(row['domain']).casefold()]['causes'].append(
-                {'name': str(row['cause']), 'keywords': _keywords(json.loads(row['keywords'] or '[]'))})
-    return list(domains.values())
-
-
 def list_root_causes(task_repository: Any) -> dict[str, Any]:
-    """The root cause domains in order, each with its colour, keywords and causes, and the settings."""
+    """The root cause catalog (domains, root categories and root causes, in order) and its settings."""
     with task_repository.connection() as connection:
-        rows = connection.execute(
-            f'SELECT domain, cause, color, keywords, position FROM {NQ_ROOT_CAUSES_TABLE} ORDER BY position, cause COLLATE NOCASE'
-        ).fetchall()
-    domains: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        if not row['cause']:
-            domains[str(row['domain']).casefold()] = {
-                'name': str(row['domain']), 'color': str(row['color'] or '#7b8790'), 'position': int(row['position']),
-                'keywords': _keywords(json.loads(row['keywords'] or '[]')), 'causes': [],
-            }
-    for row in rows:
-        domain = domains.get(str(row['domain']).casefold())
-        if row['cause'] and domain is not None:
-            domain['causes'].append({'name': str(row['cause']), 'keywords': _keywords(json.loads(row['keywords'] or '[]'))})
-    ordered = sorted(domains.values(), key=lambda item: item['position'])
-    for domain in ordered:
-        domain.pop('position')
-    return {'domains': ordered, **root_cause_settings(task_repository)}
+        catalog = _read_root_catalog(connection)
+    return {**catalog, **root_cause_settings(task_repository)}
 
 
-def _normalize_root_causes(domains: Any) -> list[dict[str, Any]]:
-    if not isinstance(domains, list):
-        raise ValueError('The root cause list is invalid.')
-    normalized: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in domains:
-        if not isinstance(item, dict):
-            raise ValueError('The root cause list is invalid.')
-        name = re.sub(r'\s+', ' ', str(item.get('name') or '')).strip()[:60]
-        if not name:
-            raise ValueError('Every root cause domain needs a name.')
-        if name.casefold() in seen:
-            raise ValueError(f'The domain "{name}" is repeated.')
-        seen.add(name.casefold())
-        color = str(item.get('color') or '').strip()
-        causes: list[dict[str, Any]] = []
-        cause_names: set[str] = set()
-        for cause in item.get('causes') or []:
-            if not isinstance(cause, dict):
-                raise ValueError('The root cause list is invalid.')
-            cause_name = re.sub(r'\s+', ' ', str(cause.get('name') or '')).strip()[:80]
-            if not cause_name:
-                raise ValueError(f'Every cause of "{name}" needs a name.')
-            if cause_name.casefold() in cause_names:
-                raise ValueError(f'The cause "{cause_name}" is repeated in "{name}".')
-            cause_names.add(cause_name.casefold())
-            causes.append({'name': cause_name, 'keywords': _keywords(cause.get('keywords')),
-                           'previous': re.sub(r'\s+', ' ', str(cause.get('previous') or '')).strip()})
-        normalized.append({
-            'name': name, 'color': color if COLOR_PATTERN.fullmatch(color) else '#7b8790',
-            'keywords': _keywords(item.get('keywords')), 'causes': causes,
-            'previous': re.sub(r'\s+', ' ', str(item.get('previous') or '')).strip(),
-        })
-    return normalized
+def domain_of(catalog: dict[str, Any], category: str, cause: str) -> str:
+    """The domain of a root category, else of a root cause."""
+    for plural, name in (('categories', category), ('causes', cause)):
+        item = next((entry for entry in catalog.get(plural) or [] if name and entry['name'].casefold() == name.casefold()), None)
+        if item and item.get('domain'):
+            return item['domain']
+    return ''
 
 
-def save_root_causes(task_repository: Any, domains: Any, require_to_close: bool, username: str) -> dict[str, Any]:
-    """Replace the root cause taxonomy; renamed values follow on every call, removed ones must be unused."""
+def save_root_causes(task_repository: Any, catalog: Any, require_to_close: bool, username: str) -> dict[str, Any]:
+    """Replace the root cause catalog; renamed values follow on every call, removed ones must be unused."""
     current = list_root_causes(task_repository)
-    normalized = _normalize_root_causes(domains)
-    existing = {domain['name'].casefold(): domain for domain in current['domains']}
+    normalized = nq_catalog.normalize_root_catalog(catalog)
+    columns = {'domains': 'root_domain', 'categories': 'root_category', 'causes': 'root_cause'}
+    titles = {'domains': 'domain', 'categories': 'Root Category', 'causes': 'Root Cause'}
     with task_repository.connection() as connection:
-        def used(domain: str, cause: str | None = None) -> int:
-            sql = f'SELECT COUNT(*) FROM {NQ_CALL_TRACKING_TABLE} WHERE root_domain = ? COLLATE NOCASE'
-            params = [domain]
-            if cause is not None:
-                sql += ' AND root_cause = ? COLLATE NOCASE'
-                params.append(cause)
-            return int(connection.execute(sql, params).fetchone()[0])
-
-        kept_domains: dict[str, dict[str, Any]] = {}
-        for domain in normalized:
-            previous = existing.get((domain['previous'] or domain['name']).casefold())
-            if previous is not None:
-                kept_domains[previous['name'].casefold()] = domain
-        for key, domain in existing.items():
-            if key not in kept_domains and used(domain['name']):
-                raise ValueError(f'The domain "{domain["name"]}" is in use; rename it or change the root cause of its calls first.')
-        for old_key, domain in kept_domains.items():
-            old = existing[old_key]
-            old_causes = {cause['name'].casefold(): cause['name'] for cause in old['causes']}
-            renamed = {cause['previous'].casefold(): cause['name'] for cause in domain['causes']
-                       if cause['previous'] and cause['previous'].casefold() in old_causes}
-            kept = {cause['name'].casefold() for cause in domain['causes']} | set(renamed)
-            for cause_key, cause_name in old_causes.items():
-                if cause_key not in kept and used(old['name'], cause_name):
-                    raise ValueError(f'The cause "{cause_name}" of "{old["name"]}" is in use; rename it or change the root cause of its calls first.')
-            for cause_key, new_name in renamed.items():
-                connection.execute(
-                    f'UPDATE {NQ_CALL_TRACKING_TABLE} SET root_cause = ? WHERE root_domain = ? COLLATE NOCASE '
-                    'AND root_cause = ? COLLATE NOCASE', (new_name, old['name'], old_causes[cause_key]),
-                )
-            if old['name'] != domain['name']:
-                connection.execute(
-                    f'UPDATE {NQ_CALL_TRACKING_TABLE} SET root_domain = ? WHERE root_domain = ? COLLATE NOCASE',
-                    (domain['name'], old['name']),
-                )
-        _write_root_causes(connection, normalized)
+        for plural, column in columns.items():
+            existing = {item['name'].casefold(): item['name'] for item in current[plural]}
+            renamed = {item['previous'].casefold(): item['name'] for item in normalized[plural]
+                       if item['previous'] and item['previous'].casefold() in existing}
+            kept = {item['name'].casefold() for item in normalized[plural]} | set(renamed)
+            for key, name in existing.items():
+                if key in kept:
+                    continue
+                if connection.execute(f'SELECT COUNT(*) FROM {NQ_CALL_TRACKING_TABLE} WHERE {column} = ? COLLATE NOCASE',
+                                      (name,)).fetchone()[0]:
+                    raise ValueError(f'The {titles[plural]} "{name}" is in use; rename it or change the root cause of its calls first.')
+            for key, name in renamed.items():
+                if existing[key] != name:
+                    connection.execute(f'UPDATE {NQ_CALL_TRACKING_TABLE} SET {column} = ? WHERE {column} = ? COLLATE NOCASE',
+                                       (name, existing[key]))
+        _write_root_catalog(connection, normalized)
+        _refresh_root_domains(connection, normalized)
     task_repository.set_workspace_state(ROOT_CAUSE_SETTINGS_STATE_KEY, json.dumps({'require_to_close': bool(require_to_close)}))
     if hasattr(task_repository, 'try_add_log'):
-        task_repository.try_add_log(username, 'nq_root_causes', 'Non-Qualified Calls root causes updated.')
+        task_repository.try_add_log(username, 'nq_root_causes', 'Non-Qualified Calls root cause catalog updated.')
     return list_root_causes(task_repository)
 
 
-def _keyword_found(keywords: list[str], text: str, match: str = 'words') -> bool:
-    """Whether a keyword appears in the text: as whole words ("rf" in "RF Problems", not in "performance"),
-    or anywhere with the partial matching of the rule."""
-    if not text:
-        return False
-    if match == 'text':
-        return any(keyword in text for keyword in keywords)
-    return any(re.search(rf'(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])', text) for keyword in keywords)
-
-
-def _matching_cause(domains: list[dict[str, Any]], text: str, match: str = 'words') -> dict[str, str] | None:
-    for domain in domains:
-        for cause in domain['causes']:
-            if _keyword_found(cause['keywords'], text, match):
-                return {'domain': domain['name'], 'cause': cause['name']}
-    return None
+def _refresh_root_domains(connection: Any, catalog: dict[str, Any]) -> None:
+    """The stored domain of every call follows the domain of its root category (else of its root cause)."""
+    rows = connection.execute(
+        f"SELECT call_key, root_domain, root_category, root_cause FROM {NQ_CALL_TRACKING_TABLE} "
+        "WHERE root_category <> '' OR root_cause <> ''").fetchall()
+    for row in rows:
+        domain = domain_of(catalog, str(row['root_category']), str(row['root_cause'])) or str(row['root_domain'] or '')
+        if domain != str(row['root_domain'] or ''):
+            connection.execute(f'UPDATE {NQ_CALL_TRACKING_TABLE} SET root_domain = ? WHERE call_key = ?', (domain, row['call_key']))
 
 
 def suggest_root_cause(call: Any, taxonomy: dict[str, Any], comments: str = '') -> dict[str, str] | None:
-    """The root cause suggested by the call, following the workspace suggestion rule.
-
-    With the default rule:
-    1. A domain keyword in the CDR Failure Classification chooses the domain.
-    2. A cause keyword in the Failure Category, Subcategory or Comment chooses the cause:
-       among the causes of that domain, or of every domain when no domain matched.
-    3. When the CDR leaves the cause unresolved, the comments of the engineers are read the
-       same way: a cause of the CDR domain (or of any domain), else a domain keyword.
-    Admins and super-admins choose the fields of steps 1 and 2, whether causes stay in the domain, the
-    use of the comments and the keyword matching. Domains and causes are tried in their
-    configured order. ``source`` tells where the cause came from.
-    """
-    rule = taxonomy.get('rule') or DEFAULT_ROOT_CAUSE_RULE
-    match = rule['match']
-
-    def text(fields: list[str]) -> str:
-        values = []
-        for field in fields:
-            try:
-                values.append(_normalized_text(call[field]))
-            except (KeyError, IndexError):
-                continue
-        return ' | '.join(value for value in values if value)
-
-    domains = taxonomy['domains']
-    classification = text(rule['domain_fields'])
-    details = text(rule['cause_fields'])
-    matched_domain = next((domain for domain in domains if _keyword_found(domain['keywords'], classification, match)), None)
-    candidates = [matched_domain] if matched_domain and rule['causes_in_domain'] else domains
-    found = _matching_cause(candidates, details, match)
-    if found:
-        return {**found, 'source': 'cdr'}
-    notes = _normalized_text(comments) if rule['comments'] else ''
-    found = _matching_cause(candidates, notes, match)
-    if found:
-        return {**found, 'source': 'comments'}
-    if matched_domain is not None:
-        return {'domain': matched_domain['name'], 'cause': '', 'source': 'cdr'}
-    if rule['comment_domain']:
-        commented_domain = next((domain for domain in domains if _keyword_found(domain['keywords'], notes, match)), None)
-        if commented_domain is not None:
-            return {'domain': commented_domain['name'], 'cause': '', 'source': 'comments'}
-    return None
+    """The domain, root category and root cause the CDR (or the comments) suggest, following the workspace rule."""
+    return nq_rca.suggest_from_text(call, taxonomy, taxonomy.get('rule') or DEFAULT_ROOT_CAUSE_RULE, comments)
 
 
 def _comment_texts(connection: Any, keys: list[str]) -> dict[str, str]:
@@ -1606,6 +1682,103 @@ def _comment_texts(connection: Any, keys: list[str]) -> dict[str, str]:
         ):
             texts.setdefault(str(row['call_key']), []).append(str(row['body']))
     return {key: '\n'.join(bodies) for key, bodies in texts.items()}
+
+
+
+
+# ---------------------------------------------------------------------------
+# NQ Call Status: rules on the phase fields, or a status set by hand
+# ---------------------------------------------------------------------------
+def status_rules(task_repository: Any) -> list[dict[str, Any]]:
+    """The status rules of the workspace; conditions on fields or statuses that no longer exist are left out."""
+    try:
+        stored = json.loads(task_repository.get_workspace_state(STATUS_RULES_STATE_KEY) or '[]')
+    except (TypeError, ValueError):
+        stored = []
+    statuses = {item['name'].casefold(): item['name'] for item in list_options(task_repository)['statuses']}
+    known = nq_catalog.condition_fields(list_fields(task_repository))
+    rules = []
+    for rule in stored if isinstance(stored, list) else []:
+        if not isinstance(rule, dict) or str(rule.get('status') or '').casefold() not in statuses:
+            continue
+        conditions = [condition for condition in rule.get('conditions') or []
+                      if isinstance(condition, dict) and condition.get('field') in known
+                      and condition.get('op') in nq_catalog.RULE_OPERATORS]
+        if conditions:
+            rules.append({'status': statuses[str(rule['status']).casefold()], 'conditions': conditions})
+    return rules
+
+
+def save_status_rules(task_repository: Any, rules: Any, username: str) -> list[dict[str, Any]]:
+    statuses = [item['name'] for item in list_options(task_repository)['statuses']]
+    normalized = nq_catalog.normalize_status_rules(rules, statuses, list_fields(task_repository))
+    task_repository.set_workspace_state(STATUS_RULES_STATE_KEY, json.dumps(normalized, ensure_ascii=False))
+    changed = recompute_statuses(task_repository, username)
+    if hasattr(task_repository, 'try_add_log'):
+        task_repository.try_add_log(username, 'nq_status_rules', f'Non-Qualified Calls status rules updated ({changed} calls changed).')
+    return normalized
+
+
+def _status_inputs(call: Any, stored: dict[str, str], fields: list[dict[str, Any]], tracking: dict[str, Any], attended: bool) -> dict[str, str]:
+    """The values the status rules read for a call."""
+    values = {field['key']: (stored.get(field['key'], '') if field['source'] == 'user' else derived_value(field, call) if call is not None else '')
+              for field in fields if field['source'] in {'user', 'derived'}}
+    values[ATTENDED_FIELD] = 'Yes' if attended else 'No'
+    for ref in ('team', 'assignee', 'root_category', 'root_cause'):
+        values[f'@{ref}'] = str(tracking.get(ref) or '')
+    return values
+
+
+def untracked_status(task_repository: Any, options: dict[str, list[dict[str, Any]]] | None = None) -> str:
+    """The status of a call nobody has followed up: what the rules say without any value, else the first status."""
+    options = options or list_options(task_repository)
+    fallback = default_status(options)
+    rules = status_rules(task_repository)
+    return evaluate_status(rules, _status_inputs(None, {}, [], {}, False), fallback) if rules else fallback
+
+
+def recompute_statuses(task_repository: Any, username: str, keys: list[str] | None = None) -> int:
+    """Set again the automatic status of the followed-up or commented calls; returns how many changed."""
+    options = list_options(task_repository)
+    fallback = default_status(options)
+    rules = status_rules(task_repository)
+    fields = list_fields(task_repository)
+    needs_call = any(field['source'] == 'derived' for field in fields)
+    when = now_iso()
+    changed = 0
+    with task_repository.connection() as connection:
+        tracked = {str(row['call_key']): dict(row) for row in connection.execute(f'SELECT * FROM {NQ_CALL_TRACKING_TABLE}')}
+        commented = {str(row[0]) for row in connection.execute(
+            f"SELECT DISTINCT call_key FROM {NQ_CALL_COMMENTS_TABLE} WHERE deleted_at = ''")}
+        candidates = set(tracked) | commented | {str(row[0]) for row in connection.execute(
+            f'SELECT DISTINCT call_key FROM {NQ_FIELD_VALUES_TABLE}')}
+        if keys is not None:
+            candidates &= set(keys)
+        candidates = [key for key in candidates if tracked.get(key, {}).get('status_mode', 'auto') != 'manual']
+        stored = field_values(connection, candidates)
+        rows: dict[str, Any] = {}
+        if needs_call:
+            for start in range(0, len(candidates), 500):
+                chunk = candidates[start:start + 500]
+                marks = ', '.join('?' for _ in chunk)
+                for row in connection.execute(
+                        f'SELECT * FROM {NQ_CALLS_TABLE} WHERE call_key IN ({marks}) OR sample_key IN ({marks})', [*chunk, *chunk]):
+                    rows.setdefault(str(row['sample_key'] or row['call_key']), row)
+                    rows.setdefault(str(row['call_key']), row)
+        for key in candidates:
+            tracking = tracked.get(key, {})
+            attended = bool(tracking.get('updated_at')) or key in commented
+            status = evaluate_status(rules, _status_inputs(rows.get(key), stored.get(key, {}), fields, tracking, attended), fallback)
+            current = str(tracking.get('status') or '') or fallback
+            if status == current:
+                continue
+            connection.execute(
+                f"INSERT INTO {NQ_CALL_TRACKING_TABLE} (call_key, status, status_mode, version, updated_by, updated_at) "
+                "VALUES (?, ?, 'auto', 1, '', '') ON CONFLICT(call_key) DO UPDATE SET status = excluded.status, version = version + 1",
+                (key, status))
+            _record_history(connection, key, 'status_auto', current, status, username, when)
+            changed += 1
+    return changed
 
 
 # ---------------------------------------------------------------------------
@@ -1668,7 +1841,9 @@ def _base_sql(default: str, task_repository: Any, dataset_ids: list[int] | None 
                COALESCE(t.team, '') AS team,
                COALESCE(t.assignee, '') AS assignee,
                COALESCE(t.root_domain, '') AS root_domain,
+               COALESCE(t.root_category, '') AS root_category,
                COALESCE(t.root_cause, '') AS root_cause,
+               COALESCE(t.status_mode, 'auto') AS status_mode,
                COALESCE(t.version, 0) AS version,
                COALESCE(t.updated_by, '') AS updated_by,
                COALESCE(t.updated_at, '') AS updated_at,
@@ -1680,7 +1855,9 @@ def _base_sql(default: str, task_repository: Any, dataset_ids: list[int] | None 
                     WHEN v.latest_dataset_id IS NOT NULL AND v.latest_dataset_id <> c.dataset_id THEN 'newer'
                     WHEN v.changed = 1 THEN 'changed' ELSE '' END AS version_state,
                (SELECT json_group_object(f.field_key, f.value) FROM {NQ_FIELD_VALUES_TABLE} f
-                WHERE f.call_key = c.call_key AND f.value <> '') AS field_values_json
+                WHERE f.call_key = c.call_key AND f.value <> '') AS field_values_json,
+               COALESCE((SELECT r.values_json FROM {NQ_RCA_RESULTS_TABLE} r
+                         WHERE c.join_id <> '' AND r.join_id = lower(c.join_id)), '{{}}') AS rca_json
         FROM (
             SELECT n.*, COUNT(*) OVER (PARTITION BY n.call_key, n.dataset_id) AS nq_samples,
                    ROW_NUMBER() OVER (PARTITION BY n.call_key
@@ -1710,12 +1887,15 @@ def _sample_sql(default: str, task_repository: Any) -> tuple[str, list[Any]]:
                1 AS nq_samples, '' AS vendor_operator,
                COALESCE(NULLIF(t.status, ''), ?) AS status, COALESCE(t.team, '') AS team,
                COALESCE(t.assignee, '') AS assignee, COALESCE(t.root_domain, '') AS root_domain,
-               COALESCE(t.root_cause, '') AS root_cause, COALESCE(t.version, 0) AS version,
+               COALESCE(t.root_category, '') AS root_category, COALESCE(t.root_cause, '') AS root_cause,
+               COALESCE(t.status_mode, 'auto') AS status_mode, COALESCE(t.version, 0) AS version,
                COALESCE(t.updated_by, '') AS updated_by, COALESCE(t.updated_at, '') AS updated_at,
                (SELECT COUNT(*) FROM {NQ_CALL_COMMENTS_TABLE} m WHERE m.call_key = c.sample_key AND m.deleted_at = '') AS comment_count,
                c.dataset_id AS latest_dataset_id, 1 AS cdr_count, '' AS version_state,
                (SELECT json_group_object(f.field_key, f.value) FROM {NQ_FIELD_VALUES_TABLE} f
-                WHERE f.call_key = c.sample_key AND f.value <> '') AS field_values_json
+                WHERE f.call_key = c.sample_key AND f.value <> '') AS field_values_json,
+               COALESCE((SELECT r.values_json FROM {NQ_RCA_RESULTS_TABLE} r
+                         WHERE c.join_id <> '' AND r.join_id = lower(c.join_id)), '{{}}') AS rca_json
         FROM {NQ_CALLS_TABLE} c
         JOIN {NQ_CALL_SOURCES_TABLE} s ON s.dataset_id = c.dataset_id
         LEFT JOIN {NQ_CALL_TRACKING_TABLE} t ON t.call_key = c.sample_key
@@ -1829,7 +2009,7 @@ def _resolve_key_filters(task_repository: Any, filters: dict[str, Any]) -> dict[
     suggestions_needed = bool(wanted['effective_domain'] or wanted['effective_cause'] or wanted['rca_state'])
     options = list_options(task_repository)
     taxonomy = list_root_causes(task_repository)
-    base, base_params = _base_sql(default_status(options), task_repository, _scope(filters))
+    base, base_params = _base_sql(untracked_status(task_repository, options), task_repository, _scope(filters))
     with task_repository.connection() as connection:
         calls = connection.execute(f'WITH calls AS ({base}) SELECT * FROM calls', base_params).fetchall()
         notes = _comment_texts(connection, [str(call['call_key']) for call in calls if not call['root_domain']]) \
@@ -1856,7 +2036,9 @@ def _resolve_key_filters(task_repository: Any, filters: dict[str, Any]) -> dict[
     return {**filters, '_call_keys': keys}
 
 
-def _filter_sql(filters: dict[str, Any], username: str, closed_statuses: list[str]) -> tuple[str, list[Any]]:
+def _filter_sql(filters: dict[str, Any], username: str, closed_statuses: list[str],
+                definitions: list[dict[str, Any]] | None = None) -> tuple[str, list[Any]]:
+    known = {field['key']: field for field in definitions or []}
     clauses: list[str] = []
     params: list[Any] = []
     for field in (*FIELD_FILTERS, *TRACKING_FILTERS):
@@ -1887,6 +2069,13 @@ def _filter_sql(filters: dict[str, Any], username: str, closed_statuses: list[st
     for key, values in fields.items():
         values = _strings(values)
         if not values:
+            continue
+        definition = known.get(str(key))
+        if definition is not None and definition['source'] != 'user':
+            # Fields from the follow-up, the CDR, the RCA script or derived: compared with their value.
+            chosen = ['' if value == UNASSIGNED else value for value in values]
+            clauses.append(f"{field_sql(definition)} IN ({', '.join('?' for _ in chosen)})")
+            params.extend(chosen)
             continue
         chosen = [value for value in values if value != UNASSIGNED]
         parts = []
@@ -1960,7 +2149,7 @@ def _filter_sql(filters: dict[str, Any], username: str, closed_statuses: list[st
 def _call_payload(row: Any) -> dict[str, Any]:
     payload = {key: row[key] for key in row.keys()}
     payload['service_label'] = SERVICE_LABELS.get(str(payload.get('service')), str(payload.get('service') or ''))
-    for source, target in (('field_values_json', 'fields'), ('extra_json', 'extra')):
+    for source, target in (('field_values_json', 'fields'), ('extra_json', 'extra'), ('rca_json', 'rca')):
         try:
             value = json.loads(payload.pop(source, None) or '{}')
         except (TypeError, ValueError):
@@ -1973,8 +2162,9 @@ def _order_sql(sort: str, task_repository: Any) -> str:
     """The ORDER BY expression of a sort key: a column, an analysis field or a CDR column."""
     if sort.startswith('field:'):
         key = sort.split(':', 1)[1]
-        if key in {field['key'] for field in list_fields(task_repository)}:
-            return f"COALESCE(json_extract(field_values_json, '$.\"{key}\"'), '')"
+        definition = next((field for field in list_fields(task_repository) if field['key'] == key), None)
+        if definition is not None:
+            return field_sql(definition)
     if sort.startswith('cdr:'):
         name = sort.split(':', 1)[1]
         if name in table_columns(task_repository)['cdr']:
@@ -1997,11 +2187,12 @@ def _comments_by_call(connection: Any, keys: list[str]) -> dict[str, dict[str, A
 def query_calls(task_repository: Any, request: dict[str, Any], username: str) -> dict[str, Any]:
     """A page of calls with the executive summary of every call that matches the filters."""
     options = list_options(task_repository)
+    definitions = list_fields(task_repository)
     filters = request.get('filters') if isinstance(request.get('filters'), dict) else {}
     filters = _resolve_key_filters(task_repository, filters)
     closed = [item['name'] for item in options['statuses'] if item['closed']]
-    base, base_params = _base_sql(default_status(options), task_repository, _scope(filters))
-    where, params = _filter_sql(filters, username, closed)
+    base, base_params = _base_sql(untracked_status(task_repository, options), task_repository, _scope(filters))
+    where, params = _filter_sql(filters, username, closed, definitions)
     filtered = f'WITH calls AS ({base}) SELECT * FROM calls{where}'
     all_params = [*base_params, *params]
     sort_key = str(request.get('sort') or '')
@@ -2022,10 +2213,14 @@ def query_calls(task_repository: Any, request: dict[str, Any], username: str) ->
         last_comments = _comments_by_call(connection, [call['call_key'] for call in calls])
         notes = _comment_texts(connection, [call['call_key'] for call in calls])
         taxonomy = list_root_causes(task_repository)
+        learned = learned_decisions(connection)
         names = {int(row['id']): str(row['file_name']) for row in connection.execute('SELECT id, file_name FROM datasets')}
         for call in calls:
             call['last_comment'] = last_comments.get(call['call_key'])
-            call['suggested_root_cause'] = suggest_root_cause(call, taxonomy, notes.get(call['call_key'], ''))
+            note = notes.get(call['call_key'], '')
+            call['suggested_root_cause'] = suggest_root_cause(call, taxonomy, note)
+            call['rca_recommendation'] = recommendation_for(call, taxonomy, note, learned)
+            call['values'] = {field['key']: catalog_value(field, call, call.get('rca'), call.get('fields')) for field in definitions}
             call['dataset_name'] = names.get(int(call['dataset_id']), '')
             call['latest_dataset_name'] = names.get(int(call['latest_dataset_id'] or call['dataset_id']), '')
         breakdowns = []
@@ -2045,10 +2240,10 @@ def query_calls(task_repository: Any, request: dict[str, Any], username: str) ->
             elif field == 'campaign':
                 items.sort(key=lambda item: campaign_sort_key(item['value']))
             breakdowns.append({'field': field, 'label': label, 'items': items})
-        # The analysis fields shown in the Summary, as one more breakdown each.
-        for definition in [field for field in list_fields(task_repository) if field['in_summary']]:
+        # The catalog fields shown in the Summary, as one more breakdown each.
+        for definition in [field for field in definitions if field['in_summary'] and field['source'] in {'user', 'derived', 'cdr', 'rca'}]:
             values = connection.execute(
-                f"SELECT COALESCE(json_extract(field_values_json, '$.\"{definition['key']}\"'), '') AS value, COUNT(*) AS count "
+                f"SELECT {field_sql(definition)} AS value, COUNT(*) AS count "
                 f"FROM ({filtered}) GROUP BY value ORDER BY count DESC, value LIMIT 12", all_params,
             ).fetchall()
             order = [option['name'] for option in definition['options']] or list(YES_NO)
@@ -2154,9 +2349,9 @@ def progress_stats(task_repository: Any, filters: dict[str, Any], username: str,
     granularity = granularity if granularity in PROGRESS_GRANULARITIES else 'month'
     options = list_options(task_repository)
     closed_names = {item['name'].casefold() for item in options['statuses'] if item['closed']}
-    base, base_params = _base_sql(default_status(options), task_repository, _scope(filters))
+    base, base_params = _base_sql(untracked_status(task_repository, options), task_repository, _scope(filters))
     where, params = _filter_sql(_resolve_key_filters(task_repository, filters), username,
-                                [item['name'] for item in options['statuses'] if item['closed']])
+                                [item['name'] for item in options['statuses'] if item['closed']], list_fields(task_repository))
     with task_repository.connection() as connection:
         calls = connection.execute(
             f'WITH calls AS ({base}) SELECT call_key, start_time, status, team, assignee, service, result FROM calls{where}',
@@ -2392,9 +2587,9 @@ def root_cause_stats(task_repository: Any, filters: dict[str, Any], username: st
     """
     options = list_options(task_repository)
     taxonomy = list_root_causes(task_repository)
-    base, base_params = _base_sql(default_status(options), task_repository, _scope(filters))
+    base, base_params = _base_sql(untracked_status(task_repository, options), task_repository, _scope(filters))
     where, params = _filter_sql(_resolve_key_filters(task_repository, filters), username,
-                                [item['name'] for item in options['statuses'] if item['closed']])
+                                [item['name'] for item in options['statuses'] if item['closed']], list_fields(task_repository))
     with task_repository.connection() as connection:
         calls = connection.execute(f'WITH calls AS ({base}) SELECT * FROM calls{where}', [*base_params, *params]).fetchall()
         notes = _comment_texts(connection, [str(call['call_key']) for call in calls if not call['root_domain']]) \
@@ -2650,16 +2845,19 @@ def _comment_payload(row: Any) -> dict[str, Any]:
 def call_detail(task_repository: Any, call_key: str) -> dict[str, Any] | None:
     """A call or a Speech sample: its fields, follow-up, comments, history, CDR versions and samples."""
     options = list_options(task_repository)
+    default = untracked_status(task_repository, options)
+    definitions = list_fields(task_repository)
     with task_repository.connection() as connection:
-        row = _call_row(connection, call_key, default_status(options), task_repository)
+        row = _call_row(connection, call_key, default, task_repository)
         if row is None:
             return None
         call = _call_payload(row)
         versions = _call_versions(connection, str(call.get('parent_key') or call_key))
-        samples = _call_samples(connection, call, default_status(options), task_repository)
+        samples = _call_samples(connection, call, default, task_repository)
+        learned = learned_decisions(connection)
         parent = None
         if call.get('parent_key'):
-            parent_row = _call_row(connection, str(call['parent_key']), default_status(options), task_repository)
+            parent_row = _call_row(connection, str(call['parent_key']), default, task_repository)
             parent = _call_payload(parent_row) if parent_row is not None else None
         comments = [_comment_payload(item) for item in connection.execute(
             f'SELECT * FROM {NQ_CALL_COMMENTS_TABLE} WHERE call_key = ? ORDER BY id', (call_key,),
@@ -2684,8 +2882,18 @@ def call_detail(task_repository: Any, call_key: str) -> dict[str, Any] | None:
     notes = '\n'.join(comment['body'] for comment in comments if not comment['deleted_at'])
     taxonomy = list_root_causes(task_repository)
     call['suggested_root_cause'] = suggest_root_cause(call, taxonomy, notes)
+    call['rca_recommendation'] = recommendation_for(call, taxonomy, notes, learned)
+    # CDR columns of the catalog are read from the CDR row itself.
+    source_values = {key: _text(source[key]) for key in source.keys()} if source is not None else {}
+    call['extra'] = {**source_values, **(call.get('extra') or {})}
+    call['values'] = {field['key']: catalog_value(field, call, call.get('rca'), call.get('fields')) for field in definitions}
+    # Values of the CDR proposed for the empty fields that name one (for example the failure position).
+    call['proposals'] = {field['key']: _text(_call_value(call, field['suggest_from'])) for field in definitions
+                         if field['source'] == 'user' and field.get('suggest_from') and not (call.get('fields') or {}).get(field['key'])
+                         and _text(_call_value(call, field['suggest_from']))}
     for sample in samples:
         sample['suggested_root_cause'] = suggest_root_cause(sample, taxonomy, '')
+        sample['rca_recommendation'] = recommendation_for(sample, taxonomy, '', learned)
     return {'call': call, 'comments': comments, 'history': history, 'fields': fields, 'versions': versions,
             'samples': samples, 'parent': parent}
 
@@ -2707,6 +2915,10 @@ def _validate_changes(changes: dict[str, Any], options: dict[str, list[dict[str,
         if not status:
             raise ValueError('Choose one of the configured statuses.')
         validated['status'] = status
+        validated['status_mode'] = 'manual'
+    if changes.get('status_mode') == 'auto':
+        validated.pop('status', None)
+        validated['status_mode'] = 'auto'
     if 'team' in changes:
         names = {item['name'].casefold(): item['name'] for item in options['teams']}
         value = str(changes.get('team') or '').strip()
@@ -2719,20 +2931,15 @@ def _validate_changes(changes: dict[str, Any], options: dict[str, list[dict[str,
         if value and value.casefold() not in lookup:
             raise ValueError('Choose a user with access to this workspace.')
         validated['assignee'] = lookup.get(value.casefold(), '')
-    if 'root_domain' in changes or 'root_cause' in changes:
-        domains = {item['name'].casefold(): item for item in taxonomy['domains']}
-        value = str(changes.get('root_domain') or '').strip()
-        domain = domains.get(value.casefold())
-        if value and domain is None:
-            raise ValueError('Choose one of the configured root cause domains.')
-        cause = str(changes.get('root_cause') or '').strip()
-        causes = {item['name'].casefold(): item['name'] for item in (domain or {}).get('causes', [])}
-        if cause and cause.casefold() not in causes:
-            raise ValueError('Choose one of the causes of the selected domain.')
-        validated['root_domain'] = domain['name'] if domain else ''
-        validated['root_cause'] = causes.get(cause.casefold(), '')
-    if changes.get('apply_suggestion'):
-        validated['apply_suggestion'] = '1'
+    for key, plural, title in (('root_category', 'categories', 'Root Categories'), ('root_cause', 'causes', 'Root Causes')):
+        if key in changes:
+            names = {item['name'].casefold(): item['name'] for item in taxonomy[plural]}
+            value = str(changes.get(key) or '').strip()
+            if value and value.casefold() not in names:
+                raise ValueError(f'Choose one of the {title} of the root cause catalog.')
+            validated[key] = names.get(value.casefold(), '')
+    if changes.get('apply_recommendation') or changes.get('apply_suggestion'):
+        validated['apply_recommendation'] = '1'
     if not validated and not changes.get('fields'):
         raise ValueError('There is nothing to change.')
     return validated
@@ -2747,7 +2954,7 @@ def _validate_field_changes(changes: dict[str, Any], definitions: list[dict[str,
     known = {field['key']: field for field in definitions}
     unknown = [str(key) for key in values if str(key) not in known]
     if unknown:
-        raise ValueError(f'Unknown analysis fields: {", ".join(unknown)}.')
+        raise ValueError(f'Unknown fields: {", ".join(unknown)}.')
     return {str(key): _field_value(known[str(key)], value) for key, value in values.items()}
 
 
@@ -2755,17 +2962,51 @@ class TrackingConflict(Exception):
     """Another user changed the call after it was loaded."""
 
 
+def learned_decisions(connection: Any) -> dict[tuple[str, str, str], dict[tuple[str, str], set[str]]]:
+    """For the RCA values of every call with a root category or cause, the categories and causes the analysts chose,
+    with the calls that chose each one (so a call counts once and never for itself)."""
+    learned: dict[tuple[str, str, str], dict[tuple[str, str], set[str]]] = {}
+    rows = connection.execute(f"""
+        SELECT t.call_key, t.root_category, t.root_cause, c.failure_category, c.failure_classification, c.failure_subcategory,
+               COALESCE(r.values_json, '{{}}') AS rca_json
+        FROM {NQ_CALL_TRACKING_TABLE} t
+        JOIN {NQ_CALLS_TABLE} c ON c.call_key = t.call_key
+        LEFT JOIN {NQ_RCA_RESULTS_TABLE} r ON c.join_id <> '' AND r.join_id = lower(c.join_id)
+        WHERE t.root_category <> '' OR t.root_cause <> ''
+        GROUP BY t.call_key
+    """).fetchall()
+    for row in rows:
+        choice = (str(row['root_category'] or ''), str(row['root_cause'] or ''))
+        try:
+            rca = json.loads(row['rca_json'] or '{}')
+        except (TypeError, ValueError):
+            rca = {}
+        pairs = [('netcheck', str(row['failure_category'] or row['failure_classification'] or ''), str(row['failure_subcategory'] or '')),
+                 ('script', str(rca.get('rca_category') or rca.get('auto_rca_category_a') or ''),
+                  str(rca.get('rca_cause') or rca.get('auto_rca_subcategory_a') or ''))]
+        for source, category, cause in pairs:
+            if category or cause:
+                learned.setdefault(nq_rca.learned_key(source, category, cause), {}).setdefault(choice, set()).add(str(row['call_key']))
+    return learned
+
+
+def recommendation_for(call: dict[str, Any], taxonomy: dict[str, Any], comments: str,
+                       learned: dict[tuple[str, str, str], dict[tuple[str, str], set[str]]]) -> dict[str, Any]:
+    return nq_rca.recommend(call, call.get('rca') or {}, taxonomy, taxonomy.get('rule') or DEFAULT_ROOT_CAUSE_RULE,
+                            comments, learned)
+
+
 def update_tracking(
     task_repository: Any, call_keys: list[str], changes: dict[str, Any], username: str, users: set[str],
     expected_version: int | None = None,
 ) -> list[str]:
-    """Apply status, team, assignee or root cause changes; returns the calls that changed.
+    """Apply follow-up and field changes; returns the calls that changed.
 
-    A team with members only accepts them as assignees: assigning anybody else
-    is refused, and moving a call to such a team clears an assignee who is not
-    a member. ``apply_suggestion`` labels the calls without a root cause with the
-    suggested one. When the root cause is required to close, a call cannot move
-    to a closed status without one.
+    A team with members only accepts them as assignees: assigning anybody else is refused, and
+    moving a call to such a team clears an assignee who is not a member. ``apply_recommendation``
+    gives the calls without a root category and cause the recommended ones. Choosing a status sets
+    it by hand; otherwise (or after going back to automatic) the status rules set it from the
+    fields. A call cannot be closed without the fields required to close it.
     """
     options = list_options(task_repository)
     taxonomy = list_root_causes(task_repository)
@@ -2773,13 +3014,16 @@ def update_tracking(
     validated = _validate_changes(changes, options, users, taxonomy)
     field_changes = _validate_field_changes(changes, definitions)
     required = [field for field in definitions if field['required_to_close']]
-    apply_suggestion = bool(validated.pop('apply_suggestion', None))
+    apply_recommendation = bool(validated.pop('apply_recommendation', None))
     closed = {item['name'].casefold() for item in options['statuses'] if item['closed']}
     members = team_members(options)
-    default = default_status(options)
+    default = untracked_status(task_repository, options)
+    fallback = default_status(options)
+    rules = status_rules(task_repository)
     when = now_iso()
     changed: list[str] = []
     with task_repository.connection() as connection:
+        learned = learned_decisions(connection) if apply_recommendation else {}
         for call_key in dict.fromkeys(call_keys):
             row = _call_row(connection, call_key, default, task_repository)
             if row is None:
@@ -2790,38 +3034,55 @@ def update_tracking(
                 )
             current = {field: str(row[field]) for field in TRACKING_FIELDS}
             current.update(validated)
-            if apply_suggestion and not current['root_domain']:
-                suggestion = suggest_root_cause(row, taxonomy, _comment_texts(connection, [call_key]).get(call_key, ''))
-                if suggestion:
-                    current['root_domain'], current['root_cause'] = suggestion['domain'], suggestion['cause']
+            if apply_recommendation:
+                recommended = None
+                if not current['root_category'] and not current['root_cause']:
+                    call = _call_payload(row)
+                    notes = _comment_texts(connection, [call_key]).get(call_key, '')
+                    recommended = recommendation_for(call, taxonomy, notes, learned)['recommendation']
+                if recommended:
+                    current['root_category'], current['root_cause'] = recommended['category'], recommended['cause']
+                elif not validated and not field_changes:
+                    # Nothing to accept: the call stays as it is.
+                    continue
+            current['root_domain'] = domain_of(taxonomy, current['root_category'], current['root_cause'])
             allowed = members.get(current['team'].casefold())
             if allowed and current['assignee'] and current['assignee'].casefold() not in allowed:
                 if 'assignee' in validated:
                     raise ValueError(f'{current["assignee"]} is not a member of the {current["team"]} team.')
                 current['assignee'] = ''
-            differences = {field: value for field, value in current.items() if str(row[field]) != value}
             stored = field_values(connection, [call_key]).get(call_key, {})
             field_differences = {key: value for key, value in field_changes.items() if stored.get(key, '') != value}
+            merged = {**stored, **field_changes}
+            if current['status_mode'] != 'manual':
+                current['status'] = evaluate_status(rules, _status_inputs(row, merged, definitions, current, True), fallback)
+            differences = {field: value for field, value in current.items() if str(row[field]) != value}
             if not differences and not field_differences:
                 continue
-            if (taxonomy['require_to_close'] and current['status'].casefold() in closed and not current['root_domain']
-                    and ('status' in differences or 'root_domain' in differences)):
-                raise ValueError(f'Set a root cause before closing a call as {current["status"]}.')
-            if current['status'].casefold() in closed and required:
-                merged = {**stored, **field_changes}
+            closing = current['status'].casefold() in closed
+            if (taxonomy['require_to_close'] and closing and not current['root_category']
+                    and ('status' in differences or 'root_category' in differences)):
+                raise ValueError(f'Choose a root category before closing a call as {current["status"]}.')
+            if closing and required:
                 missing = [field['label'] for field in required if not merged.get(field['key'])]
                 if missing and ('status' in differences or field_differences):
                     raise ValueError(f'Fill {", ".join(missing)} before closing a call as {current["status"]}.')
             connection.execute(
-                f'INSERT INTO {NQ_CALL_TRACKING_TABLE} (call_key, status, team, assignee, root_domain, root_cause, version, '
-                'updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT(call_key) DO UPDATE SET '
+                f'INSERT INTO {NQ_CALL_TRACKING_TABLE} (call_key, status, team, assignee, root_domain, root_category, root_cause, '
+                'status_mode, version, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT(call_key) DO UPDATE SET '
                 'status = excluded.status, team = excluded.team, assignee = excluded.assignee, '
-                'root_domain = excluded.root_domain, root_cause = excluded.root_cause, version = version + 1, '
+                'root_domain = excluded.root_domain, root_category = excluded.root_category, root_cause = excluded.root_cause, '
+                'status_mode = excluded.status_mode, version = version + 1, '
                 'updated_by = excluded.updated_by, updated_at = excluded.updated_at',
                 (call_key, current['status'], current['team'], current['assignee'], current['root_domain'],
-                 current['root_cause'], username, when),
+                 current['root_category'], current['root_cause'], current['status_mode'], username, when),
             )
+            automatic = current['status_mode'] != 'manual'
             for field, value in differences.items():
+                # The domain follows the category and cause; a status chosen by hand tells its mode itself; a status
+                # set by the rules is recorded after the changes that moved it.
+                if field == 'root_domain' or (field == 'status_mode' and value == 'manual') or (field == 'status' and automatic):
+                    continue
                 _record_history(connection, call_key, field, str(row[field]), value, username, when)
             for key, value in field_differences.items():
                 connection.execute(
@@ -2829,6 +3090,8 @@ def update_tracking(
                     'ON CONFLICT(call_key, field_key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, '
                     'updated_at = excluded.updated_at', (call_key, key, value, username, when))
                 _record_history(connection, call_key, f'field:{key}', stored.get(key, ''), value, username, when)
+            if 'status' in differences and automatic:
+                _record_history(connection, call_key, 'status_auto', str(row['status']), differences['status'], username, when)
             changed.append(call_key)
     return changed
 
@@ -2870,13 +3133,15 @@ def add_comment(task_repository: Any, call_key: str, body: Any, username: str) -
     text = _clean_comment(body)
     options = list_options(task_repository)
     with task_repository.connection() as connection:
-        if _call_row(connection, call_key, default_status(options), task_repository) is None:
+        if _call_row(connection, call_key, untracked_status(task_repository, options), task_repository) is None:
             raise LookupError('The call is no longer available. Refresh the list.')
         cursor = connection.execute(
             f'INSERT INTO {NQ_CALL_COMMENTS_TABLE} (uid, call_key, body, created_by, created_at) VALUES (?, ?, ?, ?, ?)',
             (uuid.uuid4().hex, call_key, text, username, now_iso()),
         )
         row = connection.execute(f'SELECT * FROM {NQ_CALL_COMMENTS_TABLE} WHERE id = ?', (cursor.lastrowid,)).fetchone()
+    # A comment attends the call: its automatic status follows.
+    recompute_statuses(task_repository, username, [call_key])
     return _comment_payload(row)
 
 
@@ -2918,36 +3183,303 @@ def delete_comment(task_repository: Any, comment_id: int, username: str, moderat
 
 
 # ---------------------------------------------------------------------------
+# RCA script results: imported by JOIN_ID
+# ---------------------------------------------------------------------------
+def import_rca_results(task_repository: Any, content: bytes, file_name: str, username: str, *, replace: bool = False,
+                       dry_run: bool = False) -> dict[str, Any]:
+    """Read an RCA results file and (unless ``dry_run``) store its rows by JOIN_ID; ``replace`` forgets the previous ones."""
+    parsed = nq_rca.read_rca_file(content, file_name)
+    results = parsed['results']
+    with task_repository.connection() as connection:
+        known = {str(row[0]) for row in connection.execute(
+            f"SELECT DISTINCT lower(join_id) FROM {NQ_CALLS_TABLE} WHERE join_id <> ''")}
+        matched = sum(1 for item in results if item['join_id'].casefold() in known)
+        existing = {str(row[0]) for row in connection.execute(f'SELECT join_id FROM {NQ_RCA_RESULTS_TABLE}')}
+        summary = {
+            'file_name': file_name, 'rows': len(results), 'matched': matched, 'unmatched': len(results) - matched,
+            'columns': parsed['columns'], 'extra': parsed['extra'], 'skipped': parsed['skipped'], 'duplicates': parsed['duplicates'],
+            'new': sum(1 for item in results if item['join_id'].casefold() not in existing),
+            'replace': replace, 'preview': [{'join_id': item['join_id'], **item['values']} for item in results[:8]],
+        }
+        if dry_run:
+            return summary
+        when = now_iso()
+        if replace:
+            connection.execute(f'DELETE FROM {NQ_RCA_RESULTS_TABLE}')
+        connection.executemany(
+            f'INSERT OR REPLACE INTO {NQ_RCA_RESULTS_TABLE} (join_id, original_join_id, values_json, source_file, imported_by, imported_at) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            [(item['join_id'].casefold(), item['join_id'], json.dumps(item['values'], ensure_ascii=False), file_name, username, when)
+             for item in results])
+    if hasattr(task_repository, 'try_add_log'):
+        task_repository.try_add_log(username, 'nq_rca_import', json.dumps(
+            {'file': file_name, 'rows': len(results), 'matched': matched, 'replace': replace}))
+    return summary
+
+
+def rca_results_summary(task_repository: Any) -> dict[str, Any]:
+    """The imported RCA results: how many, how many match a call, and each imported file."""
+    with task_repository.connection() as connection:
+        total = connection.execute(f'SELECT COUNT(*) FROM {NQ_RCA_RESULTS_TABLE}').fetchone()[0]
+        matched = connection.execute(
+            f"SELECT COUNT(*) FROM {NQ_RCA_RESULTS_TABLE} r WHERE EXISTS "
+            f"(SELECT 1 FROM {NQ_CALLS_TABLE} c WHERE c.join_id <> '' AND lower(c.join_id) = r.join_id)").fetchone()[0]
+        files = [{'name': str(row['source_file']), 'rows': int(row['rows']), 'imported_at': str(row['imported_at']),
+                  'imported_by': str(row['imported_by'])}
+                 for row in connection.execute(
+                     f'SELECT source_file, COUNT(*) AS rows, MAX(imported_at) AS imported_at, MAX(imported_by) AS imported_by '
+                     f'FROM {NQ_RCA_RESULTS_TABLE} GROUP BY source_file ORDER BY imported_at DESC')]
+    return {'total': int(total or 0), 'matched': int(matched or 0), 'files': files, 'format': nq_rca.RCA_FILE_FORMAT_HELP}
+
+
+def clear_rca_results(task_repository: Any, username: str) -> int:
+    with task_repository.connection() as connection:
+        deleted = connection.execute(f'DELETE FROM {NQ_RCA_RESULTS_TABLE}').rowcount
+    if hasattr(task_repository, 'try_add_log'):
+        task_repository.try_add_log(username, 'nq_rca_clear', f'{deleted} RCA script results deleted.')
+    return int(deleted or 0)
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle and RCA insights
+# ---------------------------------------------------------------------------
+STALLED_DAYS = 14
+PHASE_SECTIONS = ('analysis', 'implementation', 'planning')
+
+
+def _filtered_calls(task_repository: Any, filters: dict[str, Any], username: str, columns: str = '*') -> tuple[list[Any], dict[str, Any]]:
+    options = list_options(task_repository)
+    definitions = list_fields(task_repository)
+    base, base_params = _base_sql(untracked_status(task_repository, options), task_repository, _scope(filters))
+    where, params = _filter_sql(_resolve_key_filters(task_repository, filters), username,
+                                [item['name'] for item in options['statuses'] if item['closed']], definitions)
+    with task_repository.connection() as connection:
+        rows = connection.execute(f'WITH calls AS ({base}) SELECT {columns} FROM calls{where}', [*base_params, *params]).fetchall()
+    return rows, {'options': options, 'definitions': definitions}
+
+
+def lifecycle_stats(task_repository: Any, filters: dict[str, Any], username: str) -> dict[str, Any]:
+    """Where the filtered calls are in their follow-up: the status pipeline, how the statuses were set, the
+    phase fields, the time spent in each status, the most frequent moves and the calls without recent changes."""
+    rows, context = _filtered_calls(task_repository, filters, username,
+                                    'call_key, start_time, status, status_mode, updated_at, comment_count, field_values_json, '
+                                    'service, test_name, session_type, operator, campaign, city')
+    options, definitions = context['options'], context['definitions']
+    statuses = options['statuses']
+    closed = {item['name'].casefold() for item in statuses if item['closed']}
+    now = datetime.now()
+    counts: Counter = Counter()
+    ages: dict[str, list[float]] = {}
+    modes: Counter = Counter()
+    stalled = []
+    keys = [str(row['call_key']) for row in rows]
+    for row in rows:
+        status = str(row['status'] or '')
+        counts[status] += 1
+        modes[str(row['status_mode'] or 'auto')] += 1
+        started = _parse_time(row['start_time'])
+        if started is not None:
+            ages.setdefault(status, []).append((now - started).total_seconds() / 86400)
+        if status.casefold() not in closed:
+            last = _parse_time(row['updated_at']) or started
+            if last is not None and (now - last).days >= STALLED_DAYS:
+                stalled.append({'call_key': str(row['call_key']), 'status': status, 'operator': str(row['operator'] or ''),
+                                'campaign': str(row['campaign'] or ''), 'city': str(row['city'] or ''),
+                                'days': int((now - last).total_seconds() // 86400), 'followed_up': bool(row['updated_at'])})
+    pipeline = [{'status': item['name'], 'color': item['color'], 'closed': item['closed'], 'count': counts.get(item['name'], 0),
+                 'avg_age_days': round(sum(ages.get(item['name'], [])) / len(ages[item['name']]), 1) if ages.get(item['name']) else None}
+                for item in statuses]
+    pipeline += [{'status': name, 'color': '', 'closed': False, 'count': count, 'avg_age_days': None}
+                 for name, count in counts.items() if name not in {item['name'] for item in statuses}]
+    phases = []
+    for field in definitions:
+        if field['section'] not in PHASE_SECTIONS or field['type'] != 'list' or field['source'] not in {'user', 'derived'}:
+            continue
+        values: Counter = Counter()
+        for row in rows:
+            try:
+                stored = json.loads(row['field_values_json'] or '{}') or {}
+            except (TypeError, ValueError):
+                stored = {}
+            values[stored.get(field['key'], '') if field['source'] == 'user' else derived_value(field, row)] += 1
+        phases.append({'key': field['key'], 'label': field['label'], 'section': field['section'], 'empty': values.pop('', 0),
+                       'items': [{'value': option['name'], 'count': values.get(option['name'], 0), 'color': option['color']}
+                                 for option in field['options']]})
+    durations: dict[str, list[float]] = {}
+    moves: Counter = Counter()
+    with task_repository.connection() as connection:
+        history: dict[str, list[Any]] = {}
+        for start in range(0, len(keys), 500):
+            chunk = keys[start:start + 500]
+            for entry in connection.execute(
+                    f"SELECT call_key, old_value, new_value, changed_at FROM {NQ_CALL_HISTORY_TABLE} "
+                    f"WHERE field IN ('status', 'status_auto') AND call_key IN ({', '.join('?' for _ in chunk)}) ORDER BY changed_at, id", chunk):
+                history.setdefault(str(entry['call_key']), []).append(entry)
+    starts = {str(row['call_key']): _parse_time(row['start_time']) for row in rows}
+    for key, entries in history.items():
+        previous = starts.get(key)
+        for entry in entries:
+            moment = _parse_time(entry['changed_at'])
+            moves[(str(entry['old_value'] or '—'), str(entry['new_value'] or '—'))] += 1
+            if previous is not None and moment is not None and moment >= previous:
+                durations.setdefault(str(entry['old_value'] or ''), []).append((moment - previous).total_seconds() / 86400)
+            previous = moment or previous
+    time_in_status = [{'status': name, 'avg_days': round(sum(values) / len(values), 1), 'moves': len(values)}
+                      for name, values in durations.items() if name]
+    order = [item['name'] for item in statuses]
+    time_in_status.sort(key=lambda item: order.index(item['status']) if item['status'] in order else len(order))
+    stalled.sort(key=lambda item: -item['days'])
+    return {
+        'total': len(rows), 'pipeline': pipeline, 'modes': {'auto': modes.get('auto', 0), 'manual': modes.get('manual', 0)},
+        'phases': phases, 'time_in_status': time_in_status,
+        'moves': [{'from': old, 'to': new, 'count': count} for (old, new), count in moves.most_common(12)],
+        'stalled_days': STALLED_DAYS, 'stalled_total': len(stalled), 'stalled': stalled[:15],
+        'rules': status_rules(task_repository),
+    }
+
+
+def rca_insights(task_repository: Any, filters: dict[str, Any], username: str) -> dict[str, Any]:
+    """The three root cause sources of the filtered calls compared: how many calls each one covers, how often they
+    agree, their category → cause hierarchies and how the analysts' choices relate to each RCA."""
+    rows, _context = _filtered_calls(task_repository, filters, username,
+                                     'call_key, rca_json, failure_classification, failure_category, failure_subcategory, '
+                                     'failure_comment, technology, failure_technology, root_domain, root_category, root_cause')
+    taxonomy = list_root_causes(task_repository)
+    rule = taxonomy.get('rule') or DEFAULT_ROOT_CAUSE_RULE
+    colors = {item['name']: item['color'] for item in taxonomy['domains']}
+    coverage = Counter()
+    agreement = {name: Counter() for name in ('selected_script', 'selected_netcheck', 'script_netcheck')}
+    hierarchies: dict[str, dict[str, Counter]] = {'script': {}, 'netcheck': {}, 'selected': {}}
+    confusion: dict[str, Counter] = {'script': Counter(), 'netcheck': Counter()}
+    domains: Counter = Counter()
+    mapped_counts: dict[str, Counter] = {'script': Counter(), 'netcheck': Counter(), 'selected': Counter()}
+    for row in rows:
+        try:
+            rca = json.loads(row['rca_json'] or '{}') or {}
+        except (TypeError, ValueError):
+            rca = {}
+        script_raw = (str(rca.get('rca_category') or rca.get('auto_rca_category_a') or ''),
+                      str(rca.get('rca_cause') or rca.get('auto_rca_subcategory_a') or ''))
+        netcheck_raw = (str(row['failure_category'] or row['failure_classification'] or ''), str(row['failure_subcategory'] or ''))
+        selected = (str(row['root_category'] or ''), str(row['root_cause'] or ''))
+        script = nq_rca.map_to_catalog(*script_raw, taxonomy, rule.get('match', 'words')) if any(script_raw) else None
+        netcheck = nq_rca.suggest_from_text(row, taxonomy, {**rule, 'comments': False, 'comment_domain': False}) if any(netcheck_raw) else None
+        coverage['total'] += 1
+        if script is not None:
+            coverage['script'] += 1
+            hierarchies['script'].setdefault(script_raw[0] or '—', Counter())[script_raw[1] or '—'] += 1
+            mapped_counts['script'][script['category'] or '—'] += 1
+        if any(netcheck_raw):
+            coverage['netcheck'] += 1
+            hierarchies['netcheck'].setdefault(netcheck_raw[0] or '—', Counter())[netcheck_raw[1] or '—'] += 1
+            mapped_counts['netcheck'][(netcheck or {}).get('category') or '—'] += 1
+        if any(selected):
+            coverage['selected'] += 1
+            domain = str(row['root_domain'] or '') or domain_of(taxonomy, *selected) or NOT_CLASSIFIED
+            domains[domain] += 1
+            hierarchies['selected'].setdefault(selected[0] or '—', Counter())[selected[1] or '—'] += 1
+            mapped_counts['selected'][selected[0] or '—'] += 1
+            for source, mapped in (('script', script), ('netcheck', netcheck)):
+                if mapped and (mapped.get('category') or mapped.get('cause')):
+                    confusion[source][(mapped.get('category') or '—', selected[0] or '—')] += 1
+                    target = agreement[f'selected_{source}']
+                    target['compared'] += 1
+                    same = (mapped.get('category') and mapped['category'] == selected[0]) or \
+                        (not mapped.get('category') and mapped.get('cause') and mapped['cause'] == selected[1])
+                    target['agree'] += int(bool(same))
+        if script and netcheck and (script.get('category') or netcheck.get('category')):
+            agreement['script_netcheck']['compared'] += 1
+            agreement['script_netcheck']['agree'] += int(bool(script.get('category')) and script.get('category') == netcheck.get('category'))
+
+    def hierarchy(name: str, limit: int = 12) -> list[dict[str, Any]]:
+        groups = hierarchies[name]
+        ordered = sorted(groups.items(), key=lambda item: -sum(item[1].values()))[:limit]
+        return [{'category': category, 'count': sum(causes.values()),
+                 'causes': [{'cause': cause, 'count': count} for cause, count in causes.most_common(8)]} for category, causes in ordered]
+
+    def matrix(source: str) -> dict[str, Any]:
+        cells = confusion[source]
+        totals_rows = Counter()
+        totals_columns = Counter()
+        for (row_name, column_name), count in cells.items():
+            totals_rows[row_name] += count
+            totals_columns[column_name] += count
+        rows_order = [name for name, _count in totals_rows.most_common(10)]
+        columns_order = [name for name, _count in totals_columns.most_common(10)]
+        return {'rows': rows_order, 'columns': columns_order,
+                'cells': [[cells.get((row_name, column_name), 0) for column_name in columns_order] for row_name in rows_order]}
+
+    def rate(name: str) -> dict[str, Any]:
+        target = agreement[name]
+        return {'agree': target['agree'], 'compared': target['compared'],
+                'rate': round(target['agree'] * 100 / target['compared'], 1) if target['compared'] else None}
+
+    return {
+        'coverage': {key: coverage.get(key, 0) for key in ('total', 'script', 'netcheck', 'selected')},
+        'agreement': {name: rate(name) for name in agreement},
+        'hierarchies': {name: hierarchy(name) for name in hierarchies},
+        'mapped': {name: [{'category': category, 'count': count} for category, count in counts.most_common(12)]
+                   for name, counts in mapped_counts.items()},
+        'domains': [{'domain': name, 'count': count, 'color': colors.get(name, '#b8c0c6')} for name, count in domains.most_common()],
+        'confusion': {source: matrix(source) for source in confusion},
+        'rca_results': rca_results_summary(task_repository),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Excel export
 # ---------------------------------------------------------------------------
+# The call itself, before the catalog fields: what identifies the call and what the CDR says about it.
 EXPORT_COLUMNS = (
     ('Service', 'service_label'), ('Start Time', 'start_time'), ('End Time', 'end_time'), ('Operator', 'operator'),
     ('Operator_Vendor', 'operator_vendor'), ('Vendor_Operator', 'vendor_operator'), ('Vendor', 'vendor'),
     ('Campaign', 'campaign'), ('NR Mode', 'nr_mode'), ('Region', 'region'), ('Cluster', 'cluster'), ('City', 'city'),
-    ('Technology', 'technology'), ('Test Name', 'test_name'), ('Session Type', 'session_type'), ('Direction', 'direction'),
-    ('Result', 'result'),
-    ('Failure Phase', 'failure_phase'), ('Failure Technology', 'failure_technology'),
-    ('Failure Classification', 'failure_classification'), ('Failure Category', 'failure_category'),
-    ('Failure Subcategory', 'failure_subcategory'), ('Failure Comment', 'failure_comment'), ('Cell ID', 'cell_id'),
-    ('Latitude', 'latitude'), ('Longitude', 'longitude'), ('Status', 'status'), ('Team', 'team'),
-    ('Assignee', 'assignee'), ('Root Domain', 'root_domain'), ('Root Cause', 'root_cause'),
-    ('Suggested Root Domain', 'suggested_domain'), ('Suggested Root Cause', 'suggested_cause'), ('Comments', 'comment_count'), ('Last Comment', 'last_comment_text'),
-    ('Last Comment By', 'last_comment_by'), ('Last Comment At', 'last_comment_at'), ('Updated By', 'updated_by'),
-    ('Updated At', 'updated_at'), ('CDR', 'dataset_name'), ('CDR Version', 'version_label'), ('Latest CDR', 'latest_dataset_name'),
-    ('JOIN_ID', 'join_id'), ('NQ Samples', 'nq_samples'), ('Call Key', 'call_key'),
+    ('Technology', 'technology'), ('Test Name', 'test_name'), ('Session Type (CDR)', 'session_type'), ('Direction', 'direction'),
+    ('Result', 'result'), ('Failure Phase', 'failure_phase'), ('Failure Technology', 'failure_technology'),
+    ('Failure Comment', 'failure_comment'), ('Cell ID', 'cell_id'), ('Latitude', 'latitude'), ('Longitude', 'longitude'),
+    ('JOIN_ID', 'join_id'), ('CDR', 'dataset_name'), ('CDR Version', 'version_label'), ('Latest CDR', 'latest_dataset_name'),
+    ('NQ Samples', 'nq_samples'),
 )
+CALL_SECTION = {'key': 'call', 'label': 'Call', 'color': '#5E6B75'}
+# Columns of the export that follow a catalog field: (field reference, label, value key).
+EXPORT_COMPANIONS = {
+    'status': [('Status Set', 'status_set')],
+    'root_cause': [('Root Domain', 'root_domain'), ('Recommended Root Category', 'recommended_category'),
+                   ('Recommended Root Cause', 'recommended_cause'), ('Recommendation Sources', 'recommendation_sources')],
+}
+
+
+def _tint(color: str, amount: float) -> str:
+    """A lighter shade of a colour (amount 0 keeps it, 1 is white), as RRGGBB."""
+    value = int(color.lstrip('#'), 16) if nq_catalog.COLOR_PATTERN.fullmatch(color or '') else 0x7B8790
+    channels = [(value >> shift) & 255 for shift in (16, 8, 0)]
+    return ''.join(f'{round(channel + (255 - channel) * amount):02X}' for channel in channels)
+
+
+def _comment_log(rows: list[Any]) -> str:
+    """Every comment of a call, one per line: date and time, author and text."""
+    lines = []
+    for row in rows:
+        if row['deleted_at']:
+            continue
+        moment = str(row['created_at'] or '').replace('T', ' ')[:16]
+        lines.append(f"{moment} · {row['created_by']}: {str(row['body']).strip()}")
+    return '\n'.join(lines)
 
 
 def export_workbook(task_repository: Any, filters: dict[str, Any], username: str) -> bytes:
-    """Every call that matches the filters, its comments and its change history."""
+    """Every call that matches the filters with its catalog fields by section, its comments and its change history."""
     from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
     options = list_options(task_repository)
+    definitions = list_fields(task_repository)
+    sections = {section['key']: section for section in list_sections(task_repository)}
     closed = [item['name'] for item in options['statuses'] if item['closed']]
-    base, base_params = _base_sql(default_status(options), task_repository, _scope(filters))
-    where, params = _filter_sql(_resolve_key_filters(task_repository, filters), username, closed)
+    default = untracked_status(task_repository, options)
+    base, base_params = _base_sql(default, task_repository, _scope(filters))
+    where, params = _filter_sql(_resolve_key_filters(task_repository, filters), username, closed, definitions)
     with task_repository.connection() as connection:
         rows = connection.execute(
             f'WITH calls AS ({base}) SELECT * FROM calls{where} ORDER BY start_time DESC, call_key', [*base_params, *params],
@@ -2964,8 +3496,7 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
                 f'SELECT * FROM {NQ_CALL_COMMENTS_TABLE} WHERE call_key IN ({marks}) ORDER BY id', chunk).fetchall())
             history.extend(connection.execute(
                 f'SELECT * FROM {NQ_CALL_HISTORY_TABLE} WHERE call_key IN ({marks}) ORDER BY id', chunk).fetchall())
-        definitions = list_fields(task_repository)
-        sample_sql, sample_params = _sample_sql(default_status(options), task_repository)
+        sample_sql, sample_params = _sample_sql(default, task_repository)
         samples = [_call_payload(row) for row in connection.execute(
             f'WITH samples AS ({sample_sql}) SELECT * FROM samples WHERE parent_key IN (SELECT value FROM json_each(?)) '
             'ORDER BY parent_key, start_time',
@@ -2978,82 +3509,118 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
                 f'SELECT * FROM {NQ_CALL_COMMENTS_TABLE} WHERE call_key IN ({marks}) ORDER BY id', chunk).fetchall())
             history.extend(connection.execute(
                 f'SELECT * FROM {NQ_CALL_HISTORY_TABLE} WHERE call_key IN ({marks}) ORDER BY id', chunk).fetchall())
-    latest = {str(row['call_key']): row for row in comments if not row['deleted_at']}
+        learned = learned_decisions(connection)
     by_key = {call['call_key']: call for call in calls}
     by_key.update({sample['call_key']: sample for sample in samples})
     taxonomy = list_root_causes(task_repository)
-    notes: dict[str, list[str]] = {}
+    per_call: dict[str, list[Any]] = {}
     for row in comments:
-        if not row['deleted_at']:
-            notes.setdefault(str(row['call_key']), []).append(str(row['body']))
-    for call in calls:
-        suggestion = None if call.get('root_domain') else suggest_root_cause(
-            call, taxonomy, '\n'.join(notes.get(call['call_key'], [])))
-        call['suggested_domain'] = suggestion['domain'] if suggestion else ''
-        call['suggested_cause'] = suggestion['cause'] if suggestion else ''
-        comment = latest.get(call['call_key'])
-        call['last_comment_text'] = str(comment['body']) if comment else ''
-        call['last_comment_by'] = str(comment['created_by']) if comment else ''
-        call['last_comment_at'] = str(comment['created_at']) if comment else ''
+        per_call.setdefault(str(row['call_key']), []).append(row)
+    for call in [*calls, *samples]:
+        notes = '\n'.join(str(row['body']) for row in per_call.get(call['call_key'], []) if not row['deleted_at'])
+        recommendation = recommendation_for(call, taxonomy, notes, learned)['recommendation'] or {}
+        call['values'] = {field['key']: catalog_value(field, call, call.get('rca'), call.get('fields')) for field in definitions}
+        call['comment_log'] = _comment_log(per_call.get(call['call_key'], []))
+        call['status_set'] = 'By hand' if call.get('status_mode') == 'manual' else 'Automatic'
+        call['recommended_category'] = recommendation.get('category', '')
+        call['recommended_cause'] = recommendation.get('cause', '')
+        call['recommendation_sources'] = ', '.join(nq_rca.SOURCE_LABELS.get(name, name) for name in recommendation.get('sources') or [])
         call['dataset_name'] = names.get(int(call['dataset_id']), '')
         call['latest_dataset_name'] = names.get(int(call.get('latest_dataset_id') or call['dataset_id']), '')
         call['version_label'] = VERSION_LABELS.get(call.get('version_state') or 'current', '')
 
+    # (section, label, getter, tint): the call columns, the catalog in its order, the CDR columns and the keys.
+    columns: list[tuple[dict[str, str], str, Callable[[dict[str, Any]], Any], float]] = [
+        (CALL_SECTION, label, (lambda call, key=key: call.get(key)), 0.75) for label, key in EXPORT_COLUMNS]
+    for field in definitions:
+        if not field.get('in_export', True):
+            continue
+        section = sections.get(field['section'], CALL_SECTION)
+        tint = 0.35 if field['source'] in {'user', 'tracking'} else 0.65
+        if field['source'] == 'tracking' and field['source_ref'] == 'comments':
+            columns.append((section, field['label'], lambda call: call.get('comment_log', ''), tint))
+        elif field['source'] == 'tracking' and field['source_ref'] == 'updated_at':
+            columns.append((section, field['label'], lambda call: str(call.get('updated_at') or '').replace('T', ' ')[:19], tint))
+        else:
+            columns.append((section, field['label'], lambda call, key=field['key']: call['values'].get(key, ''), tint))
+        if field['source'] == 'tracking':
+            for label, key in EXPORT_COMPANIONS.get(field['source_ref'], []):
+                columns.append((section, label, lambda call, key=key: call.get(key, ''), 0.8))
+    extra_section = {'key': 'cdr', 'label': 'CDR Columns', 'color': '#5E6B75'}
+    columns += [(extra_section, name, (lambda call, name=name: (call.get('extra') or {}).get(name, '')), 0.8)
+                for name in indexed_cdr_columns(task_repository)
+                if not any(field['source'] == 'cdr' and field['source_ref'] == f'column:{name}' for field in definitions)]
+    columns += [(CALL_SECTION, 'Updated By', lambda call: call.get('updated_by', ''), 0.75),
+                (CALL_SECTION, 'Call Key', lambda call: call.get('call_key', ''), 0.75)]
+
     workbook = Workbook()
+    thin = Side(style='thin', color='FFFFFF')
+    sheet = workbook.active
+    sheet.title = 'NQ Calls'
+    # Row 1: the sections, merged over their columns; row 2: the fields, in a lighter shade of their section.
+    position = 1
+    while position <= len(columns):
+        section = columns[position - 1][0]
+        end = position
+        while end < len(columns) and columns[end][0] is section:
+            end += 1
+        cell = sheet.cell(1, position, section['label'].upper())
+        cell.font = Font(bold=True, color=nq_catalog.contrast_color(section['color']))
+        cell.fill = PatternFill('solid', fgColor=section['color'].lstrip('#'))
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        if end > position:
+            sheet.merge_cells(start_row=1, start_column=position, end_row=1, end_column=end)
+        position = end + 1
+    for index, (section, label, _getter, tint) in enumerate(columns, start=1):
+        cell = sheet.cell(2, index, label)
+        shade = _tint(section['color'], tint)
+        cell.fill = PatternFill('solid', fgColor=shade)
+        cell.font = Font(bold=True, color=nq_catalog.contrast_color(f'#{shade}'))
+        cell.alignment = Alignment(wrap_text=True, vertical='center')
+        cell.border = Border(left=thin, right=thin)
+        sheet.column_dimensions[get_column_letter(index)].width = max(12, min(48, len(label) + 6))
+    for call in calls:
+        sheet.append([_excel_value(getter(call)) for _section, _label, getter, _tint_value in columns])
+    sheet.freeze_panes = 'A3'
+    sheet.row_dimensions[2].height = 32
+    if calls:
+        sheet.auto_filter.ref = f'A2:{get_column_letter(len(columns))}{len(calls) + 2}'
+    log_columns = [index for index, (_section, label, _getter, _tint_value) in enumerate(columns, start=1)
+                   if any(field['source_ref'] == 'comments' and field['label'] == label for field in definitions)]
+    for index in log_columns:
+        sheet.column_dimensions[get_column_letter(index)].width = 70
+        for cell in sheet.iter_rows(min_row=3, min_col=index, max_col=index):
+            cell[0].alignment = Alignment(wrap_text=True, vertical='top')
+
     header_font = Font(bold=True, color='FFFFFF')
     header_fill = PatternFill('solid', fgColor='9C1C47')
 
-    def write_sheet(sheet, headers: list[str], data: list[list[Any]], widths: list[int]) -> None:
-        sheet.append(headers)
-        for cell in sheet[1]:
+    def write_sheet(target, headers: list[str], data: list[list[Any]], widths: list[int]) -> None:
+        target.append(headers)
+        for cell in target[1]:
             cell.font, cell.fill = header_font, header_fill
             cell.alignment = Alignment(vertical='center')
         for values in data:
-            sheet.append(values)
-        sheet.freeze_panes = 'A2'
+            target.append([_excel_value(value) for value in values])
+        target.freeze_panes = 'A2'
         if data:
-            sheet.auto_filter.ref = sheet.dimensions
+            target.auto_filter.ref = target.dimensions
         for index, width in enumerate(widths, start=1):
-            sheet.column_dimensions[get_column_letter(index)].width = width
+            target.column_dimensions[get_column_letter(index)].width = width
 
-    calls_sheet = workbook.active
-    calls_sheet.title = 'NQ Calls'
-    # The analysis fields follow the root cause columns.
-    position = next(index for index, (_label, key) in enumerate(EXPORT_COLUMNS) if key == 'suggested_cause') + 1
-    columns = [*EXPORT_COLUMNS[:position], *((field['label'], f"field:{field['key']}") for field in definitions),
-               *EXPORT_COLUMNS[position:]]
-    # The CDR columns of the table and those only exported, before the call key.
-    columns[-1:-1] = [(name, f'cdr:{name}') for name in indexed_cdr_columns(task_repository)]
-
-    def cell(call: dict[str, Any], key: str) -> Any:
-        if key.startswith('field:'):
-            value = call.get('fields', {}).get(key[6:], '')
-        elif key.startswith('cdr:'):
-            value = (call.get('extra') or {}).get(key[4:], '')
-        else:
-            value = call.get(key)
-        return value if value is not None else ''
-
-    write_sheet(
-        calls_sheet, [label for label, _key in columns],
-        [[cell(call, key) for _label, key in columns] for call in calls],
-        [max(12, min(48, len(label) + 6)) for label, _key in columns],
-    )
     if samples:
         # Speech samples with their own follow-up, below the call they belong to.
-        sample_columns = [('Call Start Time', 'parent_start'), ('Operator', 'operator'), ('Campaign', 'campaign'),
-                          ('Sample', 'sample_id'), ('Start Time', 'start_time'), ('Result', 'result'),
-                          ('Failure Classification', 'failure_classification'), ('Failure Category', 'failure_category'),
-                          ('Status', 'status'), ('Team', 'team'), ('Assignee', 'assignee'), ('Root Domain', 'root_domain'),
-                          ('Root Cause', 'root_cause'), *((field['label'], f"field:{field['key']}") for field in definitions),
-                          ('Comments', 'comment_count'), ('Call Key', 'parent_key'), ('Sample Key', 'call_key')]
-        for sample in samples:
-            sample['parent_start'] = by_key.get(str(sample['parent_key']), {}).get('start_time', '')
-        write_sheet(
-            workbook.create_sheet('Speech Samples'), [label for label, _key in sample_columns],
-            [[cell(sample, key) for _label, key in sample_columns] for sample in samples],
-            [max(12, min(40, len(label) + 6)) for label, _key in sample_columns],
-        )
+        sample_columns = [('Call Start Time', lambda sample: by_key.get(str(sample['parent_key']), {}).get('start_time', '')),
+                          ('Operator', lambda sample: sample.get('operator')), ('Campaign', lambda sample: sample.get('campaign')),
+                          ('Sample', lambda sample: sample.get('sample_id')), ('Start Time', lambda sample: sample.get('start_time')),
+                          ('Result', lambda sample: sample.get('result')),
+                          *((field['label'], lambda sample, key=field['key']: sample['values'].get(key, ''))
+                            for field in definitions if field.get('in_export', True) and field['source_ref'] != 'comments'),
+                          ('Comments', lambda sample: sample.get('comment_log', '')),
+                          ('Call Key', lambda sample: sample.get('parent_key')), ('Sample Key', lambda sample: sample.get('call_key'))]
+        write_sheet(workbook.create_sheet('Speech Samples'), [label for label, _getter in sample_columns],
+                    [[getter(sample) for _label, getter in sample_columns] for sample in samples],
+                    [max(12, min(40, len(label) + 6)) for label, _getter in sample_columns])
 
     def call_context(call_key: str) -> list[Any]:
         call = by_key.get(call_key, {})
@@ -3075,8 +3642,8 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
           row['old_value'], row['new_value'], row['changed_by'], row['changed_at'], row['call_key']] for row in history],
         [10, 16, 16, 24, 18, 40, 40, 16, 26, 28],
     )
-    for sheet in workbook.worksheets[1:]:
-        for row in sheet.iter_rows(min_row=2):
+    for target in workbook.worksheets[1:]:
+        for row in target.iter_rows(min_row=2):
             for cell in row:
                 cell.alignment = Alignment(wrap_text=True, vertical='top')
     output = BytesIO()
@@ -3084,8 +3651,18 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
     return output.getvalue()
 
 
+def _excel_value(value: Any) -> Any:
+    if value is None:
+        return ''
+    if isinstance(value, str) and value.startswith('='):
+        # Text that would be written as a formula.
+        return "'" + value
+    return value
+
+
 HISTORY_LABELS = {
-    'status': 'Status', 'team': 'Team', 'assignee': 'Assignee', 'root_domain': 'Root Domain', 'root_cause': 'Root Cause',
+    'status': 'Status', 'status_auto': 'Status (automatic)', 'status_mode': 'Status set', 'team': 'Team', 'assignee': 'Assignee',
+    'root_domain': 'Root Domain', 'root_category': 'Root Category', 'root_cause': 'Root Cause',
     'comment_edit': 'Comment edited', 'comment_delete': 'Comment deleted',
 }
 
@@ -3105,8 +3682,11 @@ def export_tracking_document(task_repository: Any) -> bytes:
     ensure_nq_tables(task_repository)
     with task_repository.connection() as connection:
         tracking = [dict(row) for row in connection.execute(
-            f'SELECT call_key, status, team, assignee, root_domain, root_cause, version, updated_by, updated_at '
-            f'FROM {NQ_CALL_TRACKING_TABLE} ORDER BY call_key')]
+            f'SELECT call_key, status, status_mode, team, assignee, root_domain, root_category, root_cause, version, updated_by, '
+            f'updated_at FROM {NQ_CALL_TRACKING_TABLE} ORDER BY call_key')]
+        rca_results = [dict(row) for row in connection.execute(
+            f'SELECT original_join_id AS join_id, values_json, source_file, imported_by, imported_at '
+            f'FROM {NQ_RCA_RESULTS_TABLE} ORDER BY join_id')]
         comments = [dict(row) for row in connection.execute(
             f'SELECT uid, call_key, body, created_by, created_at, edited_by, edited_at, deleted_by, deleted_at '
             f'FROM {NQ_CALL_COMMENTS_TABLE} ORDER BY id')]
@@ -3118,18 +3698,36 @@ def export_tracking_document(task_repository: Any) -> bytes:
     document = {
         'format': TRACKING_FORMAT, 'version': TRACKING_FORMAT_VERSION, 'options': list_options(task_repository),
         'root_causes': list_root_causes(task_repository), 'fields': list_fields(task_repository),
+        'sections': list_sections(task_repository), 'status_rules': status_rules(task_repository),
         'table_columns': table_columns(task_repository),
-        'tracking': tracking, 'comments': comments, 'history': history, 'field_values': values,
+        'tracking': tracking, 'comments': comments, 'history': history, 'field_values': values, 'rca_results': rca_results,
     }
     return json.dumps(document, ensure_ascii=False, indent=2).encode('utf-8')
+
+
+def _incoming_root_catalog(document: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """The root cause catalog of a tracking document; the first version listed causes inside their domains."""
+    root = document.get('root_causes') if isinstance(document.get('root_causes'), dict) else {}
+    catalog: dict[str, list[dict[str, Any]]] = {'domains': [], 'categories': [], 'causes': []}
+    for domain in root.get('domains') or []:
+        if not isinstance(domain, dict) or not domain.get('name'):
+            continue
+        catalog['domains'].append({'name': domain['name'], 'color': domain.get('color') or '', 'keywords': domain.get('keywords') or []})
+        for cause in domain.get('causes') or []:
+            if isinstance(cause, dict) and cause.get('name'):
+                catalog['causes'].append({'name': cause['name'], 'domain': domain['name'], 'keywords': cause.get('keywords') or []})
+    for plural in ('categories', 'causes'):
+        catalog[plural] += [item for item in root.get(plural) or [] if isinstance(item, dict) and item.get('name')]
+    return catalog
 
 
 def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
     """Merge a tracking document; returns the number of calls whose follow-up was added or updated.
 
-    Missing statuses, teams and root cause domains and causes are added, newer follow-up replaces older follow-up,
-    and comments and history entries are added once (by their identifier), so
-    importing the same document again changes nothing.
+    Missing statuses, teams, fields, list values and root cause catalog entries are added, the
+    sections and status rules of the document are taken, newer follow-up replaces older follow-up,
+    and comments, history entries and RCA results are added once, so importing the same document
+    again changes nothing.
     """
     document = json.loads(payload.decode('utf-8') if isinstance(payload, bytes) else payload)
     if not isinstance(document, dict) or document.get('format') != TRACKING_FORMAT:
@@ -3146,40 +3744,33 @@ def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
 
     options = document.get('options') if isinstance(document.get('options'), dict) else {}
     tracking, comments, history = records('tracking'), records('comments'), records('history')
-    value_records = records('field_values')
+    value_records, rca_records = records('field_values'), records('rca_results')
     touched: set[str] = set()
-    # Missing analysis fields are added and the values of the list fields are merged.
+    # Missing fields are added (in their section) and the values of the list fields are merged.
     incoming_fields = [item for item in document.get('fields') or [] if isinstance(item, dict) and item.get('key') and item.get('label')]
     if incoming_fields:
         current_fields = list_fields(task_repository)
         by_key = {field['key']: field for field in current_fields}
         labels = {field['label'].casefold() for field in current_fields}
+        refs = {field['source_ref'] for field in current_fields if field['source'] == 'tracking'}
         merged = [dict(field) for field in current_fields]
         for item in incoming_fields:
             target = next((field for field in merged if field['key'] == item['key']), None)
             if target is None:
-                if str(item['label']).casefold() in labels or str(item.get('type')) not in FIELD_TYPES:
+                if (str(item['label']).casefold() in labels or str(item.get('type')) not in FIELD_TYPES
+                        or (item.get('source') == 'tracking' and item.get('source_ref') in refs)):
                     continue
                 merged.append({**item, 'options': [option for option in item.get('options') or [] if isinstance(option, dict)]})
                 continue
-            if target['type'] == 'list' and str(item.get('type')) == 'list':
+            if target['type'] == 'list' and str(item.get('type')) == 'list' and target['source'] in {'user', 'derived'}:
                 names = {option['name'].casefold() for option in target['options']}
                 target['options'] = [*target['options'], *(
                     option for option in item.get('options') or []
                     if isinstance(option, dict) and str(option.get('name') or '').casefold() not in names)]
         if merged != current_fields:
-            existing = by_key
-            normalized = _normalize_fields(merged, existing)
-            with task_repository.connection() as connection:
-                connection.execute(f'DELETE FROM {NQ_FIELDS_TABLE}')
-                connection.executemany(
-                    f'INSERT INTO {NQ_FIELDS_TABLE} (field_key, label, field_type, options_json, position, in_table, in_summary, '
-                    'required_to_close, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [(field['key'], field['label'], field['type'],
-                      json.dumps([{'name': option['name'], 'color': option['color']} for option in field['options']],
-                                 ensure_ascii=False),
-                      index, int(field['in_table']), int(field['in_summary']), int(field['required_to_close']),
-                      field['description']) for index, field in enumerate(normalized)])
+            _store_fields(task_repository, nq_catalog.normalize_fields(merged, by_key, CALL_FIELDS))
+    if isinstance(document.get('sections'), list):
+        task_repository.set_workspace_state(SECTIONS_STATE_KEY, json.dumps(nq_catalog.normalize_sections(document['sections'])))
     columns = document.get('table_columns')
     if isinstance(columns, dict) and not task_repository.get_workspace_state(TABLE_COLUMNS_STATE_KEY):
         try:
@@ -3201,19 +3792,14 @@ def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
                     f'INSERT OR IGNORE INTO {NQ_TEAM_MEMBERS_TABLE} (team, username) VALUES (?, ?)',
                     [(item['name'], member) for member in item.get('members') or []],
                 )
-        root_causes = document.get('root_causes') if isinstance(document.get('root_causes'), dict) else {}
-        incoming_domains = [item for item in root_causes.get('domains') or [] if isinstance(item, dict) and item.get('name')]
-        if incoming_domains:
-            current = {domain['name'].casefold(): domain for domain in _current_root_causes(connection)}
-            merged = list(current.values())
-            for domain in _normalize_root_causes(incoming_domains):
-                target = current.get(domain['name'].casefold())
-                if target is None:
-                    merged.append(domain)
-                    continue
-                names = {cause['name'].casefold() for cause in target['causes']}
-                target['causes'].extend(cause for cause in domain['causes'] if cause['name'].casefold() not in names)
-            _write_root_causes(connection, merged)
+        incoming = _incoming_root_catalog(document)
+        if any(incoming.values()):
+            current = _read_root_catalog(connection)
+            for plural in ('domains', 'categories', 'causes'):
+                names = {item['name'].casefold() for item in current[plural]}
+                current[plural] += [item for item in incoming[plural] if str(item['name']).casefold() not in names]
+            _write_root_catalog(connection, nq_catalog.normalize_root_catalog(current))
+    root_causes = document.get('root_causes') if isinstance(document.get('root_causes'), dict) else {}
     if isinstance(root_causes.get('rule'), dict) and not task_repository.get_workspace_state(ROOT_CAUSE_RULE_STATE_KEY):
         try:
             task_repository.set_workspace_state(ROOT_CAUSE_RULE_STATE_KEY, json.dumps(normalize_root_cause_rule(root_causes['rule'])))
@@ -3221,6 +3807,13 @@ def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
             pass
     if root_causes.get('require_to_close') and not task_repository.get_workspace_state(ROOT_CAUSE_SETTINGS_STATE_KEY):
         task_repository.set_workspace_state(ROOT_CAUSE_SETTINGS_STATE_KEY, json.dumps({'require_to_close': True}))
+    if isinstance(document.get('status_rules'), list):
+        try:
+            rules = nq_catalog.normalize_status_rules(document['status_rules'], [item['name'] for item in list_options(task_repository)['statuses']],
+                                                      list_fields(task_repository))
+            task_repository.set_workspace_state(STATUS_RULES_STATE_KEY, json.dumps(rules, ensure_ascii=False))
+        except ValueError:
+            pass
     with task_repository.connection() as connection:
         for item in tracking:
             call_key = _text(item.get('call_key'))
@@ -3228,15 +3821,17 @@ def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
                 continue
             existing = connection.execute(
                 f'SELECT updated_at FROM {NQ_CALL_TRACKING_TABLE} WHERE call_key = ?', (call_key,)).fetchone()
-            incoming = _text(item.get('updated_at'))
-            if existing is not None and str(existing['updated_at']) >= incoming:
+            incoming_at = _text(item.get('updated_at'))
+            if existing is not None and str(existing['updated_at']) >= incoming_at:
                 continue
+            mode = 'manual' if _text(item.get('status_mode')) == 'manual' or (
+                'status_mode' not in item and _text(item.get('status')) not in {'', 'Open'}) else 'auto'
             connection.execute(
-                f'INSERT OR REPLACE INTO {NQ_CALL_TRACKING_TABLE} (call_key, status, team, assignee, root_domain, root_cause, '
-                'version, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                (call_key, _text(item.get('status')), _text(item.get('team')), _text(item.get('assignee')),
-                 _text(item.get('root_domain')), _text(item.get('root_cause')),
-                 int(item.get('version') or 1), _text(item.get('updated_by')), incoming),
+                f'INSERT OR REPLACE INTO {NQ_CALL_TRACKING_TABLE} (call_key, status, status_mode, team, assignee, root_domain, '
+                'root_category, root_cause, version, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (call_key, _text(item.get('status')), mode, _text(item.get('team')), _text(item.get('assignee')),
+                 _text(item.get('root_domain')), _text(item.get('root_category')), _text(item.get('root_cause')),
+                 int(item.get('version') or 1), _text(item.get('updated_by')), incoming_at),
             )
             touched.add(call_key)
         for item in comments:
@@ -3277,14 +3872,31 @@ def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
             existing = connection.execute(
                 f'SELECT updated_at FROM {NQ_FIELD_VALUES_TABLE} WHERE call_key = ? AND field_key = ?', (call_key, field_key),
             ).fetchone()
-            incoming = _text(item.get('updated_at'))
-            if existing is not None and str(existing['updated_at']) >= incoming:
+            incoming_at = _text(item.get('updated_at'))
+            if existing is not None and str(existing['updated_at']) >= incoming_at:
                 continue
             connection.execute(
                 f'INSERT OR REPLACE INTO {NQ_FIELD_VALUES_TABLE} (call_key, field_key, value, updated_by, updated_at) '
                 'VALUES (?, ?, ?, ?, ?)',
-                (call_key, field_key, str(item.get('value') or ''), _text(item.get('updated_by')) or 'import', incoming))
+                (call_key, field_key, str(item.get('value') or ''), _text(item.get('updated_by')) or 'import', incoming_at))
             touched.add(call_key)
+        for item in rca_records:
+            join_id = _text(item.get('join_id'))
+            if not join_id:
+                continue
+            existing = connection.execute(
+                f'SELECT imported_at FROM {NQ_RCA_RESULTS_TABLE} WHERE join_id = ?', (join_id.casefold(),)).fetchone()
+            incoming_at = _text(item.get('imported_at'))
+            if existing is not None and str(existing['imported_at']) >= incoming_at:
+                continue
+            values = item.get('values_json')
+            connection.execute(
+                f'INSERT OR REPLACE INTO {NQ_RCA_RESULTS_TABLE} (join_id, original_join_id, values_json, source_file, imported_by, '
+                'imported_at) VALUES (?, ?, ?, ?, ?, ?)',
+                (join_id.casefold(), join_id, values if isinstance(values, str) else json.dumps(values or {}, ensure_ascii=False),
+                 _text(item.get('source_file')), _text(item.get('imported_by')) or 'import', incoming_at))
+    if touched:
+        recompute_statuses(task_repository, 'import', list(touched))
     return len(touched)
 
 
@@ -3353,7 +3965,15 @@ def install_non_qualified_calls_routes(core: Any) -> None:
 
     class RootCausesPayload(BaseModel):
         domains: list[dict[str, Any]] = Field(default_factory=list)
+        categories: list[dict[str, Any]] = Field(default_factory=list)
+        causes: list[dict[str, Any]] = Field(default_factory=list)
         require_to_close: bool = False
+
+    class SectionsPayload(BaseModel):
+        sections: list[dict[str, Any]] = Field(default_factory=list)
+
+    class StatusRulesPayload(BaseModel):
+        rules: list[dict[str, Any]] = Field(default_factory=list)
 
     class RootCauseRulePayload(BaseModel):
         rule: dict[str, Any] | None = None
@@ -3440,8 +4060,8 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         ('datasets', 'CDRs'), ('service', 'Service'), ('campaign', 'Campaign'), ('operator', 'Operator'),
         ('operator_vendor', 'Operator_Vendor'), ('vendor_operator', 'Vendor_Operator'), ('vendor', 'Vendor'),
         ('region', 'Region'), ('cluster', 'Cluster'), ('city', 'City'), ('result', 'Result'), ('failure_classification', 'Failure Classification'),
-        ('status', 'Status'), ('team', 'Team'), ('assignee', 'Assignee'), ('root_domain', 'Root Domain'),
-        ('root_cause', 'Root Cause'), ('version', 'CDR Version'),
+        ('status', 'Status'), ('status_mode', 'Status Set'), ('team', 'Team'), ('assignee', 'Assignee'), ('root_domain', 'Root Domain'),
+        ('root_category', 'Root Category'), ('root_cause', 'Root Cause'), ('version', 'CDR Version'),
     )
     report_settings = (
         {'key': 'granularity', 'label': 'Progress periods', 'default': 'month',
@@ -3462,7 +4082,9 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         values['assignee'] = [[UNASSIGNED, 'Unassigned'], *workspace_users()]
         taxonomy = list_root_causes(repository)
         values['root_domain'] = [[UNASSIGNED, NOT_CLASSIFIED], *[domain['name'] for domain in taxonomy['domains']]]
-        values['root_cause'] = list(dict.fromkeys(cause['name'] for domain in taxonomy['domains'] for cause in domain['causes']))
+        values['root_category'] = [[UNASSIGNED, NOT_CLASSIFIED], *[item['name'] for item in taxonomy['categories']]]
+        values['root_cause'] = [[UNASSIGNED, 'No cause'], *[item['name'] for item in taxonomy['causes']]]
+        values['status_mode'] = [['auto', 'Automatic'], ['manual', 'By hand']]
         values['version'] = [[key, label] for key, label in VERSION_LABELS.items()]
         return values
 
@@ -3477,7 +4099,10 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         progress = progress_stats(repository, filters, username, granularity)
         options = {**list_options(repository),
                    'root_causes': root_cause_stats(repository, filters, username, include_suggestions),
-                   'rates': nq_rates(repository, filters)}
+                   'rates': nq_rates(repository, filters),
+                   'lifecycle': lifecycle_stats(repository, filters, username),
+                   'rca_insights': rca_insights(repository, filters, username),
+                   'sections': list_sections(repository)}
         names = {str(item['id']): item['name'] for item in indexed_datasets(repository)}
         labels = {field['key']: field['label'] for field in list_fields(repository)}
         return executive, progress, options, selection_lines(filters, names, granularity, labels)
@@ -3550,9 +4175,14 @@ def install_non_qualified_calls_routes(core: Any) -> None:
             'unassigned': UNASSIGNED, 'page_sizes': list(PAGE_SIZES),
             'main_cities': list(repository.list_main_cities()),
             'saved_filters': saved_filters(repository),
-            'root_causes': list_root_causes(repository), 'root_cause_defaults': default_root_causes(),
+            'root_causes': list_root_causes(repository), 'root_cause_defaults': nq_catalog.default_root_catalog(),
             'root_cause_rule_fields': RULE_FIELDS, 'default_root_cause_rule': DEFAULT_ROOT_CAUSE_RULE,
-            'fields': list_fields(repository), 'field_types': FIELD_TYPES,
+            'fields': list_fields(repository), 'field_types': FIELD_TYPES, 'field_sources': nq_catalog.FIELD_SOURCES,
+            'tracking_refs': nq_catalog.TRACKING_REFS, 'rca_refs': nq_catalog.RCA_REFS, 'call_fields': list(CALL_FIELDS),
+            'sections': list_sections(repository), 'default_sections': nq_catalog.default_sections(),
+            'status_rules': status_rules(repository), 'default_status_rules': nq_catalog.default_status_rules(),
+            'rule_operators': nq_catalog.RULE_OPERATORS, 'condition_fields': nq_catalog.condition_fields(list_fields(repository)),
+            'rca_results': rca_results_summary(repository), 'rca_sources': nq_rca.SOURCE_LABELS,
             'table_columns': table_columns(repository), 'optional_columns': OPTIONAL_COLUMNS,
             'cdr_columns': available_cdr_columns(repository), 'max_cdr_columns': MAX_CDR_COLUMNS,
             'version_labels': VERSION_LABELS,
@@ -3578,23 +4208,92 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         repository = workspace_repository(user)
         return JSONResponse({'fields': translate(lambda: save_fields(repository, payload.fields, user.username))})
 
-    @core.app.post('/api/non-qualified-calls/fields/from-excel')
-    async def nq_fields_from_excel(request: Request, user=Depends(editor_user)) -> JSONResponse:
-        """Analysis fields proposed by a workbook (names in the first row, values below), to review before saving."""
-        workspace_repository(user)
+    async def uploaded_file(request: Request, name: str, limit_mb: int) -> tuple[bytes, str, dict[str, Any]]:
         form = await request.form()
-        upload = form.get('workbook')
+        upload = form.get(name)
         if upload is None or not hasattr(upload, 'read'):
-            raise HTTPException(400, 'Choose an Excel workbook.')
+            raise HTTPException(400, 'Choose a file.')
         content = await upload.read()
-        if len(content) > 10 * 1024 * 1024:
-            raise HTTPException(400, 'The workbook is larger than 10 MB.')
+        if len(content) > limit_mb * 1024 * 1024:
+            raise HTTPException(400, f'The file is larger than {limit_mb} MB.')
+        return content, str(getattr(upload, 'filename', '') or 'upload'), {key: form.get(key) for key in form.keys()}
+
+    @core.app.put('/api/non-qualified-calls/sections')
+    def nq_save_sections(payload: SectionsPayload, user=Depends(editor_user)) -> JSONResponse:
+        """The names and colours of the six sections (user-editor and above)."""
+        repository = workspace_repository(user)
+        return JSONResponse({'sections': save_sections(repository, payload.sections, user.username)})
+
+    @core.app.put('/api/non-qualified-calls/status-rules')
+    def nq_save_status_rules(payload: StatusRulesPayload, user=Depends(editor_user)) -> JSONResponse:
+        """The rules that set the automatic NQ Call Status; the calls follow them at once."""
+        repository = workspace_repository(user)
+        rules = translate(lambda: save_status_rules(repository, payload.rules, user.username))
+        return JSONResponse({'status_rules': rules})
+
+    @core.app.get('/api/non-qualified-calls/catalog/export')
+    def nq_catalog_export(user=Depends(core.current_user)) -> Response:
+        """The catalog (sections, fields, lists, root cause catalog, statuses, teams and status rules) as Excel."""
+        repository = workspace_repository(user)
+        name = re.sub(r'[^A-Za-z0-9._-]+', '_', f'{core.active_workspace.name}_NQ_Analysis_Center_catalog.xlsx')
+        return Response(catalog_document(repository),
+                        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        headers={'Content-Disposition': f'attachment; filename="{name}"'})
+
+    @core.app.post('/api/non-qualified-calls/catalog/import')
+    async def nq_catalog_import(request: Request, user=Depends(editor_user)) -> JSONResponse:
+        """Preview (``preview=1``) or import a catalog workbook: its format, or the layout of the meeting workbook."""
+        repository = workspace_repository(user)
+        content, _name, form = await uploaded_file(request, 'workbook', 10)
         try:
-            return JSONResponse(fields_from_workbook(content))
+            if str(form.get('preview') or '') == '1':
+                return JSONResponse(preview_catalog(repository, content))
+            return JSONResponse(import_catalog(repository, content, user.username, set(workspace_users())))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 - an unreadable file is a user error.
+            raise HTTPException(400, f'The workbook could not be read: {exc}') from exc
+
+    @core.app.get('/api/non-qualified-calls/rca')
+    def nq_rca_summary(user=Depends(core.current_user)) -> JSONResponse:
+        return JSONResponse(rca_results_summary(workspace_repository(user)))
+
+    @core.app.get('/api/non-qualified-calls/rca/template')
+    def nq_rca_template(user=Depends(core.current_user)) -> Response:
+        workspace_repository(user)
+        return Response(nq_rca.rca_template(), media_type='text/csv',
+                        headers={'Content-Disposition': 'attachment; filename="NQ_RCA_results_template.csv"'})
+
+    @core.app.post('/api/non-qualified-calls/rca/import')
+    async def nq_rca_import(request: Request, user=Depends(editor_user)) -> JSONResponse:
+        """Preview (``preview=1``) or import RCA script results by JOIN_ID; ``replace=1`` forgets the previous results."""
+        repository = workspace_repository(user)
+        content, name, form = await uploaded_file(request, 'file', 100)
+        try:
+            return JSONResponse(import_rca_results(repository, content, name, user.username,
+                                                   replace=str(form.get('replace') or '') == '1',
+                                                   dry_run=str(form.get('preview') or '') == '1'))
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 - an unreadable file is a user error.
-            raise HTTPException(400, f'The workbook could not be read: {exc}') from exc
+            raise HTTPException(400, f'The RCA file could not be read: {exc}') from exc
+
+    @core.app.delete('/api/non-qualified-calls/rca')
+    def nq_rca_clear(user=Depends(editor_user)) -> JSONResponse:
+        repository = workspace_repository(user)
+        return JSONResponse({'deleted': clear_rca_results(repository, user.username), 'rca_results': rca_results_summary(repository)})
+
+    @core.app.post('/api/non-qualified-calls/lifecycle')
+    def nq_lifecycle(payload: ExportPayload, user=Depends(core.current_user)) -> JSONResponse:
+        repository = workspace_repository(user)
+        return JSONResponse(lifecycle_stats(repository, payload.filters, user.username))
+
+    @core.app.post('/api/non-qualified-calls/rca/insights')
+    def nq_rca_insights(payload: ExportPayload, user=Depends(core.current_user)) -> JSONResponse:
+        repository = workspace_repository(user)
+        return JSONResponse(rca_insights(repository, payload.filters, user.username))
 
     @core.app.put('/api/non-qualified-calls/table-columns')
     def nq_save_table_columns(payload: TableColumnsPayload, user=Depends(editor_user)) -> JSONResponse:
@@ -3691,8 +4390,8 @@ def install_non_qualified_calls_routes(core: Any) -> None:
     @core.app.put('/api/non-qualified-calls/root-causes')
     def nq_save_root_causes(payload: RootCausesPayload, user=Depends(editor_user)) -> JSONResponse:
         repository = workspace_repository(user)
-        return JSONResponse(translate(lambda: save_root_causes(repository, payload.domains, payload.require_to_close,
-                                                                user.username)))
+        catalog = {'domains': payload.domains, 'categories': payload.categories, 'causes': payload.causes}
+        return JSONResponse(translate(lambda: save_root_causes(repository, catalog, payload.require_to_close, user.username)))
 
     @core.app.put('/api/non-qualified-calls/root-causes/rule')
     def nq_save_root_cause_rule(payload: RootCauseRulePayload, user=Depends(rule_user)) -> JSONResponse:

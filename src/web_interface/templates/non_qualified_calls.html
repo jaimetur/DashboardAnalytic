@@ -4,9 +4,9 @@
 <section class="dashboard-stack spacious-stack non-qualified-calls" id="non-qualified-calls" data-nq-can-edit="{{ 'true' if nq_can_edit else 'false' }}">
   <article class="panel module-hero nq-hero">
     <div class="nq-hero-copy">
-      <p class="eyebrow">Non-Qualified Calls</p>
+      <p class="eyebrow">Non-Qualified Calls · Analysis Center</p>
       <h2>Follow up every call and test that did not complete</h2>
-      <p class="lede">Every Voice and Speech call and every Data test whose result is not Completed (Failed, Dropped, Cutoff…) in the ready CDRs of this workspace. Review the overall health, drill down from the summary into the calls, and track each one with a status, a responsible team, an assignee and a shared comment thread.</p>
+      <p class="lede">Every Voice and Speech call and every Data test whose result is not Completed (Failed, Dropped, Cutoff…) in the ready CDRs of this workspace. Review the overall health, drill down from the summary into the calls, and follow each one through the sections of the Analysis Center: its root cause decided from the RCA script, NetCheck and the analysts, its failure event, and its analysis, implementation and planning phases, with a status set by rules, a responsible team, an assignee and a shared comment thread.</p>
     </div>
   </article>
 
@@ -44,13 +44,15 @@
         <label>Failure Classification<select data-nq-filter="failure_classification" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Failure Classification"></select></label>
         <label>Failure Category<select data-nq-filter="failure_category" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Failure Category"></select></label>
         <label>Status<select data-nq-filter="status" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Status"></select></label>
+        <label title="Whether the status follows the Status Rules or was set by hand">Status Set<select data-nq-filter="status_mode" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Status Set"></select></label>
         <label>Team<select data-nq-filter="team" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Team"></select></label>
         <label>Assignee<select data-nq-filter="assignee" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Assignee"></select></label>
         <label>Root Domain<select data-nq-filter="root_domain" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Root Domain"></select></label>
+        <label>Root Category<select data-nq-filter="root_category" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Root Category"></select></label>
         <label>Root Cause<select data-nq-filter="root_cause" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Root Cause"></select></label>
         <label title="How the CDRs see each call: the latest version, changed between CDRs, a newer version in a CDR that is not chosen, not in the Final CDR of its campaign, or Completed in a newer CDR (listed only when chosen here)">CDR Version<select data-nq-filter="version" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="CDR Version"></select></label>
       </div>
-      <p class="nq-filter-group-title" id="nq-field-filters-title" hidden>Analysis Fields Filters:</p>
+      <p class="nq-filter-group-title" id="nq-field-filters-title" hidden>Analysis Center Filters:</p>
       <div class="nq-filter-grid nq-field-filter-grid" id="nq-field-filters" hidden></div>
       <p class="nq-filter-group-title" id="nq-column-filters-title" hidden>Additional Columns Filters:</p>
       <div class="nq-filter-grid nq-field-filter-grid" id="nq-column-filters" hidden></div>
@@ -110,6 +112,24 @@
     </div>
   </details>
 
+  <details class="panel collapsible-panel nq-life-panel" open data-panel-state-key="non-qualified-calls:lifecycle">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Analysis Center</p><h2>Lifecycle &amp; Phases</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="nq-progress-head">
+        <p class="nq-hint">Where the filtered calls are in their follow-up: the NQ Call Status pipeline, whether each status follows the Status Rules or was set by hand, the values of the phase fields (Analysis, Implementation and Planning), how long calls stay in each status, the most frequent moves and the open calls without changes for a while. Click a status, a value or a card to drill down into its calls.</p>
+        {% if nq_can_edit %}<button type="button" class="nq-secondary-action" data-nq-status-rules-open title="How the NQ Call Status is set from the phase fields">Status Rules</button>{% endif %}
+      </div>
+      <div class="nq-kpis" id="nq-life-kpis"></div>
+      <section class="nq-progress-section"><h3>NQ Call Status Pipeline</h3><div class="nq-pipeline" id="nq-life-pipeline"></div><ol class="nq-rule-list" id="nq-life-rules"></ol></section>
+      <div class="nq-phase-cards" id="nq-life-phases"></div>
+      <div class="nq-progress-grid">
+        <section class="nq-progress-section"><h3>Time in Each Status</h3><div class="nq-table-wrap"><table class="nq-table nq-stats-table" id="nq-life-times"></table></div></section>
+        <section class="nq-progress-section"><h3>Most Frequent Moves</h3><div class="nq-table-wrap"><table class="nq-table nq-stats-table" id="nq-life-moves"></table></div></section>
+      </div>
+      <section class="nq-progress-section"><h3 id="nq-life-stalled-title">Stalled Open Calls</h3><div class="nq-table-wrap"><table class="nq-table nq-stats-table" id="nq-life-stalled"></table></div></section>
+    </div>
+  </details>
+
   <details class="panel collapsible-panel nq-root-panel" open data-panel-state-key="non-qualified-calls:root-causes">
     <summary class="collapsible-summary"><div><p class="eyebrow">Diagnosis</p><h2>Root Cause Analysis</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
@@ -129,6 +149,22 @@
     </div>
   </details>
 
+  <details class="panel collapsible-panel nq-sources-panel" open data-panel-state-key="non-qualified-calls:rca-sources">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Analysis Center</p><h2>Root Cause Sources</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="nq-progress-head">
+        <p class="nq-hint">The three root cause sources of the filtered calls side by side: the RCA script results imported by JOIN_ID, the NetCheck RCA of the CDR and the Root Category and Cause selected by the analysts. See how many calls each one covers, how often they agree and how the analysts' choices relate to each RCA.</p>
+        <span class="nq-root-head-actions"><span class="nq-muted" id="nq-sources-results"></span>{% if nq_can_edit %}<button type="button" class="nq-secondary-action" data-nq-rca-open title="Import the results of the RCA script by JOIN_ID">RCA Script Results</button>{% endif %}</span>
+      </div>
+      <div class="nq-kpis" id="nq-sources-kpis"></div>
+      <div class="nq-hierarchies" id="nq-sources-hierarchies"></div>
+      <div class="nq-progress-grid">
+        <div class="nq-sources-domains" id="nq-sources-domains"></div>
+        <section class="nq-progress-section nq-matrix-section"><div class="nq-matrix-head"><h3>RCA → Selected Root Category</h3><div class="nq-rate-tabs" id="nq-sources-matrix-tabs" role="tablist" aria-label="RCA source"></div></div><div class="nq-table-wrap"><table class="nq-table nq-stats-table nq-matrix" id="nq-sources-matrix"></table></div></section>
+      </div>
+    </div>
+  </details>
+
   <details class="panel collapsible-panel nq-calls-panel" open data-panel-state-key="non-qualified-calls:calls">
     <summary class="collapsible-summary"><div><p class="eyebrow">Drill-down</p><h2>Non-Qualified Calls</h2></div>{# Finds calls by their JOIN_ID (one or more, typed or pasted), centred beside the title. #}<label class="nq-join-search" data-nq-join-search><span>Join ID</span><input type="search" data-nq-typed-filter="join_id" placeholder="Find calls by one or more JOIN_IDs…" autocomplete="off" aria-label="Join ID" title="Paste one or more JOIN_IDs, separated by commas, spaces or lines"></label><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
@@ -137,10 +173,17 @@
         <p class="nq-count" id="nq-count" role="status">Loading calls…</p>
         <div class="nq-toolbar-actions">
           <label class="nq-page-size">Rows<select id="nq-page-size">{% for size in nq_page_sizes %}<option value="{{ size }}"{% if size == 50 %} selected{% endif %}>{{ size }}</option>{% endfor %}</select></label>
-          {% if nq_can_edit %}<button type="button" class="nq-secondary-action" id="nq-options-open" title="Configure the statuses and teams">Statuses &amp; Teams</button>
-          <button type="button" class="nq-secondary-action" id="nq-root-open" title="Configure the root cause domains and causes">Root Causes</button>
-          <button type="button" class="nq-secondary-action" id="nq-fields-open" title="Configure the analysis fields every call is followed up with">Analysis Fields</button>
-          <button type="button" class="nq-secondary-action" id="nq-columns-open" title="Choose the additional columns of the table and of the Excel export, including CDR columns">Additional Columns</button>{% endif %}
+          {% if nq_can_edit %}<div class="nq-menu-wrap">
+            <button type="button" class="nq-secondary-action nq-menu-toggle" id="nq-config-toggle" aria-haspopup="menu" aria-expanded="false" aria-controls="nq-config-menu" title="Configure the Analysis Center of this workspace"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Analysis Center</button>
+            <div class="nq-menu" id="nq-config-menu" role="menu" hidden>
+              <button type="button" role="menuitem" id="nq-fields-open"><strong>Fields &amp; Sections</strong><span>The fields of every section, their lists, columns and Excel order</span></button>
+              <button type="button" role="menuitem" id="nq-options-open"><strong>Statuses &amp; Teams</strong><span>The NQ Call Statuses and the responsible teams with their members</span></button>
+              <button type="button" role="menuitem" id="nq-status-rules-open" data-nq-status-rules-open><strong>Status Rules</strong><span>How the status follows the Analysis, Implementation and Planning fields</span></button>
+              <button type="button" role="menuitem" id="nq-root-open"><strong>Root Cause Catalog</strong><span>Domains, Root Categories and Root Causes, with their keywords</span></button>
+              <button type="button" role="menuitem" id="nq-rca-open" data-nq-rca-open><strong>RCA Script Results</strong><span>Import the results of the RCA script by JOIN_ID</span></button>
+              <button type="button" role="menuitem" id="nq-columns-open"><strong>Additional Columns</strong><span>The columns of the table and of the Excel export, including CDR columns</span></button>
+            </div>
+          </div>{% endif %}
           <button type="button" class="nq-secondary-action" id="nq-column-order-reset" title="Put the columns of the table back in their default order" hidden>Default column order</button>
           <button type="button" class="nq-primary-action" id="nq-export" title="Every call that matches the filters, with its comments and history">Export Excel</button>
         </div>
@@ -157,7 +200,7 @@
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="city" data-filter="city">City</span></span><span class="nq-header-item"><span data-sort="campaign" data-filter="campaign">Campaign</span></span></th>
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="test_name" data-filter="test_name">Test</span></span><span class="nq-header-item"><span data-sort="technology" data-filter="technology">Technology</span></span></th>
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="result" data-filter="result">Result</span></span><span class="nq-header-item"><span data-sort="failure" data-filter="failure_classification">Failure</span></span></th>
-              <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="root_cause" data-filter="root_domain">Root Domain</span></span><span class="nq-header-item"><span data-sort="cause" data-filter="root_cause">Cause</span></span></th>
+              <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="root_category" data-filter="root_category">Root Category</span></span><span class="nq-header-item"><span data-sort="cause" data-filter="root_cause">Root Cause</span></span></th>
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="team" data-filter="team">Team</span></span><span class="nq-header-item"><span data-sort="assignee" data-filter="assignee">Assignee</span></span></th>
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="status" data-filter="status">Status</span></span></th>
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="comments">Comments</span></span></th>
@@ -175,9 +218,10 @@
     <select id="nq-bulk-status" aria-label="Set the status of the selected calls"><option value="">Set status…</option></select>
     <select id="nq-bulk-team" aria-label="Set the team of the selected calls"><option value="">Set team…</option></select>
     <select id="nq-bulk-assignee" aria-label="Assign the selected calls"><option value="">Assign to…</option></select>
+    <select id="nq-bulk-category" aria-label="Set the root category of the selected calls"><option value="">Set root category…</option></select>
     <select id="nq-bulk-root" aria-label="Set the root cause of the selected calls"><option value="">Set root cause…</option></select>
-    <select id="nq-bulk-field" aria-label="Set an analysis field of the selected calls" hidden><option value="">Set field…</option></select>
-    <button type="button" class="nq-link-action" id="nq-bulk-suggest" title="Label the selected calls without a root cause with their suggested root cause">Apply suggestions</button>
+    <select id="nq-bulk-field" aria-label="Set a field of the selected calls" hidden><option value="">Set field…</option></select>
+    <button type="button" class="nq-link-action" id="nq-bulk-suggest" title="Give the selected calls without a root category and cause the recommended ones">Accept recommendations</button>
     <button type="button" class="nq-link-action is-danger" id="nq-bulk-history" title="Delete every history entry of the selected calls" hidden>Clear history</button>
     <button type="button" class="nq-link-action" id="nq-bulk-clear">Clear selection</button>
   </div>
@@ -195,13 +239,14 @@
     <button type="button" class="nq-drawer-close" id="nq-drawer-close" aria-label="Close the call details">&times;</button>
   </header>
   <div class="nq-drawer-tracking" id="nq-drawer-tracking"></div>
-  <div class="nq-drawer-tabs" role="tablist">
-    <button type="button" role="tab" class="is-active" data-nq-tab="activity" aria-selected="true">Activity</button>
-    <button type="button" role="tab" data-nq-tab="analysis" aria-selected="false">Analysis</button>
+  {# One tab per section of the Analysis Center (built by the script), then the call details. #}
+  <div class="nq-drawer-tabs" id="nq-drawer-tabs" role="tablist">
+    <button type="button" role="tab" class="is-active" data-nq-tab="general" aria-selected="true">General</button>
     <button type="button" role="tab" data-nq-tab="details" aria-selected="false">Call Details</button>
   </div>
   <div class="nq-drawer-body">
-    <section data-nq-panel="activity">
+    <section data-nq-panel="general">
+      <div class="nq-section-fields" id="nq-general-fields"></div>
       <div class="nq-history-actions" id="nq-history-actions" hidden><button type="button" class="nq-link-action is-danger" id="nq-history-clear" title="Delete every history entry of this call; its follow-up and comments stay">Clear history</button></div>
       <ol class="nq-timeline" id="nq-timeline"></ol>
       <form class="nq-composer" id="nq-composer"{% if not nq_can_edit %} hidden{% endif %}>
@@ -209,15 +254,13 @@
         <div class="nq-composer-actions"><span class="nq-composer-note" id="nq-composer-note"></span><button type="submit" class="nq-primary-action">Add Comment</button></div>
       </form>
     </section>
-    <section data-nq-panel="analysis" hidden>
-      <form class="nq-analysis-form" id="nq-analysis-form"></form>
+    <div id="nq-section-panels"></div>
+    <section data-nq-panel="details" hidden>
       <section class="nq-samples" id="nq-samples" hidden>
         <h3>Speech Samples</h3>
-        <p class="form-note">Each Non-Qualified sample of the call keeps its own follow-up: open it to set its status, root cause and analysis fields or to comment on it.</p>
+        <p class="form-note">Each Non-Qualified sample of the call keeps its own follow-up: open it to set its status, root cause and fields or to comment on it.</p>
         <ul class="nq-sample-list" id="nq-sample-list"></ul>
       </section>
-    </section>
-    <section data-nq-panel="details" hidden>
       <section class="nq-versions" id="nq-versions" hidden>
         <h3>CDRs with this call</h3>
         <ul class="nq-version-list" id="nq-version-list"></ul>
@@ -232,7 +275,7 @@
 {% if nq_can_edit %}
 <dialog class="nq-options-dialog" id="nq-options-dialog" aria-labelledby="nq-options-title">
   <form method="dialog" class="nq-options-form" id="nq-options-form">
-    <header><h2 id="nq-options-title">Statuses &amp; Teams</h2><p class="form-note">Shared by every user of this workspace. The first status is shown for calls nobody has followed up yet; statuses marked Closed count as closed in the summary. Renaming a value updates every call; a value in use cannot be removed.</p></header>
+    <header><h2 id="nq-options-title">Statuses &amp; Teams</h2><p class="form-note">Shared by every user of this workspace. The NQ Call Status of each call follows the Status Rules (the first status when no rule applies) unless it is set by hand; statuses marked Closed count as closed in the summary. Renaming a value updates every call and the Status Rules; a value in use cannot be removed.</p></header>
     <div class="nq-options-columns">
       <section><h3>Statuses</h3><ul class="nq-option-list" data-nq-options="statuses"></ul><button type="button" class="nq-secondary-action" data-nq-option-add="statuses">Add Status</button></section>
       <section><h3>Teams</h3><ul class="nq-option-list" data-nq-options="teams"></ul><button type="button" class="nq-secondary-action" data-nq-option-add="teams">Add Team</button></section>
@@ -251,13 +294,21 @@
 </dialog>
 <dialog class="nq-options-dialog nq-root-dialog" id="nq-root-dialog" aria-labelledby="nq-root-title">
   <form method="dialog" class="nq-options-form" id="nq-root-form">
-    <header><h2 id="nq-root-title">Root Causes</h2><p class="form-note">Shared by every user of this workspace. Each call can be labelled with a domain and a cause inside it. Renaming a value updates every call; a value in use cannot be removed.</p>
+    <header><h2 id="nq-root-title">Root Cause Catalog</h2><p class="form-note">Shared by every user of this workspace. Each call gets a Root Category and a Root Cause, chosen independently; the technical Domain of each one gives its colour, groups the lists (the causes of the domain of the chosen category come first) and the domain of the call. The keywords map the RCA script and NetCheck values and the comments onto the catalog. Renaming a value updates every call; a value in use cannot be removed.</p>
       <div class="nq-rule-summary"><p class="form-note" id="nq-root-rule-text"></p><button type="button" class="nq-secondary-action" id="nq-rule-open" data-nq-rule-open title="See how root causes are suggested; admins and super-admins change it">Suggestion Rule</button></div></header>
-    <ul class="nq-root-domains" id="nq-root-domains"></ul>
+    <div class="nq-catalog-tabs" role="tablist" aria-label="Root cause catalog">
+      <button type="button" role="tab" class="is-active" data-nq-catalog-tab="categories" aria-selected="true">Root Categories <small></small></button>
+      <button type="button" role="tab" data-nq-catalog-tab="causes" aria-selected="false">Root Causes <small></small></button>
+      <button type="button" role="tab" data-nq-catalog-tab="domains" aria-selected="false">Domains <small></small></button>
+      <input type="search" id="nq-root-search" placeholder="Filter values…" aria-label="Filter the values of the catalog">
+    </div>
+    <ul class="nq-root-domains nq-catalog-list" id="nq-root-domains" data-nq-catalog-list="domains" hidden></ul>
+    <ul class="nq-root-domains nq-catalog-list" id="nq-root-categories" data-nq-catalog-list="categories"></ul>
+    <ul class="nq-root-domains nq-catalog-list" id="nq-root-causes" data-nq-catalog-list="causes" hidden></ul>
     <div class="nq-root-actions">
-      <span><button type="button" class="nq-secondary-action" id="nq-root-add">Add Domain</button>
-      <button type="button" class="nq-secondary-action" id="nq-root-defaults" title="Add the default domains and causes that are missing; existing values and keywords stay">Add missing defaults</button></span>
-      <label class="nq-toggle"><input type="checkbox" id="nq-root-require"> Require a root cause to close a call</label>
+      <span><button type="button" class="nq-secondary-action" id="nq-root-add">Add Root Category</button>
+      <button type="button" class="nq-secondary-action" id="nq-root-defaults" title="Add the default domains, root categories and root causes that are missing; existing values and keywords stay">Add missing defaults</button></span>
+      <label class="nq-toggle"><input type="checkbox" id="nq-root-require"> Require a root category to close a call</label>
     </div>
     <p class="nq-options-error" id="nq-root-error" role="alert"></p>
     <footer><button type="button" class="nq-secondary-action" id="nq-root-cancel">Cancel</button><button type="submit" class="nq-primary-action" id="nq-root-save">Save</button></footer>
@@ -265,9 +316,16 @@
 </dialog>
 <dialog class="nq-options-dialog nq-fields-dialog" id="nq-fields-dialog" aria-labelledby="nq-fields-title">
   <form method="dialog" class="nq-options-form" id="nq-fields-form">
-    <header><h2 id="nq-fields-title">Analysis Fields</h2><p class="form-note">The workspace's own follow-up fields, shared by every user. A list offers its values (each with a colour); text, long text, number, date and Yes / No fields are typed in. Fields shown in the table get a column; fields shown in the Summary get a breakdown; required fields must be filled before a call is closed. Renaming a list value updates every call; a value or field in use cannot be removed.</p>
-      <div class="nq-fields-import"><label class="nq-secondary-action nq-file-action">Import from Excel<input type="file" id="nq-fields-workbook" accept=".xlsx,.xlsm" hidden></label><span class="form-note">The first row names the fields and the rows below list the values of each list.</span></div>
+    <header><h2 id="nq-fields-title">Fields &amp; Sections</h2><p class="form-note">The fields every call is followed up with, shared by every user of this workspace, in the order of the Excel export. Each field belongs to a section (a tab of the call) and takes its value from the analysts, the follow-up of the call, the CDR, the RCA script or keywords of the call. A list offers its values, each with a colour; text, long text, number, date and Yes / No fields are typed in. Renaming a list value updates every call and the Status Rules; a value or field in use cannot be removed.</p>
+      <div class="nq-fields-import">
+        <a class="nq-secondary-action" id="nq-catalog-export" href="/api/non-qualified-calls/catalog/export" download title="Sections, fields, lists, root cause catalog, statuses, teams and status rules in one workbook to edit and import again">Export Catalog</a>
+        <label class="nq-secondary-action nq-file-action" title="A catalog workbook exported here, or the field list of the meeting workbook">Import Catalog<input type="file" id="nq-fields-workbook" accept=".xlsx,.xlsm" hidden></label>
+        <span class="form-note">Importing adds the new fields, values, root categories, causes, statuses and teams and takes the sections and Status Rules of the workbook; nothing is removed.</span>
+      </div>
+      <div class="nq-catalog-preview" id="nq-catalog-preview" hidden></div>
     </header>
+    <section class="nq-sections-editor"><h3>Sections</h3><div class="nq-sections-grid" id="nq-sections-editor"></div></section>
+    <div class="nq-field-toolbar"><div class="nq-section-chips" id="nq-field-section-chips" role="tablist" aria-label="Show the fields of a section"></div><input type="search" id="nq-field-filter" placeholder="Filter fields…" aria-label="Filter fields"></div>
     <ul class="nq-field-defs" id="nq-field-defs"></ul>
     <div class="nq-root-actions"><button type="button" class="nq-secondary-action" id="nq-fields-add">Add Field</button></div>
     <p class="nq-options-error" id="nq-fields-error" role="alert"></p>
@@ -276,13 +334,37 @@
 </dialog>
 <dialog class="nq-options-dialog nq-columns-dialog" id="nq-columns-dialog" aria-labelledby="nq-columns-title">
   <form method="dialog" class="nq-options-form" id="nq-columns-form">
-    <header><h2 id="nq-columns-title">Additional Columns</h2><p class="form-note">The additional columns of the Calls table and of its Excel export, for every user of this workspace. Analysis fields get their column in Analysis Fields. CDR columns show the value of the CDR version shown for each call: those of the table are exported too, and more can be exported to Excel only. Changing the CDR columns indexes the calls again.</p></header>
+    <header><h2 id="nq-columns-title">Additional Columns</h2><p class="form-note">The additional columns of the Calls table and of its Excel export, for every user of this workspace. The fields of the Analysis Center are columns of the table when chosen here or in Fields &amp; Sections, and every field marked for Excel is exported in the catalog order. CDR columns show the value of the CDR version shown for each call: those of the table are exported too, and more can be exported to Excel only. Changing the CDR columns indexes the calls again.</p></header>
     <div class="nq-options-columns">
-      <section><h3>Call columns</h3><div class="nq-rule-fields" id="nq-columns-builtin"></div></section>
+      <section><h3>Call columns</h3><div class="nq-rule-fields" id="nq-columns-builtin"></div>
+        <h3 class="nq-columns-fields-title">Analysis Center fields</h3><div class="nq-columns-fields" id="nq-columns-fields"></div></section>
       <section><h3>CDR columns <small id="nq-columns-count"></small></h3><input type="search" id="nq-columns-search" placeholder="Filter CDR columns…" aria-label="Filter CDR columns"><div class="nq-cdr-column-head" aria-hidden="true"><span>Column</span><span>Table</span><span>Excel</span></div><div class="nq-cdr-columns" id="nq-columns-cdr"></div></section>
     </div>
     <p class="nq-options-error" id="nq-columns-error" role="alert"></p>
     <footer><button type="button" class="nq-secondary-action" id="nq-columns-cancel">Cancel</button><button type="submit" class="nq-primary-action" id="nq-columns-save">Save</button></footer>
+  </form>
+</dialog>
+<dialog class="nq-options-dialog nq-status-rules-dialog" id="nq-status-rules-dialog" aria-labelledby="nq-status-rules-title">
+  <form method="dialog" class="nq-options-form" id="nq-status-rules-form">
+    <header><h2 id="nq-status-rules-title">Status Rules</h2><p class="form-note">How the NQ Call Status of every call is set from its fields. The rules are tried from top to bottom and the first one whose conditions all hold gives the status; a call that no rule matches gets the first status. A status chosen by hand stays until the call goes back to automatic. Rules follow renamed list values and statuses; a removed value leaves its conditions. Saving applies the rules to every automatic call at once.</p></header>
+    <ol class="nq-status-rules" id="nq-status-rules"></ol>
+    <div class="nq-root-actions"><span><button type="button" class="nq-secondary-action" id="nq-status-rules-add">Add Rule</button>
+      <button type="button" class="nq-secondary-action" id="nq-status-rules-default" title="The rules of a new workspace, for its default fields and statuses">Default Rules</button></span></div>
+    <p class="nq-options-error" id="nq-status-rules-error" role="alert"></p>
+    <footer><button type="button" class="nq-secondary-action" id="nq-status-rules-cancel">Cancel</button><button type="submit" class="nq-primary-action" id="nq-status-rules-save">Save</button></footer>
+  </form>
+</dialog>
+<dialog class="nq-options-dialog nq-rca-dialog" id="nq-rca-dialog" aria-labelledby="nq-rca-title">
+  <form method="dialog" class="nq-options-form" id="nq-rca-form">
+    <header><h2 id="nq-rca-title">RCA Script Results</h2><p class="form-note" id="nq-rca-format"></p>
+      <div class="nq-fields-import"><a class="nq-secondary-action" href="/api/non-qualified-calls/rca/template" download>Download Template</a>
+        <label class="nq-secondary-action nq-file-action">Choose File<input type="file" id="nq-rca-file" accept=".csv,.txt,.tsv,.xlsx,.xlsm" hidden></label>
+        <label class="nq-toggle" title="Forget every result imported before; otherwise the file adds results and replaces those of the same JOIN_ID"><input type="checkbox" id="nq-rca-replace"> Replace the previous results</label></div>
+    </header>
+    <section class="nq-rca-current" id="nq-rca-current"></section>
+    <section class="nq-rca-preview" id="nq-rca-preview" hidden></section>
+    <p class="nq-options-error" id="nq-rca-error" role="alert"></p>
+    <footer><button type="button" class="nq-link-action is-danger" id="nq-rca-clear">Delete every result</button><span class="nq-rule-spacer"></span><button type="button" class="nq-secondary-action" id="nq-rca-cancel">Close</button><button type="submit" class="nq-primary-action" id="nq-rca-import" disabled>Import</button></footer>
   </form>
 </dialog>
 {% endif %}

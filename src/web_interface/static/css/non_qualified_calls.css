@@ -529,3 +529,224 @@ button.nq-rate-box:hover { transform: translateY(-1px); box-shadow: 0 6px 14px r
 .nq-columns-dialog .nq-cdr-columns { max-height: 22rem; overflow-y: auto; }
 .nq-columns-dialog input[type="search"] { box-sizing: border-box; width: 100%; margin-bottom: .5rem; }
 .nq-field-filter-grid { margin-top: 12px; }
+
+/* -- Analysis Center ------------------------------------------------------------------------- */
+/* The configuration menu of the Calls toolbar. */
+.nq-menu-wrap { position: relative; }
+.non-qualified-calls .nq-menu-toggle { gap: .45rem; }
+.nq-menu-toggle svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.nq-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 40; display: grid; gap: 2px; width: min(23rem, 90vw); padding: .4rem; border: 1px solid var(--nq-border); border-radius: 14px; background: #fff; box-shadow: 0 18px 40px rgba(60, 10, 30, .22); }
+.nq-menu[hidden] { display: none; }
+.non-qualified-calls .nq-menu button { display: grid; gap: .1rem; min-height: 0; padding: .5rem .7rem; border: 0; border-radius: 10px; background: transparent; color: var(--nq-text); text-align: left; box-shadow: none; }
+.non-qualified-calls .nq-menu button:hover, .non-qualified-calls .nq-menu button:focus-visible { background: var(--nq-soft); outline: none; }
+.nq-menu strong { color: var(--nq-dark); font-size: .86rem; }
+.nq-menu span { color: var(--nq-muted); font-size: .76rem; font-weight: 600; }
+
+/* Status set by the rules (Auto) or by hand. */
+.nq-status-mode { display: inline-block; margin-right: .2rem; padding: 0 .35rem; border-radius: 999px; background: #e3f1ea; color: #1f6b43; font-size: .64rem; font-weight: 850; letter-spacing: .03em; text-transform: uppercase; vertical-align: 1px; }
+.nq-status-mode.is-manual { background: #fdebd9; color: #9a4a10; }
+.nq-tracking-field > span .nq-status-mode { margin-left: .2rem; }
+
+/* Root categories are filled with the colour of their domain; root causes are outlined with it. */
+.nq-pill.is-outlined, :is(.non-qualified-calls, .nq-drawer, .nq-options-dialog) .nq-pill-select.is-outlined { border-color: var(--nq-outline); box-shadow: inset 4px 0 0 var(--nq-outline); }
+:is(.non-qualified-calls, .nq-drawer) .nq-cause-picker-button.is-colored:hover:not(:disabled) { background: var(--nq-pill); color: var(--nq-pill-text); filter: brightness(.96); }
+.nq-root-suggestion { display: inline-flex; align-items: center; gap: .35rem; }
+.nq-confidence-dot { flex: 0 0 auto; width: .5rem; height: .5rem; border-radius: 50%; background: #9aa5ad; }
+.nq-root-suggestion.is-high .nq-confidence-dot { background: #2e8b57; }
+.nq-root-suggestion.is-medium .nq-confidence-dot { background: #e08a1e; }
+.nq-root-suggestion > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.nq-column-filter-group.is-proposed { color: var(--nq-color); }
+
+/* Catalog fields in the table: the colour of their section above their name. */
+.nq-table th.nq-section-col { border-top: 4px solid var(--nq-section); }
+.nq-section-tag, .nq-domain-tag { display: inline-flex; align-items: center; gap: .3rem; padding: .05rem .5rem; border: 1px solid var(--nq-section); border-radius: 999px; background: #fff; color: var(--nq-text); font-size: .68rem; font-weight: 850; letter-spacing: .02em; text-transform: none; white-space: nowrap; }
+.nq-section-tag::before, .nq-domain-tag::before { content: ''; width: .5rem; height: .5rem; border-radius: 50%; background: var(--nq-section); }
+
+/* Call drawer: wider, one tab per section in its colour, with the fields filled in. */
+.nq-drawer { width: min(780px, 100vw); }
+.nq-drawer-tabs { overflow-x: auto; scrollbar-width: thin; }
+.nq-drawer .nq-drawer-tabs button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: .35rem; padding: .5rem .7rem; font-size: .84rem; white-space: nowrap; }
+.nq-drawer .nq-drawer-tabs button.is-active { border-bottom-color: var(--nq-section, var(--nq-color)); }
+.nq-drawer-tab::before { content: ''; width: .5rem; height: .5rem; border-radius: 50%; background: var(--nq-section, transparent); }
+.nq-drawer-tab[data-nq-tab="details"]::before { display: none; }
+.nq-tab-badge { padding: 0 .35rem; border-radius: 999px; background: #f1dfe5; color: var(--nq-muted); font-size: .68rem; font-weight: 850; }
+.nq-tab-badge[hidden] { display: none; }
+.nq-tab-badge.is-complete { background: #e3f1ea; color: #1f6b43; }
+.nq-drawer-tracking .nq-phase-strip { display: flex; flex-wrap: wrap; grid-column: 1 / -1; align-items: center; gap: .35rem; }
+.nq-drawer .nq-phase-step { display: inline-flex; align-items: center; gap: .4rem; min-height: 0; padding: .25rem .4rem .25rem .6rem; border: 1px solid var(--nq-border); border-left: 4px solid var(--nq-section); border-radius: 10px; background: #fff; color: var(--nq-text); box-shadow: none; }
+.nq-drawer .nq-phase-step:hover { border-color: var(--nq-section); background: #fff; }
+.nq-phase-name { color: var(--nq-muted); font-size: .68rem; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+.nq-phase-arrow { color: var(--nq-muted); font-weight: 850; }
+.nq-section-fields:empty { display: none; }
+#nq-general-fields { margin-bottom: 1rem; }
+.nq-section-form h4, .nq-decision h4 { margin: .2rem 0 .5rem; color: var(--nq-dark); font-size: .82rem; letter-spacing: .03em; text-transform: uppercase; }
+.nq-field-title { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+.nq-source-tag, .nq-required-tag { padding: 0 .4rem; border-radius: 999px; background: #eceff1; color: #4b5a63; font-size: .64rem; font-weight: 800; }
+.nq-source-tag.is-rca { background: #fff2cc; color: #7a5a06; }
+.nq-source-tag.is-cdr { background: #e2edf9; color: #1f4f86; }
+.nq-source-tag.is-derived { background: #e7e4fb; color: #43379e; }
+.nq-required-tag { background: #fde3e7; color: #a3263a; }
+.nq-readonly-value { min-height: 2.1rem; box-sizing: border-box; padding: .35rem .6rem; border: 1px dashed var(--nq-border); border-radius: 8px; background: var(--nq-softer); font-weight: 650; overflow-wrap: anywhere; }
+.nq-drawer .nq-proposal { justify-self: start; min-height: 0; padding: .15rem .5rem; border: 1px dashed var(--nq-color); border-radius: 999px; background: #fff; color: var(--nq-dark); font-size: .72rem; font-weight: 800; box-shadow: none; }
+.nq-drawer .nq-proposal:hover { background: var(--nq-soft); }
+.nq-drawer.has-unsaved .nq-section-form .nq-composer-note { color: #9a4a10; font-weight: 750; }
+/* Root Cause Decision of the RCA section. */
+.nq-decision { display: grid; gap: .7rem; margin-bottom: 1rem; padding: .9rem 1rem; border: 1px solid var(--nq-border); border-top: 4px solid var(--nq-section, #ffc000); border-radius: 14px; background: #fff; }
+.nq-decision header h3 { margin: 0; color: var(--nq-dark); font-size: 1rem; }
+.nq-decision header p { margin: .2rem 0 0; }
+.nq-decision-current { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.nq-decision-current .nq-root-cell { display: flex; flex-wrap: wrap; width: auto; gap: .4rem; }
+.nq-decision-current .nq-pill-select { min-width: 12rem; }
+.nq-decision-label { color: var(--nq-muted); font-size: .72rem; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+.nq-recommendation { display: flex; align-items: center; gap: .8rem; padding: .6rem .8rem; border: 1px solid #f2d39a; border-radius: 12px; background: #fff8e8; }
+.nq-recommendation.is-high { border-color: #a9d8bd; background: #eef8f2; }
+.nq-recommendation.is-low { border-color: #e1e5e8; background: #f6f7f8; }
+.nq-recommendation > div { flex: 1 1 auto; display: grid; gap: .2rem; }
+.nq-recommendation p { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; margin: 0; }
+.nq-recommendation-icon { color: #e08a1e; font-size: 1.3rem; }
+.nq-recommendation.is-high .nq-recommendation-icon { color: #2e8b57; }
+.nq-recommendation-state { padding: .15rem .6rem; border-radius: 999px; background: #e3f1ea; color: #1f6b43; font-size: .74rem; font-weight: 850; }
+.nq-source-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: .6rem; }
+.nq-source-card { display: grid; align-content: start; gap: .35rem; padding: .6rem .7rem; border: 1px solid var(--nq-border); border-left: 4px solid #9aa5ad; border-radius: 10px; background: var(--nq-softer); }
+.nq-source-card.is-script { border-left-color: #ffc000; }
+.nq-source-card.is-netcheck { border-left-color: #0070c0; }
+.nq-source-card.is-comments { border-left-color: #6a63c9; }
+.nq-source-card.is-learned { border-left-color: #2e8b57; }
+.nq-source-card header { display: flex; justify-content: space-between; gap: .4rem; font-size: .84rem; }
+.nq-source-card header strong { color: var(--nq-dark); }
+.nq-source-raw { margin: 0; color: var(--nq-text); font-size: .8rem; font-weight: 650; }
+.nq-source-mapped { display: flex; flex-wrap: wrap; gap: .3rem; margin: 0; font-size: .78rem; }
+.nq-drawer .nq-source-card .nq-secondary-action { justify-self: start; min-height: 1.9rem; padding: .2rem .8rem; }
+.nq-event-change.is-automatic .nq-event-dot { background: #2e8b57; }
+
+/* Lifecycle & Phases panel. */
+.nq-stacked-bar { display: flex; overflow: hidden; height: .85rem; margin: .2rem 0 .8rem; border-radius: 999px; background: #f3dfe6; }
+.nq-stacked-bar > span { min-width: 3px; }
+.nq-stacked-bar > span + span { border-left: 2px solid #fff; }
+.nq-pipeline-steps { display: flex; flex-wrap: wrap; align-items: stretch; gap: .5rem; }
+.nq-pipeline-arrow { align-self: center; color: var(--nq-muted); font-size: 1.1rem; font-weight: 850; }
+.nq-pipeline-arrow.is-closing { color: #2e8b57; }
+.non-qualified-calls .nq-pipeline-step { display: grid; flex: 1 1 9rem; gap: .1rem; min-width: 8.5rem; min-height: 0; padding: .55rem .75rem; border: 1px solid var(--nq-border); border-top: 5px solid var(--nq-step); border-radius: 12px; background: #fff; color: var(--nq-text); text-align: left; box-shadow: 0 6px 14px rgba(125, 18, 56, .06); }
+.non-qualified-calls .nq-pipeline-step:hover { border-color: var(--nq-step); background: var(--nq-softer); }
+.non-qualified-calls .nq-pipeline-step.is-active { box-shadow: 0 0 0 2px var(--nq-step); }
+.non-qualified-calls .nq-pipeline-step.is-closed { background: #f7fbf8; }
+.nq-pipeline-name { color: var(--nq-muted); font-size: .72rem; font-weight: 850; letter-spacing: .03em; text-transform: uppercase; }
+.nq-pipeline-step strong { color: var(--nq-dark); font-size: 1.5rem; line-height: 1.1; }
+.nq-rule-list { display: grid; gap: .3rem; margin: .9rem 0 0; padding: 0; list-style: none; font-size: .8rem; }
+.nq-rule-list li { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; color: var(--nq-text); }
+.nq-rule-list li.is-fallback { color: var(--nq-muted); }
+.nq-rule-number { display: inline-grid; place-items: center; width: 1.3rem; height: 1.3rem; border-radius: 50%; background: #f1dfe5; color: var(--nq-dark); font-size: .7rem; font-weight: 850; }
+.nq-phase-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px; margin-top: 14px; }
+.nq-phase-card { padding: 12px 14px; border: 1px solid var(--nq-border); border-top: 5px solid var(--nq-section); border-radius: 12px; background: #fff; }
+.nq-phase-card header { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.nq-phase-card h3 { margin: 0; color: var(--nq-dark); font-size: .95rem; }
+.nq-phase-card .nq-stacked-bar { margin-top: .6rem; }
+.nq-phase-values { display: grid; gap: .1rem; }
+.non-qualified-calls .nq-phase-value { display: grid; grid-template-columns: auto minmax(0, 1fr) auto 3rem; align-items: center; gap: .5rem; min-height: 0; padding: .25rem .4rem; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--nq-text); font-size: .8rem; font-weight: 650; text-align: left; box-shadow: none; }
+.non-qualified-calls .nq-phase-value:hover { border-color: var(--nq-border); background: var(--nq-softer); }
+.non-qualified-calls .nq-phase-value.is-active { border-color: var(--nq-section); background: var(--nq-softer); }
+.nq-phase-value strong { color: var(--nq-dark); font-variant-numeric: tabular-nums; }
+.nq-phase-value .nq-muted { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Root Cause Sources panel. */
+.nq-hierarchies { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+@media (max-width: 1200px) { .nq-hierarchies { grid-template-columns: minmax(0, 1fr); } }
+.nq-hierarchy-note { margin: -.3rem 0 .4rem; font-size: .76rem; }
+.non-qualified-calls .nq-hierarchy-row.is-category { font-weight: 800; }
+.non-qualified-calls .nq-hierarchy-row.is-cause { padding-left: 1.2rem; color: var(--nq-muted); font-size: .76rem; }
+.nq-hierarchy-row.is-cause .nq-bar-track { height: .45rem; opacity: .75; }
+.nq-sources-domains { margin-top: 14px; }
+.nq-matrix-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .6rem; }
+.nq-matrix-head h3 { margin: 0; }
+.nq-matrix th, .nq-matrix td { white-space: nowrap; }
+.nq-matrix tbody th { position: static; background: #fbeef3; text-transform: none; font-size: .76rem; }
+.nq-matrix-cell { text-align: center; }
+.nq-matrix-cell.is-match { outline: 2px solid #2e8b57; outline-offset: -2px; font-weight: 850; }
+
+/* Dialogs of the Analysis Center. */
+.nq-options-dialog .nq-pill-select { width: auto; min-height: 2.1rem; padding: .25rem 1.6rem .25rem .65rem; border: 1px solid var(--nq-border); border-radius: 999px; background-color: #fff; color: var(--nq-text); font-size: .8rem; font-weight: 800; }
+.nq-options-dialog .nq-pill-select.is-colored { border-color: transparent; background-color: var(--nq-pill); color: var(--nq-pill-text); }
+.nq-options-dialog .nq-link-action { min-height: 0; padding: .2rem .45rem; border: 0; border-radius: 6px; background: transparent; color: var(--nq-color); font-size: .8rem; font-weight: 800; box-shadow: none; }
+.nq-options-dialog .nq-link-action:hover:not(:disabled) { background: var(--nq-soft); }
+.nq-options-dialog .nq-link-action.is-danger { color: #a3263a; }
+.nq-options-dialog .nq-link-action[hidden] { display: none; }
+.nq-options-form footer .nq-rule-spacer { flex: 1 1 auto; }
+.nq-options-dialog h3 { margin: 0 0 .5rem; color: var(--nq-dark); font-size: .95rem; }
+.nq-options-dialog .nq-table-wrap { max-height: 16rem; overflow: auto; }
+.nq-options-dialog .nq-table { min-width: 0; }
+/* Root Cause Catalog: categories, causes and domains in tabs. */
+.nq-catalog-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+.nq-options-dialog .nq-catalog-tabs button { min-height: 0; padding: .4rem .9rem; border: 1px solid var(--nq-border); border-radius: 999px; background: #fff; color: var(--nq-dark); font-weight: 800; box-shadow: none; }
+.nq-options-dialog .nq-catalog-tabs button.is-active { border-color: var(--nq-dark); background: linear-gradient(135deg, #7d1238, #c8365f); color: #fff; }
+.nq-catalog-tabs small { font-weight: 650; opacity: .8; }
+.nq-catalog-tabs input[type="search"] { flex: 1 1 12rem; min-height: 2.1rem; margin-left: auto; }
+.nq-catalog-list[hidden] { display: none; }
+.nq-catalog-row[hidden] { display: none; }
+.nq-catalog-row .nq-root-name { flex: 1 1 12rem; font-weight: 800; }
+.nq-catalog-row .nq-domain-select { flex: 0 0 11rem; max-width: 11rem; }
+/* Fields & Sections. */
+.nq-sections-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: .4rem; }
+.nq-catalog-preview { display: grid; gap: .5rem; margin-top: .6rem; padding: .7rem .9rem; border: 1px solid var(--nq-color); border-radius: 12px; background: var(--nq-soft); }
+.nq-catalog-preview[hidden] { display: none; }
+.nq-catalog-preview ul { margin: 0; padding-left: 1.1rem; font-size: .84rem; }
+.nq-field-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.nq-field-toolbar input[type="search"] { flex: 1 1 12rem; min-height: 2.1rem; }
+.nq-section-chips { display: flex; flex-wrap: wrap; gap: .3rem; }
+.nq-options-dialog .nq-section-chip { min-height: 0; padding: .3rem .7rem; border: 1px solid var(--nq-border); border-left: 4px solid var(--nq-section, var(--nq-border)); border-radius: 999px; background: #fff; color: var(--nq-text); font-size: .78rem; font-weight: 800; box-shadow: none; }
+.nq-options-dialog .nq-section-chip.is-active { border-color: var(--nq-section, var(--nq-dark)); background: var(--nq-soft); color: var(--nq-dark); }
+.nq-field-defs { max-height: min(56vh, 620px); overflow-y: auto; padding-right: .2rem; }
+.nq-field-def { border-left: 5px solid var(--nq-section, var(--nq-border)); }
+.nq-field-def[hidden] { display: none; }
+.nq-field-def .nq-field-section { flex: 0 0 10rem; max-width: 10rem; }
+.nq-field-def .nq-field-source { flex: 0 0 12.5rem; width: 12.5rem; min-height: 2.1rem; }
+.nq-field-def .nq-field-source:disabled, .nq-field-def .nq-field-type:disabled { opacity: .75; }
+.nq-flag { padding: .3rem .65rem; font-size: .78rem; }
+.nq-flag:has(input:disabled) { opacity: .55; cursor: default; }
+.nq-field-more { display: grid; gap: .45rem; }
+.nq-field-more > summary { color: var(--nq-color); font-size: .8rem; font-weight: 800; cursor: pointer; }
+.nq-field-more[open] > summary { margin-bottom: .3rem; }
+.nq-field-setting { display: grid; grid-template-columns: 13rem minmax(0, 1fr); align-items: center; gap: .5rem; font-size: .8rem; font-weight: 750; }
+.nq-field-setting[hidden] { display: none; }
+.nq-field-setting :is(input, select) { min-height: 2rem; }
+.nq-field-values .nq-root-keywords { flex: 1.4 1 auto; }
+/* Status Rules. */
+.nq-status-rules-dialog { width: min(980px, calc(100vw - 32px)); }
+.nq-status-rules { display: grid; gap: .7rem; max-height: min(62vh, 660px); margin: 0; padding: 0 .2rem 0 0; overflow-y: auto; list-style: none; counter-reset: rule; }
+.nq-status-rule { counter-increment: rule; }
+.nq-status-rule > .nq-option-row::before { content: counter(rule); display: inline-grid; flex: 0 0 auto; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--nq-dark); color: #fff; font-size: .78rem; font-weight: 850; }
+.nq-rule-word { color: var(--nq-muted); font-size: .8rem; font-weight: 800; white-space: nowrap; }
+.nq-status-rule .nq-rule-status { flex: 0 0 auto; }
+.nq-status-rule > .nq-option-row .nq-icon-action:first-of-type { margin-left: auto; }
+.nq-conditions { display: grid; gap: .4rem; margin: 0 0 0 2.2rem; padding: 0; list-style: none; }
+.nq-condition { display: grid; grid-template-columns: minmax(10rem, 16rem) 9rem auto; align-items: center; gap: .4rem; padding: .4rem; border: 1px solid var(--nq-border); border-radius: 10px; background: #fff; }
+.nq-condition select { min-height: 2rem; }
+.nq-condition-values { display: flex; flex-wrap: wrap; grid-column: 1 / -1; gap: .3rem; max-height: 9rem; overflow-y: auto; }
+.nq-condition-values[hidden] { display: none; }
+.nq-condition-value { padding: .25rem .6rem; border-left: 4px solid var(--nq-chip, var(--nq-border)); font-size: .76rem; }
+.nq-status-rule > .nq-link-action { justify-self: start; margin-left: 2.2rem; }
+/* RCA Script Results. */
+.nq-rca-dialog { width: min(900px, calc(100vw - 32px)); }
+.nq-rca-current, .nq-rca-preview { display: grid; gap: .4rem; }
+.nq-rca-preview { padding: .7rem .9rem; border: 1px solid var(--nq-color); border-radius: 12px; background: var(--nq-softer); }
+.nq-rca-preview[hidden] { display: none; }
+.nq-rca-preview ul { margin: 0; padding-left: 1.1rem; font-size: .84rem; }
+/* Analysis Center fields of Additional Columns. */
+.nq-columns-fields-title { margin-top: 1rem !important; }
+.nq-columns-fields { display: grid; gap: .5rem; max-height: 22rem; overflow-y: auto; }
+.nq-columns-field-group { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; padding: .4rem; border-left: 4px solid var(--nq-section); border-radius: 8px; background: var(--nq-softer); }
+.nq-columns-field-group .nq-toggle { padding: .3rem .6rem; font-size: .78rem; }
+@media (max-width: 760px) {
+  .nq-field-setting, .nq-condition { grid-template-columns: minmax(0, 1fr); }
+  .nq-field-def .nq-field-section, .nq-field-def .nq-field-source, .nq-field-def .nq-field-type { flex: 1 1 100%; width: auto; max-width: none; }
+}
+.nq-history-actions[hidden] { display: none; }
+.nq-drawer-tracking .nq-tracking-root .nq-root-cell { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.nq-drawer-tracking .nq-tracking-root .nq-pill-select { min-width: 13rem; }
+/* A field fits in two lines: its name, section, source and type, then its flags and settings. */
+.nq-field-def { grid-template-columns: minmax(0, auto) minmax(0, 1fr); align-items: center; }
+.nq-field-def > .nq-option-row { grid-column: 1 / -1; }
+.nq-field-def > .nq-field-more { justify-self: start; }
+.nq-field-def > .nq-field-more[open] { grid-column: 1 / -1; justify-self: stretch; }
+.nq-field-def[data-source="derived"] .nq-field-values > .nq-root-causes { grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr)); }
+.nq-field-value .nq-root-name { min-width: 8rem; }
+.non-qualified-calls .nq-hierarchy .nq-bar { grid-template-columns: minmax(0, 55%) minmax(0, 1fr) auto; }

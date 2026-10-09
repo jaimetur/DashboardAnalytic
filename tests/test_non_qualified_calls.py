@@ -129,7 +129,7 @@ def test_nq_calls_are_indexed_tracked_and_commented(client, tmp_path):
 
     state = client.get('/api/non-qualified-calls/state').json()
     assert state['sync']['calls'] == 4 and state['sync']['datasets'] == 2
-    assert [item['name'] for item in state['options']['statuses']][:2] == ['Open', 'Under Investigation']
+    assert [item['name'] for item in state['options']['statuses']][:2] == ['Not Attended', 'Open']
     assert state['filter_options']['result'] == ['Cutoff', 'Dropped', 'Failed']
     assert {'super', 'editor', 'viewer'} <= set(state['users'])
 
@@ -141,22 +141,23 @@ def test_nq_calls_are_indexed_tracked_and_commented(client, tmp_path):
     assert {item['value']: item['count'] for item in by_service} == {'voice': 2, 'data': 2}
     dropped = next(call for call in result['calls'] if call['result'] == 'Dropped')
     # Empty values fall back to the next CDR column with a value.
-    assert dropped['start_time'] == '2026-02-24 12:00:00' and dropped['status'] == 'Open'
+    assert dropped['start_time'] == '2026-02-24 12:00:00' and dropped['status'] == 'Not Attended'
     assert dropped['latitude'] == 53.7 and dropped['failure_classification'] == 'VoLTE Problems'
     assert query(client, filters={'service': ['voice']})['total'] == 2
     assert query(client, filters={'search': 'pci 80'})['total'] == 1
 
     key = dropped['call_key']
     url = f'/api/non-qualified-calls/calls/{key}'
-    changed = client.patch(url, json={'changes': {'status': 'Under Investigation', 'team': 'Core Network'}, 'version': 0})
+    changed = client.patch(url, json={'changes': {'status': 'Under Analysis', 'team': 'Operations'}, 'version': 0})
     assert changed.status_code == 200, changed.text
     detail = changed.json()
-    assert detail['call']['status'] == 'Under Investigation' and detail['call']['version'] == 1
+    assert detail['call']['status'] == 'Under Analysis' and detail['call']['version'] == 1
+    assert detail['call']['status_mode'] == 'manual'
     assert {(entry['field'], entry['new_value']) for entry in detail['history']} == {
-        ('status', 'Under Investigation'), ('team', 'Core Network')}
+        ('status', 'Under Analysis'), ('team', 'Operations')}
     assert ['Call_Status', 'Dropped'] in detail['fields'] and detail['call']['dataset_name'].endswith('Voice_2026_Q1.xlsx')
     # A stale version means another user changed the call first.
-    assert client.patch(url, json={'changes': {'status': 'Resolved'}, 'version': 0}).status_code == 409
+    assert client.patch(url, json={'changes': {'status': 'Closed'}, 'version': 0}).status_code == 409
     assert client.patch(url, json={'changes': {'status': 'Unknown'}}).status_code == 400
     assert client.patch(url, json={'changes': {'assignee': 'nobody'}}).status_code == 400
 
@@ -180,7 +181,7 @@ def test_nq_calls_are_indexed_tracked_and_commented(client, tmp_path):
 
     login(client, 'viewer', 'viewer123')
     assert query(client)['total'] == 4
-    assert client.patch(url, json={'changes': {'status': 'Resolved'}}).status_code == 403
+    assert client.patch(url, json={'changes': {'status': 'Closed'}}).status_code == 403
     assert client.post(f'{url}/comments', json={'body': 'Hi'}).status_code == 403
 
     login(client)  # A super-admin moderates any comment; deleted comments keep their history.
@@ -194,10 +195,10 @@ def test_nq_calls_are_indexed_tracked_and_commented(client, tmp_path):
     core.repository.replace_dataset_rows(voice_id, voice_rows())
     core.repository.update_dataset_profile(voice_id, processed_at=local_now_iso(), updated_at=local_now_iso())
     assert client.get('/api/non-qualified-calls/index-status').json()['sync']['pending'] == 1
-    again = query(client, filters={'service': ['voice'], 'status': ['Under Investigation']})
+    again = query(client, filters={'service': ['voice'], 'status': ['Under Analysis']})
     assert again['sync']['pending'] == 0 and again['total'] == 1 and again['calls'][0]['call_key'] == key
     assert query(client, filters={'open_only': True})['total'] == 4
-    client.patch(url, json={'changes': {'status': 'Resolved'}})
+    client.patch(url, json={'changes': {'status': 'Closed'}})
     assert query(client, filters={'open_only': True})['total'] == 3
     assert query(client)['summary']['closed'] == 1
 
@@ -207,9 +208,9 @@ def test_statuses_and_teams_can_be_renamed_but_not_removed_while_in_use(client, 
     add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'voice', voice_rows())
     login(client)
     key = query(client)['calls'][0]['call_key']
-    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'team': 'Transport'}})
+    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'team': 'Operations'}})
     options = client.get('/api/non-qualified-calls/state').json()['options']
-    teams = [{'name': 'Backhaul' if team['name'] == 'Transport' else team['name'], 'color': team['color'],
+    teams = [{'name': 'Backhaul' if team['name'] == 'Operations' else team['name'], 'color': team['color'],
               'previous': team['name']} for team in options['teams']]
     saved = client.put('/api/non-qualified-calls/options', json={'statuses': options['statuses'], 'teams': teams})
     assert saved.status_code == 200, saved.text
@@ -227,7 +228,7 @@ def test_excel_export_lists_calls_comments_and_history(client, tmp_path):
     add_cdr(tmp_path, 'NetCheck_UK_CDR_Data_2026_Q1.xlsx', 'data', data_rows())
     login(client)
     key = query(client, filters={'result': ['Cutoff']})['calls'][0]['call_key']
-    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Pending Information'}})
+    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Under Planning'}})
     client.post(f'/api/non-qualified-calls/calls/{key}/comments', json={'body': 'Check the interference.'})
     response = client.post('/api/non-qualified-calls/export', json={'filters': {'result': ['Cutoff']}})
     assert response.status_code == 200
@@ -235,13 +236,14 @@ def test_excel_export_lists_calls_comments_and_history(client, tmp_path):
     workbook = load_workbook(io.BytesIO(response.content))
     assert workbook.sheetnames == ['NQ Calls', 'Comments', 'History']
     calls = list(workbook['NQ Calls'].values)
-    header = calls[0]
-    assert len(calls) == 2
-    row = dict(zip(header, calls[1]))
-    assert (row['Result'], row['Status'], row['Comments'], row['Last Comment']) == (
-        'Cutoff', 'Pending Information', 1, 'Check the interference.')
+    # Row 1 names the sections, row 2 the columns.
+    header = calls[1]
+    assert len(calls) == 3
+    row = dict(zip(header, calls[2]))
+    assert (row['Result'], row['NQ Call Status'], row['Status Set']) == ('Cutoff', 'Under Planning', 'By hand')
+    assert row['Comments'].endswith('super: Check the interference.')
     assert list(workbook['Comments'].values)[1][4] == 'Check the interference.'
-    assert list(workbook['History'].values)[1][4:7] == ('Status', 'Open', 'Pending Information')
+    assert list(workbook['History'].values)[1][4:7] == ('Status', 'Not Attended', 'Under Planning')
 
 
 def test_tracking_travels_with_workspace_packages_and_imports_once(client, tmp_path):
@@ -249,7 +251,7 @@ def test_tracking_travels_with_workspace_packages_and_imports_once(client, tmp_p
     add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'voice', voice_rows())
     login(client)
     key = query(client)['calls'][0]['call_key']
-    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Resolved'}})
+    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Closed'}})
     client.post(f'/api/non-qualified-calls/calls/{key}/comments', json={'body': 'Fixed by the RAN team.'})
     payload = core._nq_call_tracking_payload(core.active_workspace)
     document = json.loads(payload)
@@ -262,7 +264,7 @@ def test_tracking_travels_with_workspace_packages_and_imports_once(client, tmp_p
             connection.execute(f'DELETE FROM {table}')
     assert core._restore_workspace_nq_call_tracking(core.active_workspace, payload) == 1
     detail = client.get(f'/api/non-qualified-calls/calls/{key}').json()
-    assert detail['call']['status'] == 'Resolved' and detail['comments'][0]['body'] == 'Fixed by the RAN team.'
+    assert detail['call']['status'] == 'Closed' and detail['comments'][0]['body'] == 'Fixed by the RAN team.'
     assert len(detail['history']) == 1
     # Importing the same follow-up again changes nothing.
     assert core._restore_workspace_nq_call_tracking(core.active_workspace, payload) == 0
@@ -313,13 +315,13 @@ def test_teams_members_progress_shared_filters_and_reporting_artifact(client, tm
     page_state = client.get('/api/non-qualified-calls/state').json()
     assert {'editor', 'viewer'} <= set(page_state['users'])
     statuses = [{**status, 'previous': status['name']} for status in page_state['options']['statuses']]
-    payload = [{**team, 'previous': team['name'], 'members': ['editor'] if team['name'] == 'Core Network' else []}
+    payload = [{**team, 'previous': team['name'], 'members': ['editor'] if team['name'] == 'Operations' else []}
                for team in page_state['options']['teams']]
     payload.append({'name': 'Field Ops', 'color': '#336699', 'previous': '', 'members': ['editor', 'viewer']})
     saved = client.put('/api/non-qualified-calls/options', json={'statuses': statuses, 'teams': payload})
     assert saved.status_code == 200, saved.text
     members = {team['name']: team['members'] for team in saved.json()['options']['teams']}
-    assert members['Core Network'] == ['editor'] and members['Field Ops'] == ['editor', 'viewer']
+    assert members['Operations'] == ['editor'] and members['Field Ops'] == ['editor', 'viewer']
     ghosts = client.put('/api/non-qualified-calls/options', json={'statuses': statuses, 'teams': [{'name': 'Ghosts', 'members': ['nobody']}]})
     assert ghosts.status_code == 400
     assert client.get('/api/non-qualified-calls/teams').status_code in {404, 405}
@@ -329,19 +331,20 @@ def test_teams_members_progress_shared_filters_and_reporting_artifact(client, tm
     # A call of a team with members only accepts its members as assignee.
     call = next(item for item in query(client)['calls'] if item['result'] == 'Dropped')
     url = f"/api/non-qualified-calls/calls/{call['call_key']}"
-    assert client.patch(url, json={'changes': {'team': 'Core Network', 'assignee': 'viewer'}}).status_code == 400
+    assert client.patch(url, json={'changes': {'team': 'Operations', 'assignee': 'viewer'}}).status_code == 400
     assigned = client.patch(url, json={'changes': {'team': 'Field Ops', 'assignee': 'viewer'}}).json()['call']
     assert assigned['assignee'] == 'viewer'
     # Moving it to a team the assignee does not belong to clears the assignee.
-    moved = client.patch(url, json={'changes': {'team': 'Core Network'}}).json()['call']
-    assert moved['team'] == 'Core Network' and moved['assignee'] == ''
+    moved = client.patch(url, json={'changes': {'team': 'Operations'}}).json()['call']
+    assert moved['team'] == 'Operations' and moved['assignee'] == ''
     assert client.post(f'{url}/comments', json={'body': 'Checked the drive test.'}).status_code == 200
 
     # Summary breakdowns, in the order of the page and of the one-slide Executive Summary.
     result = query(client)
     assert [item['field'] for item in result['breakdowns']] == [
-        'service', 'result', 'status', 'team', 'root_domain', 'failure_classification', 'campaign', 'operator', 'vendor',
-        'region', 'cluster', 'city']
+        'service', 'result', 'status', 'team', 'root_domain', 'root_category', 'root_cause', 'failure_classification', 'campaign',
+        'operator', 'vendor', 'region', 'cluster', 'city',
+        'field:session_type', 'field:analysis_status', 'field:implementation_status', 'field:planned_status']
     by_campaign = next(item for item in result['breakdowns'] if item['field'] == 'campaign')
     assert by_campaign['label'] == 'By Campaign' and by_campaign['items'] == [{'value': 'UK_Q1_2026', 'count': 4}]
 
@@ -415,55 +418,57 @@ def test_root_causes_are_suggested_labelled_required_and_analysed(client, tmp_pa
     assert list(domains)[:2] == ['RF', 'RAN'] and state['root_causes']['require_to_close'] is False
     calls = {(call['service'], call['result']): call for call in query(client)['calls']}
     # The CDR failure classification suggests the domain, and its category or comment the cause.
-    assert calls['voice', 'Failed']['suggested_root_cause'] == {'domain': 'RF', 'cause': 'Coverage', 'source': 'cdr'}
+    assert calls['voice', 'Failed']['suggested_root_cause'] == {'domain': 'RF', 'category': '', 'cause': 'Coverage', 'source': 'netcheck'}
     # "Interference on PCI 80" does not say whether it is DL or UL: only the RF domain is suggested.
-    assert calls['data', 'Cutoff']['suggested_root_cause'] == {'domain': 'RF', 'cause': '', 'source': 'cdr'}
-    assert calls['voice', 'Dropped']['suggested_root_cause'] == {'domain': 'IMS/E2E', 'cause': '', 'source': 'cdr'}
+    assert calls['data', 'Cutoff']['suggested_root_cause'] == {'domain': 'RF', 'category': '', 'cause': '', 'source': 'netcheck'}
+    assert calls['voice', 'Dropped']['suggested_root_cause'] == {'domain': 'IMS/E2E', 'category': '', 'cause': '', 'source': 'netcheck'}
     assert calls['data', 'Failed']['suggested_root_cause'] is None
 
     key = calls['voice', 'Dropped']['call_key']
-    response = client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'root_domain': 'RF', 'root_cause': 'TAU reject'}})
-    assert response.status_code == 400 and 'causes of the selected domain' in response.text
-    detail = client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'root_domain': 'IMS/E2E', 'root_cause': 'No QCI1 established'}}).json()
-    assert (detail['call']['root_domain'], detail['call']['root_cause']) == ('IMS/E2E', 'No QCI1 established')
-    assert {entry['field'] for entry in detail['history']} == {'root_domain', 'root_cause'}
+    response = client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'root_cause': 'Not a cause'}})
+    assert response.status_code == 400 and 'Root Causes of the root cause catalog' in response.text
+    detail = client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'root_category': 'E2E', 'root_cause': 'No QCI1 established'}}).json()
+    assert (detail['call']['root_domain'], detail['call']['root_category'], detail['call']['root_cause']) == ('IMS/E2E', 'E2E', 'No QCI1 established')
+    # The domain follows the category; the first change attends the call, which opens it.
+    assert {entry['field'] for entry in detail['history']} == {'root_category', 'root_cause', 'status_auto'}
     assert query(client, filters={'root_domain': ['IMS/E2E']})['total'] == 1
+    assert query(client, filters={'root_category': ['E2E']})['total'] == 1
     assert query(client, filters={'root_domain': [nq.UNASSIGNED]})['total'] == 3
 
-    # Bulk: the suggestions label the calls without a root cause and keep the labelled ones.
+    # Bulk: the recommendations label the calls without a root cause and keep the labelled ones; calls without
+    # a recommendation are left as they are.
     keys = [call['call_key'] for call in calls.values()]
-    changed = client.post('/api/non-qualified-calls/calls/bulk', json={'call_keys': keys, 'changes': {'apply_suggestion': True}})
-    assert changed.json()['changed'] == 2
+    changed = client.post('/api/non-qualified-calls/calls/bulk', json={'call_keys': keys, 'changes': {'apply_recommendation': True}})
+    assert changed.json()['changed'] == 1
     labelled = labelled_calls(client)
-    assert labelled['voice', 'Dropped'] == ('IMS/E2E', 'No QCI1 established')
-    assert labelled['data', 'Cutoff'] == ('RF', '') and labelled['voice', 'Failed'] == ('RF', 'Coverage')
-    assert labelled['data', 'Failed'] == ('', '')
+    assert labelled['voice', 'Dropped'] == ('IMS/E2E', 'E2E', 'No QCI1 established')
+    assert labelled['voice', 'Failed'] == ('RF', '', 'Coverage')
+    assert labelled['data', 'Cutoff'] == ('', '', '') and labelled['data', 'Failed'] == ('', '', '')
 
     # Renaming follows on every call; a cause in use cannot be removed.
     taxonomy = client.get('/api/non-qualified-calls/root-causes').json()
-    rf = next(item for item in taxonomy['domains'] if item['name'] == 'RF')
-    rf['previous'], rf['name'] = 'RF', 'Radio'
-    for cause in rf['causes']:
-        cause['previous'] = cause['name']
-    saved = client.put('/api/non-qualified-calls/root-causes', json={'domains': taxonomy['domains'], 'require_to_close': True})
+    for plural in ('domains', 'categories', 'causes'):
+        for item in taxonomy[plural]:
+            item['previous'] = item['name']
+    next(item for item in taxonomy['domains'] if item['name'] == 'RF')['name'] = 'Radio'
+    saved = client.put('/api/non-qualified-calls/root-causes', json={**taxonomy, 'require_to_close': True})
     assert saved.status_code == 200, saved.text
-    assert labelled_calls(client)['voice', 'Failed'] == ('Radio', 'Coverage')
-    current = saved.json()['domains']
-    radio = next(item for item in current if item['name'] == 'Radio')
-    radio['causes'] = [cause for cause in radio['causes'] if cause['name'] != 'Coverage']
-    refused = client.put('/api/non-qualified-calls/root-causes', json={'domains': current, 'require_to_close': True})
+    assert labelled_calls(client)['voice', 'Failed'] == ('Radio', '', 'Coverage')
+    current = saved.json()
+    current['causes'] = [cause for cause in current['causes'] if cause['name'] != 'Coverage']
+    refused = client.put('/api/non-qualified-calls/root-causes', json={**current, 'require_to_close': True})
     assert refused.status_code == 400 and 'in use' in refused.text
 
-    # With the root cause required, a call cannot be closed without one.
-    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'root_domain': '', 'root_cause': ''}})
-    blocked = client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Resolved'}})
-    assert blocked.status_code == 400 and 'root cause before closing' in blocked.text
-    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'root_domain': 'AAA'}})
-    assert client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Resolved'}}).status_code == 200
+    # With the root category required, a call cannot be closed without one.
+    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'root_category': '', 'root_cause': ''}})
+    blocked = client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Closed'}})
+    assert blocked.status_code == 400 and 'root category before closing' in blocked.text
+    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'root_category': 'Operational'}})
+    assert client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Closed'}}).status_code == 200
 
     stats = client.post('/api/non-qualified-calls/root-causes/stats', json={'filters': {}, 'include_suggestions': False}).json()
-    assert stats['summary'] == {'total': 4, 'labelled': 3, 'suggested': 0, 'unclassified': 1}
-    assert {item['value']: item['count'] for item in stats['domains']} == {'Radio': 2, 'AAA': 1, 'Not classified': 1}
+    assert stats['summary'] == {'total': 4, 'labelled': 2, 'suggested': 0, 'unclassified': 2}
+    assert {item['value']: item['count'] for item in stats['domains']} == {'Radio': 1, 'Operational': 1, 'Not classified': 2}
     assert {row['name']: row['total'] for row in stats['call_types']} == {'Classic': 1, 'WhatsApp': 1, 'Data': 2}
     assert {row['name'] for row in stats['nr_modes']} == {'NSA'}
     # The last cell of the chain gives the eNB (ECI / 256); small identities are 2G/3G cells.
@@ -472,13 +477,14 @@ def test_root_causes_are_suggested_labelled_required_and_analysed(client, tmp_pa
 
     tracking = json.loads(nq.export_tracking_document(core.repository))
     assert tracking['root_causes']['require_to_close'] is True
-    assert {(item['root_domain'], item['root_cause']) for item in tracking['tracking']} >= {('Radio', 'Coverage'), ('AAA', '')}
+    assert {(item['root_domain'], item['root_cause']) for item in tracking['tracking']} >= {('Radio', 'Coverage'), ('Operational', '')}
     page = client.get('/non-qualified-calls').text
     assert 'id="nq-root-dialog"' in page and 'data-nq-filter="root_domain"' in page and 'id="nq-root-nodes"' in page
 
 
 def labelled_calls(client):
-    return {(call['service'], call['result']): (call['root_domain'], call['root_cause']) for call in query(client)['calls']}
+    return {(call['service'], call['result']): (call['root_domain'], call['root_category'], call['root_cause'])
+            for call in query(client)['calls']}
 
 
 def test_root_cause_taxonomy_imports_with_the_tracking_and_shows_in_exports(client, tmp_path):
@@ -489,32 +495,34 @@ def test_root_cause_taxonomy_imports_with_the_tracking_and_shows_in_exports(clie
     login(client)
     key = query(client)['calls'][0]['call_key']
     taxonomy = client.get('/api/non-qualified-calls/root-causes').json()
-    taxonomy['domains'].append({'name': 'Transport', 'color': '#245a96', 'keywords': 'backhaul',
-                                'causes': [{'name': 'Microwave fading', 'keywords': 'fading'}]})
-    assert client.put('/api/non-qualified-calls/root-causes', json={'domains': taxonomy['domains']}).status_code == 200
-    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'root_domain': 'Transport', 'root_cause': 'Microwave fading'}})
+    taxonomy['domains'].append({'name': 'Transport', 'color': '#245a96', 'keywords': 'backhaul'})
+    taxonomy['causes'].append({'name': 'Microwave fading', 'domain': 'Transport', 'keywords': 'fading'})
+    assert client.put('/api/non-qualified-calls/root-causes', json=taxonomy).status_code == 200
+    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'root_cause': 'Microwave fading'}})
     document = nq.export_tracking_document(core.repository)
     with core.repository.connection() as connection:
         connection.execute(f'DELETE FROM {nq.NQ_CALL_TRACKING_TABLE}')
-        connection.execute(f"DELETE FROM {nq.NQ_ROOT_CAUSES_TABLE} WHERE domain = 'Transport'")
+        connection.execute(f"DELETE FROM {nq.NQ_ROOT_CATALOG_TABLE} WHERE name IN ('Transport', 'Microwave fading')")
     nq.import_tracking_document(core.repository, document)
     restored = client.get('/api/non-qualified-calls/root-causes').json()
-    transport = next(item for item in restored['domains'] if item['name'] == 'Transport')
-    assert transport['causes'] == [{'name': 'Microwave fading', 'keywords': ['fading']}]
+    assert any(item['name'] == 'Transport' for item in restored['domains'])
+    fading = next(item for item in restored['causes'] if item['name'] == 'Microwave fading')
+    assert (fading['domain'], fading['keywords']) == ('Transport', ['fading'])
     detail = client.get(f'/api/non-qualified-calls/calls/{key}').json()['call']
     assert (detail['root_domain'], detail['root_cause']) == ('Transport', 'Microwave fading')
 
     exported = client.post('/api/non-qualified-calls/export', json={'filters': {}})
     sheet = load_workbook(io.BytesIO(exported.content))['NQ Calls']
-    headers = [cell.value for cell in sheet[1]]
-    assert {'Root Domain', 'Root Cause', 'Suggested Root Domain', 'Suggested Root Cause'} <= set(headers)
+    headers = [cell.value for cell in sheet[2]]
+    assert {'Selected Root Category', 'Selected Root Cause', 'Root Domain', 'Recommended Root Category',
+            'Recommended Root Cause'} <= set(headers)
     deck = client.post('/api/non-qualified-calls/export/powerpoint', json={'filters': {}, 'granularity': 'month'})
     titles = [slide.shapes.title.text_frame.text for slide in Presentation(io.BytesIO(deck.content)).slides
               if slide.shapes.title is not None]
     assert any(title.startswith('Root Cause Analysis') for title in titles)
     assert any('eNB / gNB' in title for title in titles)
     page = client.get('/admin').text
-    assert '>NQ Root Causes<' in page or '"NQ Root Causes"' in page
+    assert '>NQ Root Catalog<' in page or '"NQ Root Catalog"' in page
 
 
 def test_admins_delete_single_history_entries_or_the_history_of_calls(client, tmp_path):
@@ -525,7 +533,7 @@ def test_admins_delete_single_history_entries_or_the_history_of_calls(client, tm
     login(client)
     keys = [call['call_key'] for call in query(client)['calls']]
     for key in keys:
-        client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Under Investigation', 'team': 'Transport'}})
+        client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Under Analysis', 'team': 'Operations'}})
     client.post(f'/api/non-qualified-calls/calls/{keys[0]}/comments', json={'body': 'Checked.'})
     detail = client.get(f'/api/non-qualified-calls/calls/{keys[0]}').json()
     assert len(detail['history']) == 2 and all(entry['id'] for entry in detail['history'])
@@ -541,7 +549,7 @@ def test_admins_delete_single_history_entries_or_the_history_of_calls(client, tm
     after = client.get(f'/api/non-qualified-calls/calls/{keys[0]}').json()
     assert [entry['field'] for entry in after['history']] == ['team']
     # The follow-up and the comments stay.
-    assert after['call']['status'] == 'Under Investigation' and len(after['comments']) == 1
+    assert after['call']['status'] == 'Under Analysis' and len(after['comments']) == 1
 
     cleared = client.post('/api/non-qualified-calls/history/clear', json={'call_keys': keys[:2]})
     assert cleared.json() == {'deleted': 1 + 2}
@@ -561,42 +569,18 @@ def test_root_cause_suggestions_fall_back_to_comments_and_match_whole_words(clie
     cutoff = calls['Cutoff']['call_key']
     client.post(f'/api/non-qualified-calls/calls/{cutoff}/comments', json={'body': 'Strong UL interference seen on the eNB counters.'})
     assert query(client, filters={'result': ['Cutoff']})['calls'][0]['suggested_root_cause'] == {
-        'domain': 'RF', 'cause': 'UL interference', 'source': 'comments'}
+        'domain': 'RF', 'category': '', 'cause': 'UL interference', 'source': 'comments'}
     # Without any CDR classification, a comment can choose the domain; keywords are whole words.
     failed = calls['Failed']['call_key']
     client.post(f'/api/non-qualified-calls/calls/{failed}/comments', json={'body': 'Poor performance, grant issue.'})
     assert client.get(f'/api/non-qualified-calls/calls/{failed}').json()['call']['suggested_root_cause'] is None
     client.post(f'/api/non-qualified-calls/calls/{failed}/comments', json={'body': 'Looks like an AAA rejection.'})
     assert client.get(f'/api/non-qualified-calls/calls/{failed}').json()['call']['suggested_root_cause'] == {
-        'domain': 'AAA', 'cause': '', 'source': 'comments'}
+        'domain': 'AAA', 'category': '', 'cause': '', 'source': 'comments'}
     stats = client.post('/api/non-qualified-calls/root-causes/stats', json={'filters': {}}).json()
     assert {(item['domain'], item['cause']) for item in stats['causes']} >= {('RF', 'UL interference')}
-    assert client.get('/api/non-qualified-calls/state').json()['root_cause_defaults'][0]['causes'][1]['name'] == 'UL interference'
-
-
-def test_first_default_root_causes_are_upgraded_once(client, tmp_path):
-    enable_module()
-    login(client)
-    client.get('/api/non-qualified-calls/state')
-    repository = core.repository
-    # A workspace seeded with the first defaults.
-    with repository.connection() as connection:
-        connection.execute(f"DELETE FROM {nq.NQ_ROOT_CAUSES_TABLE} WHERE domain = 'RF' AND cause = 'UL interference'")
-        connection.execute(f"UPDATE {nq.NQ_ROOT_CAUSES_TABLE} SET keywords = '[\"interference\"]' WHERE domain = 'RF' AND cause = 'DL interference'")
-        connection.execute(f"UPDATE {nq.NQ_ROOT_CAUSES_TABLE} SET keywords = '[\"volte\", \"ims\", \"e2e\"]' WHERE domain = 'IMS/E2E' AND cause = ''")
-    repository.set_workspace_state(nq.ROOT_CAUSE_DEFAULTS_STATE_KEY, '1')
-    taxonomy = client.get('/api/non-qualified-calls/root-causes').json()
-    rf = next(item for item in taxonomy['domains'] if item['name'] == 'RF')
-    assert [cause['name'] for cause in rf['causes']][:3] == ['DL interference', 'UL interference', 'Coverage']
-    assert rf['causes'][0]['keywords'] == ['dl interference', 'downlink interference']
-    assert next(item for item in taxonomy['domains'] if item['name'] == 'IMS/E2E')['keywords'] == ['volte', 'ims']
-    # Edited values are kept, and the upgrade does not run again.
-    rf['causes'] = [cause for cause in rf['causes'] if cause['name'] != 'UL interference']
-    rf['causes'][0]['keywords'] = 'interference'
-    assert client.put('/api/non-qualified-calls/root-causes', json={'domains': taxonomy['domains']}).status_code == 200
-    again = client.get('/api/non-qualified-calls/root-causes').json()
-    rf = next(item for item in again['domains'] if item['name'] == 'RF')
-    assert rf['causes'][0]['keywords'] == ['interference'] and 'UL interference' not in [cause['name'] for cause in rf['causes']]
+    defaults = client.get('/api/non-qualified-calls/state').json()['root_cause_defaults']
+    assert next(item for item in defaults['causes'] if item['name'] == 'UL interference')['domain'] == 'RF'
 
 
 def test_everybody_sees_the_suggestion_rule_and_admins_edit_it(client, tmp_path):
@@ -614,7 +598,7 @@ def test_everybody_sees_the_suggestion_rule_and_admins_edit_it(client, tmp_path)
     def suggestion(service, result):
         return next(call for call in query(client)['calls'] if call['service'] == service and call['result'] == result)['suggested_root_cause']
 
-    assert suggestion('voice', 'Failed') == {'domain': 'RF', 'cause': 'Coverage', 'source': 'cdr'}
+    assert suggestion('voice', 'Failed') == {'domain': 'RF', 'category': '', 'cause': 'Coverage', 'source': 'netcheck'}
     # Everybody sees the rule (the dialog is on the page); editors and viewers cannot change it.
     for username, password in (('editor', 'editor123'), ('viewer', 'viewer123')):
         login(client, username, password)
@@ -631,20 +615,20 @@ def test_everybody_sees_the_suggestion_rule_and_admins_edit_it(client, tmp_path)
     rule = {**nq.DEFAULT_ROOT_CAUSE_RULE, 'cause_fields': ['failure_comment']}
     saved = client.put('/api/non-qualified-calls/root-causes/rule', json={'rule': rule})
     assert saved.status_code == 200 and saved.json()['rule']['cause_fields'] == ['failure_comment']
-    assert suggestion('voice', 'Failed') == {'domain': 'RF', 'cause': '', 'source': 'cdr'}
+    assert suggestion('voice', 'Failed') == {'domain': 'RF', 'category': '', 'cause': '', 'source': 'netcheck'}
     assert client.get('/api/non-qualified-calls/root-causes').json()['rule']['cause_fields'] == ['failure_comment']
     # The comments resolve the cause the fields left open, unless the rule turns them off.
     key = next(call['call_key'] for call in query(client)['calls'] if call['result'] == 'Dropped')
     client.post(f'/api/non-qualified-calls/calls/{key}/comments', json={'body': 'qci1 bearer missing'})
-    assert suggestion('voice', 'Dropped') == {'domain': 'IMS/E2E', 'cause': 'No QCI1 established', 'source': 'comments'}
+    assert suggestion('voice', 'Dropped') == {'domain': 'IMS/E2E', 'category': '', 'cause': 'No QCI1 established', 'source': 'comments'}
     client.put('/api/non-qualified-calls/root-causes/rule', json={'rule': {**rule, 'comments': False}})
-    assert suggestion('voice', 'Dropped') == {'domain': 'IMS/E2E', 'cause': '', 'source': 'cdr'}
+    assert suggestion('voice', 'Dropped') == {'domain': 'IMS/E2E', 'category': '', 'cause': '', 'source': 'netcheck'}
     # Partial matching finds keywords inside words: "rf" in "performance".
     data_failed = next(call['call_key'] for call in query(client)['calls'] if call['service'] == 'data' and call['result'] == 'Failed')
     client.post(f'/api/non-qualified-calls/calls/{data_failed}/comments', json={'body': 'Poor performance.'})
     assert suggestion('data', 'Failed') is None
     client.put('/api/non-qualified-calls/root-causes/rule', json={'rule': {**rule, 'match': 'text'}})
-    assert suggestion('data', 'Failed') == {'domain': 'RF', 'cause': '', 'source': 'comments'}
+    assert suggestion('data', 'Failed') == {'domain': 'RF', 'category': '', 'cause': '', 'source': 'comments'}
     client.put('/api/non-qualified-calls/root-causes/rule', json={'rule': {**rule, 'comments': False}})
     bad = client.put('/api/non-qualified-calls/root-causes/rule', json={'rule': {**rule, 'cause_fields': ['Call_Status']}})
     assert bad.status_code == 400 and 'Unknown root cause rule fields' in bad.text
@@ -664,15 +648,17 @@ def test_every_header_name_sorts_and_filters_the_calls(client, tmp_path):
     add_cdr(tmp_path, 'NetCheck_UK_CDR_Data_2026_Q1.xlsx', 'data', data_rows())
     login(client)
     keys = [call['call_key'] for call in query(client)['calls']]
-    client.patch(f'/api/non-qualified-calls/calls/{keys[0]}', json={'changes': {'root_domain': 'RF', 'root_cause': 'Coverage'}})
+    client.patch(f'/api/non-qualified-calls/calls/{keys[0]}', json={'changes': {'root_category': 'Poor Coverage LTE', 'root_cause': 'Coverage'}})
     for sort in ('cause', 'vendor', 'technology', 'campaign', 'service', 'result', 'assignee'):
         result = query(client, sort=sort, direction='asc')
         assert result['sort'] == sort and result['total'] == 4, sort
     assert query(client, sort='cause', direction='desc')['calls'][0]['root_cause'] == 'Coverage'
     page = client.get('/non-qualified-calls').text
     for field in ('service', 'vendor', 'campaign', 'technology', 'result', 'failure_classification', 'team', 'assignee',
-                  'root_domain', 'root_cause'):
+                  'root_category', 'root_cause'):
         assert f'data-filter="{field}"' in page and f'data-nq-filter="{field}"' in page, field
+    # The root domain is filtered in the Filters panel, with the Status Set (automatic or by hand).
+    assert 'data-nq-filter="root_domain"' in page and 'data-nq-filter="status_mode"' in page
 
 
 def test_progress_and_root_cause_values_filter_the_calls(client, tmp_path):
@@ -732,9 +718,9 @@ def test_indicator_cards_filter_by_follow_up_state(client, tmp_path):
     login(client)
     calls = query(client)['calls']
     first, second = calls[0]['call_key'], calls[1]['call_key']
-    client.patch(f'/api/non-qualified-calls/calls/{first}', json={'changes': {'status': 'Resolved', 'team': 'Transport'}})
+    client.patch(f'/api/non-qualified-calls/calls/{first}', json={'changes': {'status': 'Closed', 'team': 'Operations'}})
     client.post(f'/api/non-qualified-calls/calls/{second}/comments', json={'body': 'Checked.'})
-    client.patch(f'/api/non-qualified-calls/calls/{second}', json={'changes': {'root_domain': 'RF'}})
+    client.patch(f'/api/non-qualified-calls/calls/{second}', json={'changes': {'root_category': 'Poor Coverage LTE'}})
 
     def total(**filters):
         return query(client, filters=filters)['total']
@@ -804,7 +790,7 @@ def test_daily_follow_up_moves_to_the_final_cdr_and_versions_are_told(client, tm
     calls = {call['join_id']: call for call in query(client)['calls']}
     assert set(calls) == {'0x1', '0x2', '0x3'}
     key = calls['0x1']['call_key']
-    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Under Investigation'}})
+    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Under Analysis'}})
     client.post(f'/api/non-qualified-calls/calls/{key}/comments', json={'body': 'Analysed on the Daily CDR.'})
 
     # The Final CDR: 0x1 changed its failure, 0x2 is Completed, 0x3 dropped out and 0x5 is new.
@@ -815,7 +801,7 @@ def test_daily_follow_up_moves_to_the_final_cdr_and_versions_are_told(client, tm
     final = add_stage_cdr(tmp_path, 'UK_Voice_Q3_Final.xlsx', 'voice', final_rows, 'final')
     calls = {call['join_id']: call for call in query(client)['calls']}
     # The analysis follows the call to the Final CDR, which is its shown version.
-    assert calls['0x1']['call_key'] == key and calls['0x1']['status'] == 'Under Investigation'
+    assert calls['0x1']['call_key'] == key and calls['0x1']['status'] == 'Under Analysis'
     assert calls['0x1']['dataset_id'] == final and calls['0x1']['result'] == 'Dropped'
     assert calls['0x1']['version_state'] == 'changed' and calls['0x1']['comment_count'] == 1
     assert calls['0x3']['version_state'] == 'not_in_final'
@@ -824,14 +810,14 @@ def test_daily_follow_up_moves_to_the_final_cdr_and_versions_are_told(client, tm
     assert [call['join_id'] for call in query(client, filters={'version': ['qualified']})['calls']] == ['0x2']
     only_daily = {call['join_id']: call for call in query(client, filters={'datasets': [str(daily)]})['calls']}
     assert set(only_daily) == {'0x1', '0x2', '0x3'}
-    assert only_daily['0x1']['version_state'] == 'newer' and only_daily['0x1']['status'] == 'Under Investigation'
+    assert only_daily['0x1']['version_state'] == 'newer' and only_daily['0x1']['status'] == 'Under Analysis'
     assert only_daily['0x2']['version_state'] == 'qualified'
     detail = client.get(f'/api/non-qualified-calls/calls/{key}').json()
     assert [(version['stage'], version['latest']) for version in detail['versions']] == [('Final', True), ('Daily', False)]
     # Deleting the Daily CDR keeps the analysis of the calls the Final CDR still has.
     client.post(f'/datasets-analysis/delete/{daily}', follow_redirects=False)
     calls = {call['join_id']: call for call in query(client)['calls']}
-    assert set(calls) == {'0x1', '0x5'} and calls['0x1']['status'] == 'Under Investigation'
+    assert set(calls) == {'0x1', '0x5'} and calls['0x1']['status'] == 'Under Analysis'
 
 
 def test_speech_calls_are_listed_once_and_their_samples_keep_their_own_follow_up(client, tmp_path):
@@ -849,12 +835,12 @@ def test_speech_calls_are_listed_once_and_their_samples_keep_their_own_follow_up
     detail = client.get(f'/api/non-qualified-calls/calls/{call_key}').json()
     assert len(detail['samples']) == 2
     sample_key = detail['samples'][1]['call_key']
-    changed = client.patch(f'/api/non-qualified-calls/calls/{sample_key}', json={'changes': {'status': 'Resolved'}})
+    changed = client.patch(f'/api/non-qualified-calls/calls/{sample_key}', json={'changes': {'status': 'Closed'}})
     assert changed.status_code == 200 and changed.json()['call']['parent_key'] == call_key
     client.post(f'/api/non-qualified-calls/calls/{sample_key}/comments', json={'body': 'Sample with garbled audio.'})
-    assert query(client)['calls'][0]['status'] == 'Open'
+    assert query(client)['calls'][0]['status'] == 'Not Attended'
     detail = client.get(f'/api/non-qualified-calls/calls/{call_key}').json()
-    assert [sample['status'] for sample in detail['samples']] == ['Open', 'Resolved']
+    assert [sample['status'] for sample in detail['samples']] == ['Not Attended', 'Closed']
     workbook = load_workbook(io.BytesIO(client.post('/api/non-qualified-calls/export', json={'filters': {}}).content))
     assert 'Speech Samples' in workbook.sheetnames and len(list(workbook['Speech Samples'].values)) == 3
 
@@ -904,7 +890,7 @@ def test_analysis_fields_are_configured_filled_filtered_required_and_exported(cl
     assert client.patch(url, json={'changes': {'fields': {keys['Final Category']: 'Unknown'}}}).status_code == 400
     assert client.patch(url, json={'changes': {'fields': {keys['Planned Date']: '21/09/2026'}}}).status_code == 400
     # A required field must be filled before closing.
-    refused = client.patch(url, json={'changes': {'status': 'Resolved'}})
+    refused = client.patch(url, json={'changes': {'status': 'Closed'}})
     assert refused.status_code == 400 and 'Final Category' in refused.json()['detail']
     filled = client.patch(url, json={'changes': {'fields': {keys['Final Category']: 'poor coverage lte', keys['Findings']: 'Weak signal\nin the tunnel',
                                                           keys['Notice to VF3']: 'yes', keys['Planned Date']: '2026-10-15'}}})
@@ -914,7 +900,7 @@ def test_analysis_fields_are_configured_filled_filtered_required_and_exported(cl
     assert call['version'] == 1
     history = filled.json()['history']
     assert ('field:' + keys['Final Category'], 'Poor Coverage LTE') in {(entry['field'], entry['new_value']) for entry in history}
-    assert client.patch(url, json={'changes': {'status': 'Resolved'}}).status_code == 200
+    assert client.patch(url, json={'changes': {'status': 'Closed'}}).status_code == 200
     assert query(client, filters={'fields': {keys['Final Category']: ['Poor Coverage LTE']}})['total'] == 1
     assert query(client, filters={'fields': {keys['Final Category']: [nq.UNASSIGNED]}})['total'] == 1
     assert query(client, filters={'search': 'in the tunnel'})['total'] == 1
@@ -930,8 +916,8 @@ def test_analysis_fields_are_configured_filled_filtered_required_and_exported(cl
     fields[0]['options'] = [{'name': 'E2E'}]
     assert client.put('/api/non-qualified-calls/fields', json={'fields': fields}).status_code == 400
     workbook = load_workbook(io.BytesIO(client.post('/api/non-qualified-calls/export', json={'filters': {}}).content))
-    header = list(workbook['NQ Calls'].values)[0]
-    assert 'Final Category' in header and header.index('Final Category') > header.index('Root Cause')
+    header = list(workbook['NQ Calls'].values)[1]
+    assert 'Final Category' in header and header.index('Final Category') > header.index('Failure Comment')
     # The analysis travels with the NQ Call Tracking package.
     document = json.loads(core._nq_call_tracking_payload(core.active_workspace))
     assert {field['label'] for field in document['fields']} >= {'Final Category', 'Findings'}
@@ -940,28 +926,6 @@ def test_analysis_fields_are_configured_filled_filtered_required_and_exported(cl
         connection.execute(f'DELETE FROM {nq.NQ_FIELDS_TABLE}')
     core._restore_workspace_nq_call_tracking(core.active_workspace, json.dumps(document).encode('utf-8'))
     assert client.get(url).json()['call']['fields'][keys['Final Category']] == 'Poor Coverage 4G'
-
-
-def test_analysis_fields_are_proposed_from_a_user_input_workbook(client, tmp_path):
-    from openpyxl import Workbook
-
-    enable_module()
-    login(client)
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.append(['Failure Type', 'Auto_RCA_Category_A', 'Tunnel Failure', 'Findings', 'Planned Date', 'Netcheck Category'])
-    sheet.append(['CALL', 'Will Come from Python Script- Yuriy', 'Yes', 'User Define', 'User Define', 'Value to be Taken from CDR'])
-    sheet.append(['MRAB', None, 'No', None, None, None])
-    output = io.BytesIO()
-    workbook.save(output)
-    response = client.post('/api/non-qualified-calls/fields/from-excel',
-                           files={'workbook': ('User_Input_List.xlsx', output.getvalue(), 'application/vnd.ms-excel')})
-    assert response.status_code == 200, response.text
-    proposed = {field['label']: field for field in response.json()['fields']}
-    assert proposed['Failure Type']['type'] == 'list' and [item['name'] for item in proposed['Failure Type']['options']] == ['CALL', 'MRAB']
-    assert proposed['Tunnel Failure']['type'] == 'yes_no' and proposed['Findings']['type'] == 'long_text'
-    assert proposed['Planned Date']['type'] == 'date'
-    assert response.json()['skipped'] == ['Auto_RCA_Category_A', 'Netcheck Category']
 
 
 def test_cdr_columns_and_optional_columns_of_the_calls_table(client, tmp_path):
@@ -993,10 +957,10 @@ def test_cdr_columns_and_optional_columns_of_the_calls_table(client, tmp_path):
         'builtin': ['join_id'], 'cdr': ['Cellname_A'], 'export_cdr': ['Cellname_A', 'Call_Status']})
     assert saved.json()['table_columns'] == {'builtin': ['join_id'], 'cdr': ['Cellname_A'], 'export_cdr': ['Call_Status']}
     sheet = load_workbook(io.BytesIO(client.post('/api/non-qualified-calls/export', json={'filters': {}}).content))['NQ Calls']
-    headers = [cell.value for cell in sheet[1]]
+    headers = [cell.value for cell in sheet[2]]
     assert {'Cluster', 'Operator_Vendor', 'Vendor_Operator', 'CDR', 'Cellname_A', 'Call_Status'} <= set(headers)
     assert headers.index('Call_Status') == headers.index('Cellname_A') + 1 and headers[-1] == 'Call Key'
-    rows = [dict(zip(headers, (cell.value for cell in row))) for row in sheet.iter_rows(min_row=2)]
+    rows = [dict(zip(headers, (cell.value for cell in row))) for row in sheet.iter_rows(min_row=3)]
     assert {row['Cellname_A'] for row in rows} == {'LEEDS_3', 'YORK_2'} and all(row['Call_Status'] for row in rows)
     assert client.put('/api/non-qualified-calls/table-columns', json={'builtin': ['unknown'], 'cdr': []}).status_code == 400
 
@@ -1007,7 +971,7 @@ def test_session_type_is_a_call_column_with_its_own_filter(client, tmp_path):
     rows['Session_Type'] = ['MO Call', 'MT Call', 'MO Call']
     add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'voice', rows)
     login(client)
-    assert client.get('/api/non-qualified-calls/state').json()['optional_columns']['session_type'] == 'Session Type'
+    assert client.get('/api/non-qualified-calls/state').json()['optional_columns']['session_type'] == 'Session Type (CDR)'
     saved = client.put('/api/non-qualified-calls/table-columns', json={'builtin': ['session_type'], 'cdr': []})
     assert saved.status_code == 200
     calls = query(client, sort='session_type', direction='asc')['calls']
@@ -1016,8 +980,8 @@ def test_session_type_is_a_call_column_with_its_own_filter(client, tmp_path):
     filtered = query(client, filters={'columns': {'session_type': ['MT Call']}})['calls']
     assert [call['session_type'] for call in filtered] == ['MT Call']
     sheet = load_workbook(io.BytesIO(client.post('/api/non-qualified-calls/export', json={'filters': {}}).content))['NQ Calls']
-    headers = [cell.value for cell in sheet[1]]
-    assert headers.index('Session Type') == headers.index('Test Name') + 1
+    headers = [cell.value for cell in sheet[2]]
+    assert headers.index('Session Type (CDR)') == headers.index('Test Name') + 1
 
 
 def test_follow_up_moves_once_to_the_join_id_call_keys(client, tmp_path):

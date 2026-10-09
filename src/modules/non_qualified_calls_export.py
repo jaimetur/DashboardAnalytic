@@ -22,8 +22,8 @@ FILTER_LABELS = (
     ('region', 'Region'), ('cluster', 'Cluster'),
     ('city', 'City'), ('technology', 'Technology'), ('test_name', 'Test Name'), ('result', 'Result'),
     ('failure_classification', 'Failure Classification'), ('failure_category', 'Failure Category'),
-    ('status', 'Status'), ('team', 'Team'), ('assignee', 'Assignee'), ('root_domain', 'Root Domain'),
-    ('root_cause', 'Root Cause'), ('nr_mode', 'NR Mode'), ('call_type', 'Call Type'), ('period', 'Period'),
+    ('status', 'Status'), ('status_mode', 'Status Set'), ('team', 'Team'), ('assignee', 'Assignee'), ('root_domain', 'Root Domain'),
+    ('root_category', 'Root Category'), ('root_cause', 'Root Cause'), ('nr_mode', 'NR Mode'), ('call_type', 'Call Type'), ('period', 'Period'),
     ('age', 'Age of Open Calls'), ('root_pair', 'Root Domain · Cause'),
     ('effective_domain', 'Root Domain (with suggestions)'), ('effective_cause', 'Root Domain · Cause (with suggestions)'),
     ('node', 'eNB / gNB'), ('state', 'Follow-up'), ('rca_state', 'Root Cause'), ('version', 'CDR Version'),
@@ -51,12 +51,14 @@ def selection_lines(filters: dict[str, Any], dataset_names: dict[str, str], gran
         values = [str(value) for value in filters.get(key) or [] if str(value).strip()]
         if key == 'datasets':
             values = [dataset_names.get(value, value) for value in values]
-        empty = 'Not classified' if key in {'root_domain', 'effective_domain', 'root_pair'} else 'Unassigned'
+        empty = 'No cause' if key == 'root_cause' else 'Not classified' if key in {'root_domain', 'root_category', 'effective_domain', 'root_pair'} \
+            else 'Unassigned'
         values = [empty if value == '__unassigned__' else value for value in values]
         # "RF||Coverage" and "month:2026-07" read "RF · Coverage" and "2026-07".
         values = [value.partition(':')[2] if key == 'period' else value.strip('|').replace('||', ' · ') for value in values]
         values = [STATE_LABELS.get(value, value) if key in {'state', 'rca_state'} else value for value in values]
         values = [VERSION_LABELS.get(value, value) if key == 'version' else value for value in values]
+        values = [{'auto': 'Automatic', 'manual': 'By hand'}.get(value, value) if key == 'status_mode' else value for value in values]
         if values:
             lines.append(f'{label}: {", ".join(values)}')
     for key, chosen in (filters.get('fields') or {}).items():
@@ -247,7 +249,8 @@ def report_panels(summary: dict[str, Any], breakdowns: list[dict[str, Any]], pro
                   options: dict[str, Any]) -> list[tuple[str, Any]]:
     """The Executive Summary and Progress View drawn like the page, as (title, PNG) panels."""
     from src.modules.non_qualified_calls_visuals import (
-        executive_summary_panels, progress_view_panels, rate_panels, root_cause_panels, table_panels,
+        executive_summary_panels, lifecycle_panels, progress_view_panels, rate_panels, rca_insight_panels, root_cause_panels,
+        table_panels,
     )
 
     label = GRANULARITY_LABELS.get(progress['granularity'], 'Month')
@@ -259,7 +262,10 @@ def report_panels(summary: dict[str, Any], breakdowns: list[dict[str, Any]], pro
                     *(panel for title, columns, rows in root_cause_tables(root_causes)
                       for panel in table_panels(title, columns, rows))]
     rates = rate_panels(options['rates']) if options.get('rates') else []
-    return [*executive_summary_panels(summary, breakdowns, options), *rates, *progress_view_panels(progress, options, label),
+    # The Analysis Center: where the calls are in their lifecycle and how the root cause sources compare.
+    center = [*(lifecycle_panels(options['lifecycle']) if options.get('lifecycle') else []),
+              *(rca_insight_panels(options['rca_insights']) if options.get('rca_insights') else [])]
+    return [*executive_summary_panels(summary, breakdowns, options), *rates, *center, *progress_view_panels(progress, options, label),
             *tables, *analysis]
 
 
