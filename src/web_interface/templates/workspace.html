@@ -1313,14 +1313,12 @@
     submitButton.textContent = 'Starting upload…';
     try {
       // The upload goes on in the background on any page or workspace until its files are processed.
-      const upload = await window.DriveTestUploads.start(form, {
+      await window.DriveTestUploads.start(form, {
         workspaceId: form.dataset.workspaceId, workspaceName: form.dataset.workspaceName || 'Active workspace',
       });
       form.reset();
       picker.dispatchEvent(new Event('change', {bubbles: true}));
-      showInfoDialog(upload.persisted
-        ? 'The datasets are uploading in the background. You can keep working, change page or open another workspace: the upload continues and its datasets are processed in this workspace.'
-        : 'The datasets are uploading in the background. Keep this browser tab open until the upload ends: this browser does not keep the files when the page changes.', {
+      showInfoDialog('The datasets are uploading in the background, and each one is processed as soon as it is uploaded. You can keep working, change page or open another workspace: the upload continues and its datasets are processed in this workspace. If the browser cannot keep the files, its card asks you to keep this page open.', {
         title: 'Dataset upload', tone: 'info',
       });
     } catch (error) {

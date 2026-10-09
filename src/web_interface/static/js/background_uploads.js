@@ -45,15 +45,29 @@
       }
     });
   };
-  // Without IndexedDB (a private window) the upload still goes on while the page stays open.
-  const saveRecord = async (record) => {
+  // Keeping many large files can take a while, so the upload does not wait for it. Without IndexedDB
+  // (a private window, or files over the browser's quota) the upload goes on while the page stays open.
+  const saving = new Map();
+  const saveRecord = (record) => {
     memoryRecords.set(record.key, record);
-    return withStore('readwrite', (store) => store.put(record));
+    const saved = withStore('readwrite', (store) => store.put(record));
+    saving.set(record.key, saved);
+    return saved;
   };
   const removeRecord = async (record) => {
     memoryRecords.delete(record.key);
+    unsaved.delete(record.key);
+    await saving.get(record.key);
+    saving.delete(record.key);
     return withStore('readwrite', (store) => store.delete(record.key));
   };
+  // Uploads the browser could not keep stop when the page is left: leaving asks first.
+  const unsaved = new Set();
+  window.addEventListener('beforeunload', (event) => {
+    if (![...unsaved].some((key) => running.has(key))) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
   const listRecords = async () => {
     const stored = await withStore('readonly', (store) => store.getAll());
     const records = new Map((Array.isArray(stored) ? stored : []).map((record) => [record.key, record]));
@@ -70,6 +84,8 @@
     started_at: record.started_at,
     cancel: () => cancel(record),
     ...detail,
+    ...(unsaved.has(record.key) && detail.detail && !['completed', 'cancelled'].includes(detail.status)
+      ? {detail: `${detail.detail} · Keep this page open: the browser could not keep the files to resume on another page`} : {}),
   }}));
 
   const request = async (url, options = {}) => {
@@ -202,10 +218,12 @@
       workspace_name: payload.workspace_name || workspaceName, username: config.username, files,
       names: files.map((file) => file.name), kinds: form.dataset_kinds || [], started_at: Date.now() / 1000,
     };
-    const stored = await saveRecord(record);
     publish(record, {status: 'processing', progress: 0, detail: 'Starting upload', duration_seconds: 0});
     run(record);
-    return {...record, persisted: Boolean(stored)};
+    saveRecord(record).then((stored) => {
+      if (!stored && memoryRecords.has(record.key)) unsaved.add(record.key);
+    });
+    return record;
   }
 
   window.DriveTestUploads = {start};
