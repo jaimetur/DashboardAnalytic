@@ -671,6 +671,12 @@ def _loss_bars(slide, bars: list[dict[str, Any]], *, left: float, top: float, wi
 LOSS_FIELD_TITLES = {'Area': 'Map Area', 'City': 'City', 'Cluster': 'Cluster', 'Region': 'Region'}
 
 
+def _short_environment(label: str) -> str:
+    """The short name of an environment: the last word after its last " - " (Drive - Connecting Roads reads Roads)."""
+    words = str(label).split(' - ')[-1].split()
+    return words[-1] if words else str(label)
+
+
 def add_points_loss_slides(presentation, maps: list[dict[str, Any]], background: list[list[float]], *,
                            scoring_label: str, subtitle: str, new_slide: Callable,
                            boundaries: Callable[[str], dict] | None = None,
@@ -709,7 +715,7 @@ def add_points_loss_slides(presentation, maps: list[dict[str, Any]], background:
         bars = [area for area in ranking['areas'] if area['name'] != 'Not specified'][:MAX_LOSS_BARS]
         # All environments: each city or route names the environments where it loses points (not per Region or Cluster).
         labels = environment_labels or {}
-        bars = [{**area, 'name': f"{area['name']} ({', '.join(labels.get(name, name) for name in area['environments'])})"}
+        bars = [{**area, 'name': f"{area['name']} ({', '.join(_short_environment(labels.get(name, name)) for name in area['environments'])})"}
                 if area.get('environments') and field == 'City' else area for area in bars]
         share = sum(area['points'] for area in bars) / ranking['total'] if ranking['total'] else 0
         plural = {'City': 'cities and routes', 'Cluster': 'clusters', 'Region': 'regions'}.get(field, 'areas')

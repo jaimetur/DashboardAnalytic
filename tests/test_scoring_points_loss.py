@@ -185,7 +185,7 @@ def test_the_web_map_links_the_ranking_and_the_areas():
     assert "mode = real && insightSelections.get('points-loss-colour') === 'losses' ? 'losses' : 'top';" in script
     assert 'if (event.shiftKey && onSelect) onSelect(area, event); else apply(area);' in script
     # All Environments names the environments of each area.
-    assert "...(withEnvironments ? ['Environment'] : [])" in script
+    assert "...(withEnvironments ? ['Type'] : [])" in script
 
 
 def test_a_level_with_a_single_value_keeps_the_maps():

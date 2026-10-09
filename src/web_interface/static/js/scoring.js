@@ -4864,6 +4864,7 @@
         if (content instanceof Node) cell.append(content);
         else if (content && typeof content === 'object') {
           cell.textContent = content.text ?? '';
+          if (content.title) cell.title = content.title;
           if (content.className) cell.className = content.className;
           if (content.style) Object.assign(cell.style, content.style);
           if (content.bar) {
@@ -5235,8 +5236,9 @@
     // All environments: beside each city or route, the environments where it loses points (most first).
     // Regions and Clusters hold tests of every environment, so they leave the column out.
     const withEnvironments = entry.title === 'City' && bars.some(area => area.environments?.length);
-    const table = insightTable(['Area', ...(withEnvironments ? ['Environment'] : []), 'Points lost', 'Share'], bars.map(area => [area.name,
-      ...(withEnvironments ? [{text: (area.environments || []).map(name => environmentLabel(name)).join(', '),
+    const table = insightTable(['Area', ...(withEnvironments ? ['Type'] : []), 'Points lost', 'Share'], bars.map(area => [area.name,
+      ...(withEnvironments ? [{text: (area.environments || []).map(name => shortEnvironmentLabel(name)).join(', '),
+        title: (area.environments || []).map(name => environmentLabel(name)).join(', '),
         className: 'scoring-loss-environment'}] : []),
       gapBarCell(area.points, peak, {loss: true, total: true}),
       {text: `${insightNumber(area.share * 100, 1)}%`, className: 'scoring-insight-number'}]));
@@ -5744,6 +5746,13 @@
       return (leftIndex < 0 ? environmentOrder.length : leftIndex) - (rightIndex < 0 ? environmentOrder.length : rightIndex) || left.localeCompare(right);
     });
     return ordered.length || combinedIsAvailable ? ['all', ...ordered] : [];
+  }
+
+  // The short name of an environment for narrow columns: the last word after its last " - "
+  // ("Drive - Connecting Roads" reads Roads and "Drive - City" City).
+  function shortEnvironmentLabel(environment) {
+    const label = environmentLabel(environment);
+    return label.split(' - ').pop().trim().split(/\s+/).pop() || label;
   }
 
   function environmentLabel(environment) {
