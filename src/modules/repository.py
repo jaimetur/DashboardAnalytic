@@ -704,18 +704,25 @@ class Repository:
         """Migrate the former hardcoded chart order and colours into workspace data."""
         defaults = {
             'operator': (
-                ('VF', '#E15759', ('Vodafone', 'Vodafone UK', 'VFUK')),
-                ('3', '#F28E2B', ('Three', 'Three UK', '3 UK')),
-                ('EE', '#76B7B2', ('EE UK', 'Everything Everywhere')),
-                ('O2', '#4E79A7', ('Telefonica', 'Telefonica O2')),
+                ('EE', '#76B7B2', ('EE UK', 'EE_UK', 'EEUK', 'Everything Everywhere', 'Everything_Everywhere')),
+                ('3', '#000000', ('3 UK', '3_UK', '3UK', 'Three', 'Three UK', 'Three_UK')),
+                ('VF', '#F34851', ('Vodafone UK', 'VF UK', 'VFUK', 'Vodafone')),
+                ('VF SA', '#801A21', (
+                    'Vodafone SA', 'VF SA UK', 'VF UK SA', 'VFSA', 'VFSA UK', 'VFUK SA', 'Vodafone SA UK', 'Vodafone UK SA',
+                )),
+                ('VF VoNR', '#801A21', ('Vodafone VoNR', 'VF_VoNR')),
+                ('O2', '#69B4EC', ('O2 (UK)', 'O2 UK', 'O2_UK', 'O2(UK)', 'Telefonica', 'Telefónica', 'Telefonica O2')),
+                ('Lebara', '#6F42C1', ('LEB', 'Lebara_UK', 'LUK')),
             ),
             'vendor': (
-                ('Ericsson', '#2E8B57', ()), ('Huawei', '#E15759', ()),
-                ('Samsung', '#7B3FB5', ()), ('NSN', '#4E79A7', ()),
-                ('Ericsson (Mixed)', '#D9A514', ('Ericsson Mixed',)),
-                ('Mixed (non-Ericsson)', '#B9770E', ('Non-Ericsson Mixed', 'Non Ericsson Mixed')),
-                ('Mixed Vendor', '#D9A514', ('Mixed',)),
-                ('Other Vendor', '#D9A514', ('Other',)),
+                ('Ericsson', '#0255AD', ()),
+                ('Ericsson (Mixed)', '#002F61', ('Ericsson Mixed', 'Ericsson-Mixed')),
+                ('Huawei', '#FBBD00', ()),
+                ('Samsung', '#008521', ()),
+                ('NSN', '#8C00FF', ('NNS', 'Nokia')),
+                ('SCW', '#6F42C1', ()),
+                ('Mixed (non-Ericsson)', '#5E4F2E', ('Mixed', 'Non Ericsson Mixed', 'Non-Ericsson Mixed')),
+                ('Other Vendor', '#5E4F26', ('Other',)),
                 ('(blank)', '#7A8791', ('Blank', 'nan', 'none')),
             ),
         }
@@ -758,7 +765,8 @@ class Repository:
         # Workspaces seeded before the unified Vodafone/Three vendor rule also
         # receive its Ericsson (Mixed) and Mixed (non-Ericsson) groups, once.
         if not conn.execute("SELECT 1 FROM workspace_state WHERE key = 'vendor_mixed_groups_v2'").fetchone():
-            for canonical, color, aliases in defaults['vendor'][4:6]:
+            mixed_groups = ('Ericsson (Mixed)', 'Mixed (non-Ericsson)')
+            for canonical, color, aliases in [entry for entry in defaults['vendor'] if entry[0] in mixed_groups]:
                 position = int(conn.execute(
                     "SELECT COALESCE(MAX(position), -1) + 1 FROM chart_mapping_groups WHERE mapping_type = 'vendor'"
                 ).fetchone()[0])

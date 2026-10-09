@@ -422,13 +422,15 @@ Use **Add label** to create a label with its colour and possible names (one per 
 
 Renaming a label updates exact matching references in Report Templates and saved Dashboards, and the values of the Operator, Operator_Vendor, Vendor_Operator and Vendor filters saved in Reporting Jobs (including the GAP reference operator and the Scoring report scenarios), saved Scoring report configurations, the last Scoring calculation, the CDR Analysis filters of each CDR and the Non-Qualified Calls filters (`VF_UK` → `VF` also turns `VF_UK_Ericsson` into `VF_Ericsson` and `Ericsson_VF_UK` into `Ericsson_VF`). Campaign filters keep the full campaign value, so changing the Campaign Maps never requires renaming them.
 
-The colour picker sets the label's chart theme colour; charts can derive related shades to distinguish campaigns or series. Every filter, table, chart, legend and report of the tool shows the label, and choosing it selects all its names; only Preview Dataset shows the names as they are in the CDRs.
+A new workspace starts with the labels, in this order, EE (`#76B7B2`), 3 (`#000000`), VF (`#F34851`), VF SA and VF VoNR (`#801A21`), O2 (`#69B4EC`) and Lebara (`#6F42C1`), each with the usual ways it is written in the CDRs (for example `Vodafone UK`, `VFUK` or `Vodafone` for VF and `O2 (UK)` or `Telefonica` for O2). The colour picker sets the label's chart theme colour; charts can derive related shades to distinguish campaigns or series. Every filter, table, chart, legend and report of the tool shows the label, and choosing it selects all its names; only Preview Dataset shows the names as they are in the CDRs.
 
 The maps do not rewrite source workbooks, stored CDR rows or combined CDR tables. Saving, moving or deleting a label clears chart caches so later views use the new settings.
 
 ### Vendor Maps
 
 Vendor Maps have the same two subpanels: **1 · Vendor names found in the CDRs** lists every Vendor name of the ready CDRs (the Operators without a Vendor, `<Operator> - All`, are not Vendors) and gives each one a label exactly as in the [Operator Maps](#operator-maps), and **2 · Vendor labels** has the same **Order**, **Colour**, **Label**, **Possible names in the CDRs** and **Actions** controls, with **Add label**, **Save Labels**, **Move up**, **Move down** and confirmed **Delete**. Names are matched without regard to case.
+
+A new workspace starts with the Vendor labels, in this order, Ericsson (`#0255AD`), Ericsson (Mixed) (`#002F61`), Huawei (`#FBBD00`), Samsung (`#008521`), NSN (`#8C00FF`, also `Nokia` and `NNS`), SCW (`#6F42C1`), Mixed (non-Ericsson) (`#5E4F2E`, also `Mixed`), Other Vendor (`#5E4F26`) and (blank) (`#7A8791`).
 
 Renaming a Vendor label updates exact matching Report Template and saved Dashboard references, and the same saved filters as an Operator rename.
 

@@ -2662,10 +2662,10 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         assert exported_mappings['version'] == 1
         assert exported_mappings['spectrum_holdings'] == []
         assert exported_mappings['campaign_map']['format'] == '{year}-Q{quarter}{-mode}'
-        assert exported_mappings['operator_mappings'][0]['canonical'] == 'VF'
-        assert exported_mappings['operator_mappings'][0]['color'] == '#E15759'
+        assert exported_mappings['operator_mappings'][0]['canonical'] == 'EE'
+        assert exported_mappings['operator_mappings'][0]['color'] == '#76B7B2'
         assert exported_mappings['vendor_mappings'][0]['canonical'] == 'Ericsson'
-        assert exported_mappings['vendor_mappings'][0]['color'] == '#2E8B57'
+        assert exported_mappings['vendor_mappings'][0]['color'] == '#0255AD'
         # Map Areas travel with the Mappings & Reference Data, with their polygons.
         assert [layer['country_code'] for layer in exported_mappings['map_areas']['layers']] == ['ESP']
         assert list(exported_mappings['map_areas']['layers'][0]['boundaries']) == ['Madrid']
@@ -6289,11 +6289,11 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     initial_mappings = app_module.repository.list_operator_mappings()
     assert initial_mappings['vodafone uk'] == 'VF'
     assert initial_mappings['three uk'] == '3'
-    assert [group['canonical'] for group in app_module.repository.list_operator_mapping_groups()[:4]] == [
-        'VF', '3', 'EE', 'O2',
+    assert [group['canonical'] for group in app_module.repository.list_operator_mapping_groups()[:7]] == [
+        'EE', '3', 'VF', 'VF SA', 'VF VoNR', 'O2', 'Lebara',
     ]
-    assert [group['color'] for group in app_module.repository.list_operator_mapping_groups()[:4]] == [
-        '#E15759', '#F28E2B', '#76B7B2', '#4E79A7',
+    assert [group['color'] for group in app_module.repository.list_operator_mapping_groups()[:7]] == [
+        '#76B7B2', '#000000', '#F34851', '#801A21', '#801A21', '#69B4EC', '#6F42C1',
     ]
     app_module.repository.replace_operator_mapping_group(
         None, 'Legacy Carrier', ['Legacy A', 'Legacy B'],
@@ -6346,8 +6346,11 @@ def test_admin_vendor_mappings_support_aliases_colours_and_reordering(client) ->
 
     login(client)
     groups = app_module.repository.list_vendor_mapping_groups()
-    assert [group['canonical'] for group in groups[:4]] == ['Ericsson', 'Huawei', 'Samsung', 'NSN']
-    assert [group['color'] for group in groups[:4]] == ['#2E8B57', '#E15759', '#7B3FB5', '#4E79A7']
+    assert [(group['canonical'], group['color']) for group in groups[:9]] == [
+        ('Ericsson', '#0255AD'), ('Ericsson (Mixed)', '#002F61'), ('Huawei', '#FBBD00'), ('Samsung', '#008521'),
+        ('NSN', '#8C00FF'), ('SCW', '#6F42C1'), ('Mixed (non-Ericsson)', '#5E4F2E'), ('Other Vendor', '#5E4F26'),
+        ('(blank)', '#7A8791'),
+    ]
 
     created = client.post('/workspace-config/vendor-mappings/save', data={
         'canonical_value': 'Nokia', 'aliases': 'Nokia Networks', 'color': '#123456',
@@ -6391,7 +6394,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
 
     login(client)
     app_module.repository.replace_operator_mapping_group(
-        None, 'VF_SA', ['VF SA UK'], '#8000FF',
+        None, 'VF_SA', ['VF-SA UK'], '#8000FF',
     )
     app_module.repository.replace_vendor_mapping_group(None, 'SA', [], '#ABCDEF')
     entry = app_module.CatalogEntry(
