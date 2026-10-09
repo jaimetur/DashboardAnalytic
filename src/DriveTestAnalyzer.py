@@ -2906,6 +2906,35 @@ PASSIVE_APPLICATION_REQUEST_PATHS = {
 }
 
 
+# Requests sent by pages on their own with a method other than GET (the polling refresh of a Scoring calculation).
+PASSIVE_APPLICATION_MUTATIONS = {'/api/scoring/jobs/match'}
+
+
+def is_interactive_request(method: str, path: str, accept: str, background_refresh: bool = False) -> bool:
+    """Whether a request means someone is using the application: a page they open, or something they send.
+
+    Pages poll the API on their own (job progress, background tasks, transfer offers…) with GET requests, which
+    never count as activity, so the work kept for an idle server (Dashboard warm-up, Non-Qualified Calls indexing)
+    is not held back by an open page.
+    """
+    # A refresh a page sends on its own says so with the X-Background-Refresh header.
+    if background_refresh or path in PASSIVE_APPLICATION_REQUEST_PATHS or path.startswith('/static/'):
+        return False
+    if method.upper() in {'GET', 'HEAD', 'OPTIONS'}:
+        return not path.startswith('/api/') and 'text/html' in accept
+    return path not in PASSIVE_APPLICATION_MUTATIONS
+
+
+IDLE_TASK_CALLBACKS: list[tuple[float, Callable[[], None]]] = []
+
+
+def register_idle_task(callback: Callable[[], None], idle_seconds: float) -> None:
+    """Run ``callback`` every half minute while nobody has used the application for ``idle_seconds`` and no
+    background work is queued; it decides itself whether there is anything to do."""
+    with APPLICATION_ACTIVITY_LOCK:
+        IDLE_TASK_CALLBACKS.append((idle_seconds, callback))
+
+
 def application_idle_seconds() -> float:
     """Seconds since the last user request that was not a background poll."""
     with APPLICATION_ACTIVITY_LOCK:
@@ -2927,6 +2956,15 @@ def idle_dashboard_warmup_loop(stop_event: Event) -> None:
             activity_at = LAST_INTERACTIVE_APPLICATION_ACTIVITY
             callback = IDLE_DASHBOARD_WARMUP_CALLBACK
             already_warmed = LAST_IDLE_DASHBOARD_WARMUP_ACTIVITY >= activity_at
+            idle_tasks = list(IDLE_TASK_CALLBACKS)
+        schedulers_idle = BACKGROUND_TASK_SCHEDULER.is_idle and EXPORT_TASK_SCHEDULER.is_idle
+        for idle_seconds, idle_task in idle_tasks:
+            if schedulers_idle and monotonic() - activity_at >= idle_seconds:
+                try:
+                    idle_task()
+                except Exception:
+                    # Idle work is optional and must never stop the monitor.
+                    pass
         if (
             callback is None
             or already_warmed
@@ -3111,7 +3149,8 @@ async def track_interactive_application_requests(request: Request, call_next):
             else {'authenticated': False, 'active_workspace_id': None, 'sizes': {}, 'cache_sizes': {}}
         )
         return JSONResponse(payload, headers={'Cache-Control': 'no-store'})
-    if request.url.path not in PASSIVE_APPLICATION_REQUEST_PATHS:
+    if is_interactive_request(request.method, request.url.path, request.headers.get('accept', ''),
+                              request.headers.get('x-background-refresh') == '1'):
         with APPLICATION_ACTIVITY_LOCK:
             global LAST_INTERACTIVE_APPLICATION_ACTIVITY
             LAST_INTERACTIVE_APPLICATION_ACTIVITY = monotonic()
@@ -11830,7 +11869,13 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
     task_provider = getattr(sys.modules[__name__], 'ppt_dashboard_tasks', None)
     if callable(task_provider):
         tasks.extend(task_provider(workspace))
+    for provider in BACKGROUND_TASK_PROVIDERS:
+        tasks.extend(provider(workspace))
     return tasks
+
+
+# The background tasks of other modules (Non-Qualified Calls indexing), as cards like the tasks above.
+BACKGROUND_TASK_PROVIDERS: list[Callable[[Workspace], list[dict[str, Any]]]] = []
 
 
 def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> list[dict[str, Any]]:

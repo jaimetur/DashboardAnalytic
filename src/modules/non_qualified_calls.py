@@ -35,12 +35,13 @@ import json
 import math
 import re
 import tempfile
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 from io import BytesIO
 from threading import Lock
-from typing import Any
+from typing import Any, Callable
 
 from src.modules.cdr_stage import CDR_STAGE_LABELS, dataset_cdr_stage
 from src.modules.column_names import campaign_sort_key, column_identity
@@ -829,6 +830,22 @@ def _rebuild_versions(connection: Any, affected: set[str]) -> None:
     """)
 
 
+def _index_changes(task_repository: Any, force: bool = False) -> tuple[list[str], str, dict[int, Any], list[int], list[Any]]:
+    """The indexed CDR columns and their signature, the CDRs, the indexed CDRs now removed and the CDRs to index."""
+    cdr_columns = indexed_cdr_columns(task_repository)
+    signature = _columns_signature(cdr_columns)
+    datasets = {int(row['id']): row for row in _cdr_datasets(task_repository)}
+    with task_repository.connection() as connection:
+        indexed = {
+            int(row['dataset_id']): str(row['revision'])
+            for row in connection.execute(f'SELECT dataset_id, revision FROM {NQ_CALL_SOURCES_TABLE}').fetchall()
+        }
+    removed = [dataset_id for dataset_id in indexed if dataset_id not in datasets]
+    changed = [row for dataset_id, row in datasets.items()
+               if force or indexed.get(dataset_id) != _dataset_revision(row, signature)]
+    return cdr_columns, signature, datasets, removed, changed
+
+
 def sync_nq_calls(task_repository: Any, *, force: bool = False) -> dict[str, Any]:
     """Index the NQ calls and the population of new or changed CDRs and forget removed ones; ``force`` indexes
     every CDR again (Reindex)."""
@@ -837,17 +854,7 @@ def sync_nq_calls(task_repository: Any, *, force: bool = False) -> dict[str, Any
     with _sync_locks_guard:
         lock = _sync_locks.setdefault(path, Lock())
     with lock:
-        cdr_columns = indexed_cdr_columns(task_repository)
-        signature = _columns_signature(cdr_columns)
-        datasets = {int(row['id']): row for row in _cdr_datasets(task_repository)}
-        with task_repository.connection() as connection:
-            indexed = {
-                int(row['dataset_id']): str(row['revision'])
-                for row in connection.execute(f'SELECT dataset_id, revision FROM {NQ_CALL_SOURCES_TABLE}').fetchall()
-            }
-        removed = [dataset_id for dataset_id in indexed if dataset_id not in datasets]
-        changed = [row for dataset_id, row in datasets.items()
-                   if force or indexed.get(dataset_id) != _dataset_revision(row, signature)]
+        cdr_columns, signature, datasets, removed, changed = _index_changes(task_repository, force)
         migrating = str(task_repository.get_workspace_state(KEY_SCHEME_STATE_KEY) or '') != KEY_SCHEME
         moved = 0
         if removed or changed:
@@ -898,6 +905,65 @@ def sync_nq_calls(task_repository: Any, *, force: bool = False) -> dict[str, Any
             synced_at = connection.execute(f'SELECT MAX(synced_at) FROM {NQ_CALL_SOURCES_TABLE}').fetchone()[0]
     return {'datasets': len(datasets), 'reindexed': len(changed), 'removed': len(removed),
             'calls': int(total or 0), 'synced_at': synced_at or ''}
+
+
+# ---------------------------------------------------------------------------
+# Indexing in the background: new, changed or removed CDRs are indexed once the server has been idle for a while
+# (or at once the first time, and on Reindex), never while a page waits for its calls.
+NQ_INDEX_IDLE_SECONDS = 2 * 60
+_index_jobs: dict[str, dict[str, Any]] = {}
+_index_jobs_guard = Lock()
+
+
+def _workspace_key(path: Any) -> str:
+    return str(Path(str(path)).resolve())
+
+
+def nq_index_job(database_path: Any) -> dict[str, Any] | None:
+    with _index_jobs_guard:
+        job = _index_jobs.get(_workspace_key(database_path))
+        return dict(job) if job else None
+
+
+def start_nq_index(task_repository: Any, submit: Callable[..., Any], *, force: bool = False) -> dict[str, Any]:
+    """Queue the indexing of the workspace (every CDR again with ``force``), unless it is already queued or running."""
+    key = _workspace_key(task_repository.db_path)
+    with _index_jobs_guard:
+        current = _index_jobs.get(key)
+        if current and current['status'] in {'queued', 'processing'}:
+            return dict(current)
+        job = {'status': 'queued', 'force': force, 'queued_at': time.time(), 'started_at': None, 'finished_at': None,
+               'error': '', 'result': None}
+        _index_jobs[key] = job
+
+    def run() -> None:
+        with _index_jobs_guard:
+            job.update(status='processing', started_at=time.time())
+        try:
+            result = sync_nq_calls(task_repository, force=force)
+        except Exception as exc:  # The next idle period or a Reindex tries again.
+            with _index_jobs_guard:
+                job.update(status='failed', error=str(exc), finished_at=time.time())
+            return
+        with _index_jobs_guard:
+            job.update(status='ready', result=result, finished_at=time.time())
+
+    submit(run)
+    with _index_jobs_guard:
+        return dict(job)
+
+
+def nq_index_status(task_repository: Any) -> dict[str, Any]:
+    """The indexed calls and CDRs, when they were last indexed, the CDRs waiting to be indexed and the running job."""
+    _columns, _signature, datasets, removed, changed = _index_changes(task_repository)
+    with task_repository.connection() as connection:
+        total = connection.execute(f'SELECT COUNT(DISTINCT call_key) FROM {NQ_CALLS_TABLE}').fetchone()[0]
+        synced_at = connection.execute(f'SELECT MAX(synced_at) FROM {NQ_CALL_SOURCES_TABLE}').fetchone()[0]
+    job = nq_index_job(task_repository.db_path)
+    running = bool(job and job['status'] in {'queued', 'processing'})
+    return {'datasets': len(datasets), 'calls': int(total or 0), 'synced_at': synced_at or '',
+            'pending': len(removed) + len(changed), 'indexing': running, 'reindexing': running and bool(job['force']),
+            'error': job['error'] if job and job['status'] == 'failed' else ''}
 
 
 # ---------------------------------------------------------------------------
@@ -3227,6 +3293,36 @@ def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
 # ---------------------------------------------------------------------------
 def install_non_qualified_calls_routes(core: Any) -> None:
     from fastapi import Depends, HTTPException, Request
+
+    def index_when_idle() -> None:
+        """Index the new, changed or removed CDRs of the active workspace once nobody has used the server for a while,
+        if the module has been opened there."""
+        workspace = core.active_workspace
+        if not workspace:
+            return
+        repository = core.Repository(workspace.database_path, global_db_path=core.repository.global_db_path,
+                                     workspace_registry_db_path=core.workspace_registry.registry_path)
+        with repository.connection() as connection:
+            if not connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                                      (NQ_CALL_SOURCES_TABLE,)).fetchone():
+                return
+        status = nq_index_status(repository)
+        if status['pending'] and not status['indexing']:
+            start_nq_index(repository, core.submit_background_task)
+
+    def index_tasks(workspace: Any) -> list[dict[str, Any]]:
+        job = nq_index_job(workspace.database_path)
+        if not job or (job['status'] in {'ready', 'failed'} and time.time() - (job['finished_at'] or 0) > 5):
+            return []
+        detail = 'Indexing the calls of every CDR again' if job['force'] else 'Indexing the calls of new or changed CDRs'
+        return [{
+            'id': f'nq-index:{workspace.id}', 'label': 'Non-Qualified Calls indexing',
+            'detail': job['error'] or detail, 'status': job['status'], 'progress': None,
+            'queued_at': job['queued_at'], 'started_at': job['started_at'], 'completed_at': job['finished_at'],
+        }]
+
+    core.register_idle_task(index_when_idle, NQ_INDEX_IDLE_SECONDS)
+    core.BACKGROUND_TASK_PROVIDERS.append(index_tasks)
     from fastapi.responses import HTMLResponse, JSONResponse, Response
     from pydantic import BaseModel, Field
 
@@ -3441,7 +3537,11 @@ def install_non_qualified_calls_routes(core: Any) -> None:
     @core.app.get('/api/non-qualified-calls/state')
     def nq_state(user=Depends(core.current_user)) -> JSONResponse:
         repository = workspace_repository(user)
-        sync = sync_nq_calls(repository)
+        sync = nq_index_status(repository)
+        if sync['pending'] and not sync['synced_at'] and not sync['indexing']:
+            # Nothing indexed yet (the first time the module opens): it is indexed at once, in the background.
+            start_nq_index(repository, core.submit_background_task)
+            sync = nq_index_status(repository)
         return JSONResponse({
             'sync': sync, 'options': list_options(repository), 'filter_options': filter_options(repository),
             'datasets': indexed_datasets(repository), 'users': workspace_users(),
@@ -3460,12 +3560,17 @@ def install_non_qualified_calls_routes(core: Any) -> None:
 
     @core.app.post('/api/non-qualified-calls/reindex')
     def nq_reindex(user=Depends(core.current_user)) -> JSONResponse:
-        """Index the calls of every CDR again, keeping their follow-up."""
+        """Index the calls of every CDR again in the background, keeping their follow-up."""
         repository = workspace_repository(user)
-        sync = sync_nq_calls(repository, force=True)
+        start_nq_index(repository, core.submit_background_task, force=True)
         if hasattr(repository, 'try_add_log'):
-            repository.try_add_log(user.username, 'nq_calls_reindexed', json.dumps(sync))
-        return JSONResponse({'sync': sync})
+            repository.try_add_log(user.username, 'nq_calls_reindex_queued', '{}')
+        return JSONResponse({'sync': nq_index_status(repository)})
+
+    @core.app.get('/api/non-qualified-calls/index-status')
+    def nq_index_status_route(user=Depends(core.current_user)) -> JSONResponse:
+        """Whether the indexing still runs, for the page to reload its calls once it ends."""
+        return JSONResponse({'sync': nq_index_status(workspace_repository(user))})
 
     @core.app.put('/api/non-qualified-calls/fields')
     def nq_save_fields(payload: FieldsPayload, user=Depends(editor_user)) -> JSONResponse:
@@ -3496,14 +3601,14 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         """The optional columns of the Calls table: built-in ones and CDR columns (indexed again)."""
         repository = workspace_repository(user)
         columns = translate(lambda: save_table_columns(repository, payload.builtin, payload.cdr, user.username, payload.export_cdr))
-        sync_nq_calls(repository)
-        return JSONResponse({'table_columns': columns})
+        # New CDR columns are indexed in the background.
+        start_nq_index(repository, core.submit_background_task)
+        return JSONResponse({'table_columns': columns, 'sync': nq_index_status(repository)})
 
     @core.app.post('/api/non-qualified-calls/rates')
     def nq_rates_route(payload: ExportPayload, user=Depends(core.current_user)) -> JSONResponse:
         """Calls and Non-Qualified Calls of every campaign and operator."""
         repository = workspace_repository(user)
-        sync_nq_calls(repository)
         return JSONResponse(nq_rates(repository, payload.filters))
 
     @core.app.put('/api/non-qualified-calls/filters')
@@ -3513,9 +3618,8 @@ def install_non_qualified_calls_routes(core: Any) -> None:
     @core.app.post('/api/non-qualified-calls/calls')
     def nq_calls(payload: QueryPayload, user=Depends(core.current_user)) -> JSONResponse:
         repository = workspace_repository(user)
-        sync = sync_nq_calls(repository)
         result = query_calls(repository, payload.model_dump(), user.username)
-        return JSONResponse({**result, 'sync': sync})
+        return JSONResponse({**result, 'sync': nq_index_status(repository)})
 
     @core.app.get('/api/non-qualified-calls/calls/{call_key}')
     def nq_call(call_key: str, user=Depends(core.current_user)) -> JSONResponse:
@@ -3599,13 +3703,11 @@ def install_non_qualified_calls_routes(core: Any) -> None:
     @core.app.post('/api/non-qualified-calls/root-causes/stats')
     def nq_root_cause_stats(payload: RootCauseStatsPayload, user=Depends(core.current_user)) -> JSONResponse:
         repository = workspace_repository(user)
-        sync_nq_calls(repository)
         return JSONResponse(root_cause_stats(repository, payload.filters, user.username, payload.include_suggestions))
 
     @core.app.post('/api/non-qualified-calls/progress')
     def nq_progress(payload: ProgressPayload, user=Depends(core.current_user)) -> JSONResponse:
         repository = workspace_repository(user)
-        sync_nq_calls(repository)
         return JSONResponse(progress_stats(repository, payload.filters, user.username, payload.granularity))
 
     @core.app.post('/api/non-qualified-calls/export/{export_format}')
@@ -3614,7 +3716,6 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         if export_format not in {'powerpoint', 'word'}:
             raise HTTPException(404, 'Unsupported export type.')
         repository = workspace_repository(user)
-        sync_nq_calls(repository)
         executive, progress, options, lines = summary_parts(repository, payload.filters, user.username, payload.granularity,
                                                             payload.include_suggestions)
         suffix = '.pptx' if export_format == 'powerpoint' else '.docx'
@@ -3631,7 +3732,6 @@ def install_non_qualified_calls_routes(core: Any) -> None:
     @core.app.post('/api/non-qualified-calls/export')
     def nq_export(payload: ExportPayload, user=Depends(core.current_user)) -> Response:
         repository = workspace_repository(user)
-        sync_nq_calls(repository)
         content = export_workbook(repository, payload.filters, user.username)
         stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
         name = re.sub(r'[^A-Za-z0-9._-]+', '_', f'{core.active_workspace.name}_non-qualified-calls_{stamp}.xlsx')

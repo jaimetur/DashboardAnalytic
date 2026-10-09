@@ -1275,11 +1275,37 @@
   };
 
   // -- loading ----------------------------------------------------------------
-  const renderSync = (sync) => {
+  // The indexing runs in the background (when the server is idle, the first time, or on Reindex): the badge says
+  // so, and the page follows it with a light status request, then reloads its calls.
+  let indexWatch = null;
+  const watchIndexing = () => {
+    if (indexWatch) return;
+    indexWatch = window.setTimeout(async function check() {
+      try {
+        const {sync} = await api('/api/non-qualified-calls/index-status');
+        if (sync.indexing) {
+          renderSync(sync, {watch: false});
+          indexWatch = window.setTimeout(check, 4000);
+          return;
+        }
+        indexWatch = null;
+        await loadState();
+      } catch (_error) {
+        indexWatch = window.setTimeout(check, 8000);
+      }
+    }, 4000);
+  };
+  const renderSync = (sync, {watch = true} = {}) => {
     if (!sync) return;
     const when = sync.synced_at ? ` · indexed ${relativeTime(sync.synced_at)}` : '';
-    $('nq-sync').textContent = `${number(sync.calls)} Non-Qualified Calls in ${number(sync.datasets)} CDRs${when}`;
-    $('nq-sync').title = sync.synced_at ? `CDRs last indexed ${exactTime(sync.synced_at)}` : '';
+    const pending = sync.indexing ? (sync.reindexing ? ' · reindexing every CDR…' : ' · indexing…')
+      : sync.pending ? ` · ${number(sync.pending)} CDR${sync.pending === 1 ? '' : 's'} waiting to be indexed` : '';
+    $('nq-sync').textContent = `${number(sync.calls)} Non-Qualified Calls in ${number(sync.datasets)} CDRs${when}${pending}`;
+    $('nq-sync').title = [sync.synced_at ? `CDRs last indexed ${exactTime(sync.synced_at)}` : '',
+      sync.pending && !sync.indexing ? 'New or changed CDRs are indexed once the server is idle, or now with Reindex' : '',
+      sync.error ? `The last indexing failed: ${sync.error}` : ''].filter(Boolean).join('\n');
+    $('nq-refresh').disabled = Boolean(sync.indexing);
+    if (sync.indexing && watch) watchIndexing();
   };
   async function loadCalls({quiet = false} = {}) {
     const token = ++state.requestToken;
@@ -1293,6 +1319,8 @@
       const result = await api('/api/non-qualified-calls/calls', {
         method: 'POST',
         body: JSON.stringify({filters, sort: state.sort, direction: state.direction, page: state.page, page_size: state.pageSize}),
+        // A quiet reload is the page keeping itself current, not someone using the application.
+        ...(quiet ? {headers: {'X-Background-Refresh': '1'}} : {}),
       });
       if (token !== state.requestToken) return;
       state.result = result;
@@ -2349,19 +2377,16 @@
     $('nq-search').value = '';
     scheduleLoad();
   });
-  // Reindex: the calls of every CDR are indexed again (their follow-up is kept), then the page reloads them.
+  // Reindex: the calls of every CDR are indexed again in the background (their follow-up is kept); the page
+  // reloads them once it ends.
   $('nq-refresh').addEventListener('click', async () => {
-    const button = $('nq-refresh');
-    button.disabled = true;
-    globalThis.showLoadingOverlay?.('Reindexing Non-Qualified Calls', 'Indexing the calls of every CDR again. Their follow-up is kept.');
+    $('nq-refresh').disabled = true;
     try {
-      await api('/api/non-qualified-calls/reindex', {method: 'POST'});
-      await loadState();
+      const {sync} = await api('/api/non-qualified-calls/reindex', {method: 'POST'});
+      renderSync(sync);
     } catch (error) {
       $('nq-sync').textContent = error.message;
-    } finally {
-      globalThis.hideLoadingOverlay?.();
-      button.disabled = false;
+      $('nq-refresh').disabled = false;
     }
   });
   $('nq-page-size').addEventListener('change', (event) => { state.pageSize = Number(event.target.value) || 50; state.page = 1; loadCalls(); });

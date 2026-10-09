@@ -10914,10 +10914,12 @@ def test_periodic_page_polls_do_not_count_as_application_activity(client) -> Non
         app_module.LAST_INTERACTIVE_APPLICATION_ACTIVITY = 0.0
     # Pages check incoming transfers and backups on their own; Dashboard charts are
     # still prepared once nobody uses the application for five minutes.
-    for path in ('/admin/import-export/transfers/offers', '/api/admin/backup-status', '/api/background-tasks'):
+    for path in ('/admin/import-export/transfers/offers', '/api/admin/backup-status', '/api/background-tasks',
+                 '/api/scoring/jobs', '/api/non-qualified-calls/index-status'):
         client.get(path)
     assert app_module.LAST_INTERACTIVE_APPLICATION_ACTIVITY == 0.0
-    client.get('/workspace')
+    # A page opened in the browser is activity.
+    client.get('/workspace', headers={'Accept': 'text/html,application/xhtml+xml'})
     assert app_module.LAST_INTERACTIVE_APPLICATION_ACTIVITY > 0.0
 
 

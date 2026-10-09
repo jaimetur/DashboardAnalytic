@@ -5,11 +5,23 @@ import zipfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from openpyxl import load_workbook
 
 import src.DriveTestAnalyzer as core
 from src.modules import non_qualified_calls as nq
 from src.modules.repository import local_now_iso
+
+
+@pytest.fixture(autouse=True)
+def indexing_runs_at_once(monkeypatch):
+    """The background indexing runs at once, so each test reads the calls it has just indexed."""
+    monkeypatch.setattr(core, 'submit_background_task', lambda callback, *args: callback(*args))
+
+
+def index_cdrs():
+    """Index the new or changed CDRs of the active workspace, as the server does once it is idle."""
+    nq.sync_nq_calls(core.repository)
 
 
 def login(client, username='super', password='super123'):
@@ -76,6 +88,7 @@ def data_rows() -> pd.DataFrame:
 
 
 def query(client, **payload):
+    index_cdrs()
     response = client.post('/api/non-qualified-calls/calls', json=payload)
     assert response.status_code == 200, response.text
     return response.json()
@@ -180,8 +193,9 @@ def test_nq_calls_are_indexed_tracked_and_commented(client, tmp_path):
     # Processing the same CDR again keeps the follow-up of its calls.
     core.repository.replace_dataset_rows(voice_id, voice_rows())
     core.repository.update_dataset_profile(voice_id, processed_at=local_now_iso(), updated_at=local_now_iso())
+    assert client.get('/api/non-qualified-calls/index-status').json()['sync']['pending'] == 1
     again = query(client, filters={'service': ['voice'], 'status': ['Under Investigation']})
-    assert again['sync']['reindexed'] == 1 and again['total'] == 1 and again['calls'][0]['call_key'] == key
+    assert again['sync']['pending'] == 0 and again['total'] == 1 and again['calls'][0]['call_key'] == key
     assert query(client, filters={'open_only': True})['total'] == 4
     client.patch(url, json={'changes': {'status': 'Resolved'}})
     assert query(client, filters={'open_only': True})['total'] == 3
@@ -850,6 +864,7 @@ def test_nq_rate_of_each_campaign_and_operator(client, tmp_path):
     add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'voice', voice_rows())
     add_cdr(tmp_path, 'NetCheck_UK_CDR_Data_2026_Q1.xlsx', 'data', data_rows())
     login(client)
+    index_cdrs()
     rates = client.post('/api/non-qualified-calls/rates', json={'filters': {}}).json()
     voice = next(matrix for matrix in rates['matrices'] if matrix['service'] == 'voice')
     cells = voice['cells']['UK_Q1_2026']
@@ -1038,8 +1053,44 @@ def test_join_id_filter_and_reindex(client, tmp_path):
     assert query(client, filters={'join_id': ['0xb2']})['total'] == 1
     assert query(client, filters={'join_id': ['0xA1', '0xC3']})['total'] == 2
     assert nq.normalize_saved_filters({'join_id': ['0xA1']}) == {'join_id': ['0xA1']}
-    # Reindex indexes every CDR again, also when none has changed.
-    assert client.get('/api/non-qualified-calls/state').json()['sync']['reindexed'] == 0
+    # Reindex indexes every CDR again in the background, also when none has changed.
+    assert client.get('/api/non-qualified-calls/state').json()['sync']['pending'] == 0
     reindexed = client.post('/api/non-qualified-calls/reindex').json()['sync']
-    assert reindexed['reindexed'] == 1 and reindexed['calls'] == first['calls']
+    assert reindexed['calls'] == first['calls'] and not reindexed['indexing']
+    assert nq.nq_index_job(core.repository.db_path)['result']['reindexed'] == 1
+
+
+def test_calls_are_indexed_in_the_background_when_the_server_is_idle(client, tmp_path, monkeypatch):
+    enable_module()
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'voice', voice_rows())
+    login(client)
+    # The first time the module opens, its CDRs are indexed at once.
+    assert client.get('/api/non-qualified-calls/state').json()['sync']['pending'] == 0
+    calls = client.post('/api/non-qualified-calls/calls', json={}).json()['sync']['calls']
+    # A new CDR waits: the requests of the page never index.
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q2.xlsx', 'voice', voice_rows())
+    waiting = client.post('/api/non-qualified-calls/calls', json={}).json()['sync']
+    assert waiting['pending'] == 1 and waiting['calls'] == calls and not waiting['indexing']
+    # The indexing of the idle server is a background task, shown with the others.
+    queued = []
+    monkeypatch.setattr(core, 'submit_background_task', lambda callback, *args: queued.append((callback, args)))
+    idle_task = next(callback for seconds, callback in core.IDLE_TASK_CALLBACKS if seconds == nq.NQ_INDEX_IDLE_SECONDS)
+    idle_task()
+    assert len(queued) == 1
+    card = next(task for task in core._workspace_background_tasks(core.active_workspace) if task['id'].startswith('nq-index:'))
+    assert card['status'] == 'queued' and card['label'] == 'Non-Qualified Calls indexing'
+    callback, args = queued[0]
+    callback(*args)
+    done = client.get('/api/non-qualified-calls/index-status').json()['sync']
+    assert done['pending'] == 0 and not done['indexing']
+
+
+def test_page_polls_are_not_activity():
+    # Pages poll the API on their own: only the pages opened and what someone sends count as activity.
+    assert core.is_interactive_request('GET', '/non-qualified-calls', 'text/html,application/xhtml+xml')
+    assert not core.is_interactive_request('GET', '/api/non-qualified-calls/index-status', 'application/json')
+    assert not core.is_interactive_request('GET', '/api/scoring/jobs', '*/*')
+    assert core.is_interactive_request('POST', '/api/non-qualified-calls/calls', 'application/json')
+    assert not core.is_interactive_request('POST', '/api/non-qualified-calls/calls', 'application/json', background_refresh=True)
+    assert not core.is_interactive_request('POST', '/api/scoring/jobs/match', 'application/json')
 
