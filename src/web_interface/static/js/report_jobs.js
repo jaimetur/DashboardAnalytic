@@ -665,7 +665,7 @@
       reportSummary.classList.toggle('rj-report-missing', !scenarios.length);
     };
     const configure = node('button', 'Configure report…', 'ghost-link'); configure.type = 'button';
-    configure.title = 'Choose the scenarios (filters and aggregation) and the slides of each scoring';
+    configure.title = 'Choose the scenarios (filters and Split by levels) and the slides of each scoring';
     configure.addEventListener('click', async () => {
       if (!window.ScoringReportEditor) return;
       const defaults = currentDefaults();

@@ -207,7 +207,7 @@ def test_results_controls_are_grouped_with_icons_and_unique_environment_heading(
         assert kpi_shortcut.xpath('./svg/path/@d') == [
             'M2 17h16M3 17V7h5v10M5 10h1M5 13h1M12 3l-2 14M16 3l2 14M14 4v2m0 3v2m0 3v2',
         ]
-        # Only Methodology stays here: KPI Priorities is gone and the hierarchy lives in Aggregation levels.
+        # Only Methodology stays here: KPI Priorities is gone and the hierarchy lives in Split by.
         assert not nav.xpath('./a[@data-config-shortcut="gap"]')
         assert not nav.xpath('./a[@data-config-shortcut="hierarchy"]')
     labels = [link.xpath('./span')[0].text for link in tree.xpath('//div[@class="scoring-export-actions"]/a')]
@@ -220,9 +220,9 @@ def test_results_controls_are_grouped_with_icons_and_unique_environment_heading(
     dialog = tree.xpath('//dialog[@data-scoring-hierarchy-dialog]')[0]
     assert 'shared by every workspace and methodology' in dialog.text_content()
     assert not dialog.xpath('.//*[@data-scoring-hierarchy-methodology]')
-    # On the line of the Aggregation levels, at its right, with the note below the levels.
+    # On the line of the Split by levels, at its right, with the note below the levels.
     panel = hierarchy[0].xpath('ancestor::div[@class="scoring-levels-row"]/parent::div')[0]
-    assert panel.xpath('./div[@class="scoring-picker-head"]/strong')[0].text == 'Aggregation levels'
+    assert panel.xpath('./div[@class="scoring-picker-head"]/strong')[0].text == 'Split by'
     assert panel.xpath('./p[contains(@class, "scoring-levels-note")]')[0].text == 'Operator is required.'
     header = re.search(r'<div class="scoring-results-head">(.*?)<div class="scoring-results-tabbed">', template, re.S)
     assert header

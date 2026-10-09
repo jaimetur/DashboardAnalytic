@@ -32,7 +32,7 @@
   .scoring-picker-head { display: flex; align-items: center; justify-content: space-between; gap: .7rem; margin-bottom: .6rem; }
   .scoring-picker-head strong { color: var(--text); font-size: .88rem; }
   .scoring-picker-head span { color: var(--muted); font-size: .76rem; }
-  /* Aggregation levels: the hierarchy shortcut at the right of the levels, the note below them. */
+  /* Split by: the hierarchy shortcut at the right of the levels, the note below them. */
   .scoring-levels-row { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .9rem; }
   .scoring-levels-shortcut { margin-left: auto; }
   .scoring-hierarchy-dialog { width: min(26rem, calc(100vw - 2rem)); padding: 0; border: 0; border-radius: 14px; box-shadow: 0 18px 48px rgba(16,32,48,.32); }
@@ -458,12 +458,12 @@
         <h2>Scoring &amp; GAP Analysis</h2>
       </div>
     </div>
-    <p class="lede">Calculate and review NetCheck scoring across one or more CDR datasets. Choose the aggregation levels for this run, then inspect the saved scoring tables, charts and GAP analysis.</p>
+    <p class="lede">Calculate and review NetCheck scoring across one or more CDR datasets. Choose how to split the results of this run (Split by), then inspect the saved scoring tables, charts and GAP analysis.</p>
   </article>
 
   <article class="panel scoring-controls" aria-labelledby="scoring-run-title">
     <div class="section-head tight-head">
-      <div><p class="eyebrow">Scoring Calculation</p><h3 id="scoring-run-title">Select CDRs, filters, aggregation levels &amp; GAP reference</h3></div>
+      <div><p class="eyebrow">Scoring Calculation</p><h3 id="scoring-run-title">Select CDRs, filters, Split by &amp; GAP reference</h3></div>
       <div class="scoring-controls-meta"><span class="scoring-hero-badge"><span aria-hidden="true">◉</span> CDR benchmark workspace</span><span class="pill" data-selected-count>0 CDRs selected</span></div>
     </div>
     <div class="scoring-filter-grid scoring-dataset-filter-grid">
@@ -525,7 +525,7 @@
       <p class="scoring-context-filter-note">Values come from the selected CDR catalogues. Leaving a filter empty includes all values. Main Cities uses the workspace city list.</p>
     </div>
     <div class="scoring-picker">
-      <div class="scoring-picker-head"><strong>Aggregation levels</strong></div>
+      <div class="scoring-picker-head"><strong>Split by</strong></div>
       <div class="scoring-levels-row">
         <div class="scoring-levels" data-aggregation-levels>
           {% for level in aggregation_levels %}
@@ -664,7 +664,7 @@
   <dialog class="scoring-hierarchy-dialog" data-scoring-hierarchy-dialog data-can-edit="{{ 'true' if can_edit_hierarchy else 'false' }}" aria-labelledby="scoring-hierarchy-title">
     <form method="dialog" class="scoring-hierarchy-form" data-scoring-hierarchy-form>
       <h3 id="scoring-hierarchy-title">Aggregation hierarchy</h3>
-      <p class="scoring-hierarchy-copy">Order used to group the scoring results and to list the filters. It is an application setting shared by every workspace and methodology. Operator is always one of the aggregation levels.{% if not can_edit_hierarchy %} Only editors can change it.{% endif %}</p>
+      <p class="scoring-hierarchy-copy">Order used to group the scoring results and to list the filters. It is an application setting shared by every workspace and methodology. Operator is always one of the Split by levels.{% if not can_edit_hierarchy %} Only editors can change it.{% endif %}</p>
       <ol class="scoring-hierarchy-list" data-scoring-hierarchy-list></ol>
       <p class="scoring-hierarchy-status" data-scoring-hierarchy-status role="status" aria-live="polite"></p>
       <div class="scoring-hierarchy-actions">

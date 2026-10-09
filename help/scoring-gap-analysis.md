@@ -12,7 +12,7 @@ Each job calculates the NetCheck **Best Network** scoring, which rates every KPI
 | I want to… | Go to |
 | --- | --- |
 | Calculate or recalculate a comparison | [Calculate and review](#calculate-and-review) |
-| Understand filters and aggregation | [Filters and aggregation](#filters-and-aggregation) |
+| Understand filters and Split by | [Filters and Split by](#filters-and-split-by) |
 | Read scores, GAPs and coverage warnings | [Results and workspace settings](#results-and-workspace-settings) |
 | Show or configure the Most Reliable scoring | [Most Reliable Network scoring](#most-reliable-network-scoring) |
 | Change environments, KPIs or weights | [Methodology](#methodology) |
@@ -28,7 +28,7 @@ Each job calculates the NetCheck **Best Network** scoring, which rates every KPI
 
 1. Open the correct workspace and finish processing the required CDRs.
 2. If no methodology is configured, import one under **Workspace Config → Scoring & GAP Analysis Setup**.
-3. Open **Scoring & GAP Analysis** and expand **Select CDRs, filters, aggregation levels & GAP reference**.
+3. Open **Scoring & GAP Analysis** and expand **Select CDRs, filters, Split by & GAP reference**.
 4. Choose **NSA** or **SA** above **CDR datasets**. A job cannot mix both modes.
 
 > [!IMPORTANT]
@@ -48,14 +48,14 @@ Use the Data, Voice and Speech selectors, or replace the selection with a shortc
 
 On first use, the module selects the latest ready CDR of each type for the chosen NR Mode.
 
-### 3. Set filters, aggregation and reference
+### 3. Set filters, Split by and reference
 
 1. Restrict **Operators**, **Vendors**, **Regions**, **Cities** or **Campaigns** if needed. The values offered are those of the selected CDRs; when the NR Mode or the CDRs change, a filter with every value checked keeps every new value checked, and a partial choice keeps its values for when CDRs that have them are selected again.
-2. Choose the aggregation levels (Operator, Vendor, Region, **Cluster**, City and Campaign, in the order of the aggregation hierarchy). **Operator** is always included; additional levels split the results into separate combinations. Cluster needs CDRs with a `Cluster` column, filled by the source CDR or by a Cluster mapping.
+2. Choose the **Split by** levels (Operator, Vendor, Region, **Cluster**, City and Campaign, in the order of the aggregation hierarchy). **Operator** is always included; additional levels split the results into separate combinations. Cluster needs CDRs with a `Cluster` column, filled by the source CDR or by a Cluster mapping.
 3. In **GAP reference operator**, select the operator to compare against. The initial reference is **EE**.
 4. Choose the saved **Scoring Methodology** beside Calculate and Recalculate.
 
-The aggregation hierarchy determines the order of the filter controls and aggregation headers. It is an application setting shared by every workspace and methodology. **Aggregation hierarchy**, at the right of the Aggregation levels, opens a dialog to reorder it; editors save it for everyone. The initial order is **Operator → Vendor → Region → Cluster → City → Campaign**, and calculated jobs keep the order they were calculated with.
+The aggregation hierarchy determines the order of the filter controls and of the Split by levels and headers. It is an application setting shared by every workspace and methodology. **Aggregation hierarchy**, at the right of the Split by levels, opens a dialog to reorder it; editors save it for everyone. The initial order is **Operator → Vendor → Region → Cluster → City → Campaign**, and calculated jobs keep the order they were calculated with.
 
 ### 4. Calculate or recalculate
 
@@ -65,7 +65,7 @@ The aggregation hierarchy determines the order of the filter controls and aggreg
 | A matching job already exists | **Calculate Scoring** is disabled; **Recalculate** updates that job |
 | An identical job is queued or running | Both actions are disabled until it finishes, and the yellow notice says *Calculating* (or *Recalculating*) *the scoring of the selected CDRs and filters…* until then |
 
-Matching checks the CDR content, NR Mode, filters, aggregation levels, GAP reference and saved methodology. A change to these inputs can produce a different job, even when its visible title looks similar.
+Matching checks the CDR content, NR Mode, filters, Split by levels, GAP reference and saved methodology. A change to these inputs can produce a different job, even when its visible title looks similar.
 
 Recalculation keeps the job identifier, replaces its results and updates the displayed date/time to the recalculation submission time. Job lists show the latest calculations first.
 
@@ -76,27 +76,27 @@ Recalculation keeps the job identifier, replaces its results and updates the dis
 
 Select a job in the **Scoring Results** dropdown or the **Scoring Jobs** history. The module loads its saved results and restores its calculation inputs so you can relaunch it.
 
-Job cards show filters, ordered aggregation levels, **GAP Reference** and **Scoring Methodology**. The job name lists the date, NR Mode, Regions, **Clusters** (in their own colour), Cities, Operators, Vendors and Campaigns, and the generated PowerPoint is named `yyyymmdd_hhmmss - Scoring & GAP Analysis - <NR Mode> - <Regions> - <Clusters> - <Cities> - <Operators> - <Vendors> - <Campaigns>.pptx`. A complete vendor selection appears as **All Vendors**. Hover or click the **CDRs** button to inspect the source files.
+Job cards show filters, ordered Split by levels, **GAP Reference** and **Scoring Methodology**. The job name lists the date, NR Mode, Regions, **Clusters** (in their own colour), Cities, Operators, Vendors and Campaigns, and the generated PowerPoint is named `yyyymmdd_hhmmss - Scoring & GAP Analysis - <NR Mode> - <Regions> - <Clusters> - <Cities> - <Operators> - <Vendors> - <Campaigns>.pptx`. A complete vendor selection appears as **All Vendors**. Hover or click the **CDRs** button to inspect the source files.
 
 Deleting a job removes its saved results after confirmation; it does not delete its source CDRs. Running work stops at a processing checkpoint or discards its pending result.
 
 ### What is remembered?
 
-- **Shared across workspace users and browsers:** CDRs, NR Mode, methodology, filters, aggregation and GAP reference. These calculation selections save automatically.
+- **Shared across workspace users and browsers:** CDRs, NR Mode, methodology, filters, Split by levels and GAP reference. These calculation selections save automatically.
 - **Within the browser session:** result tab, environment, display controls, comparison selection and scroll position.
 - **Inside each job:** source metadata, rules, grouping, results and warnings captured for that calculation.
 
 Automatic job refreshes do not overwrite edits to the calculation controls. Removed or unready inputs produce a notice when a saved selection is restored.
 
-## Filters and aggregation
+## Filters and Split by
 
-### Filtering chooses rows; aggregation chooses groups
+### Filtering chooses rows; Split by chooses groups
 
 | Control | Example | Effect |
 | --- | --- | --- |
 | Filter | City = Leeds and London | Include rows from either city |
-| Aggregation | Operator → City → Campaign | Calculate separate results for each operator/city/campaign combination |
-| Omit an aggregation level | Campaign not selected | Pool the selected campaigns' raw rows before calculating KPIs |
+| Split by | Operator → City → Campaign | Calculate separate results for each operator/city/campaign combination |
+| Omit a Split by level | Campaign not selected | Pool the selected campaigns' raw rows before calculating KPIs |
 
 Values within a filter combine with **OR**. Different filter fields combine with **AND**. An empty selection means all values. **Main Cities** selects configured workspace cities that exist in the selected CDRs.
 
@@ -113,11 +113,11 @@ The **Operator_Vendor** selector filters the `<Operator>_<Vendor>` identity, **V
 
 Selecting **Ericsson** and **Huawei** includes only those vendor identities from the selected operators. To include an operator with no assigned vendor, also select its **Operator - All** choice, or leave the Vendor filter unrestricted. Vendor mapping stores the suffix in `Operator_Vendor` and `Vendor`; legacy operator-only values without it remain supported.
 
-Legacy saved operator-prefixed selections are normalized to vendor names. The **Operator** filter remains independent. When Vendor is an aggregation level, operators without a vendor still display **All** in that level; web and PowerPoint retain the existing comparison and reference behavior.
+Legacy saved operator-prefixed selections are normalized to vendor names. The **Operator** filter remains independent. When Vendor is a Split by level, operators without a vendor still display **All** in that level; web and PowerPoint retain the existing comparison and reference behavior.
 
 ### How the GAP reference is matched
 
-Each comparison retains the selected environment and aggregation context. For vendor comparisons, the engine tries the same vendor first, then the reference operator's **All** vendor group.
+Each comparison retains the selected environment and Split by context. For vendor comparisons, the engine tries the same vendor first, then the reference operator's **All** vendor group.
 
 > [!NOTE]
 > **EE / All can be the reference for Ericsson, Huawei and other vendor groups.** Campaign, City, Region and other selected levels must still match. The fallback does not compare different cities or campaigns.
@@ -164,7 +164,7 @@ Breakdown score colors use **Low**, **Medium**, **High** and **UltraHigh** bands
 
 GAP visibility starts unchecked. It affects Scoring Tables and its PowerPoint tables; dedicated GAP Analysis views remain available.
 
-**Campaign Comparison** appears below the tables when Campaign is an aggregation level with at least two campaigns. For each operator and each combination of the other levels, it lists every KPI with its value and points in the two latest campaigns and **Δ Points** (latest minus previous), from the largest loss to the largest gain in a red–green scale, with the total **Scoring Points Gap**. Choose the comparison in its selector.
+**Campaign Comparison** appears below the tables when Campaign is a Split by level with at least two campaigns. For each operator and each combination of the other levels, it lists every KPI with its value and points in the two latest campaigns and **Δ Points** (latest minus previous), from the largest loss to the largest gain in a red–green scale, with the total **Scoring Points Gap**. Choose the comparison in its selector.
 
 ### GAP Analysis
 
@@ -236,14 +236,14 @@ The sources and licences of the areas shipped with the application, such as the 
 | **Best Network / Most Reliable Network Scoring per Category** | Compare category contributions within each operator/context stack |
 | **Best Network / Most Reliable Network Scoring per Category (Breakdown)** | Compare operators directly within each category |
 | **Maximum score allocation donuts** | Inspect configured environment, service and category maxima and shares |
-| **Scoring per City / Cluster / Region** | When City, Cluster or Region is an aggregation level with 2 to 12 values: one card per value with each operator's Voice and Data points and its total, labelled with the operator names of the mapping table (hover a bar for its points) |
-| **Scoring Trend** | When Campaign is an aggregation level with more than four campaigns: each operator's total points per campaign, one line per operator |
+| **Scoring per City / Cluster / Region** | When City, Cluster or Region is a Split by level with 2 to 12 values: one card per value with each operator's Voice and Data points and its total, labelled with the operator names of the mapping table (hover a bar for its points) |
+| **Scoring Trend** | When Campaign is a Split by level with more than four campaigns: each operator's total points per campaign, one line per operator |
 
 Voice and Speech KPIs contribute to **Voice**; Data KPIs contribute to **Data**, regardless of category names. Allocation donuts show **maximum available allocation**, not earned scores. Chart titles and donuts follow the selected scoring.
 
 Hover bars, segments, totals or donut sectors for values and context. Double-click a chart, a map or a table of Scoring Tables and GAP Analysis to open it larger, taking the whole screen but 5% on each side. Charts and maps zoom into a rectangle dragged with the mouse, or with the zoom buttons (zoom in, zoom out, whole view) shown while the pointer is over them, also in the larger view. Dense web charts scroll horizontally. Operator Mapping supplies labels, order and colors.
 
-A single aggregation level uses normal axis labels; multiple levels use separate header rows. Campaign labels display year-quarter, such as **2026-Q1**, while stored campaign names and CSV identifiers remain unchanged.
+A single Split by level uses normal axis labels; multiple levels use separate header rows. Campaign labels display year-quarter, such as **2026-Q1**, while stored campaign names and CSV identifiers remain unchanged.
 
 The cards follow City first, then Cluster, then Region, and group the other levels: with several campaigns, one set of cards per campaign shows the latest one. In All Environments each card adds the environments measured in that location and scales them to the full maximum (1,000 points in NetCheck 2026), so a city measured only in Drive - City is comparable with the others, as the NetCheck per-city rankings do; the blue panel says so and gives the Voice and Data maxima. A single environment shows its own points. The trend offers one series per combination of the other levels in its selector and uses the same points as the cards.
 
@@ -544,7 +544,7 @@ Version-2 exchange envelopes must be replaced with a new export. Existing suppor
 5. Multiply by the KPI's configured maximum points.
 6. Sum weighted points for categories, environments and total scoring.
 
-Operator aliases use the mapping snapshot saved with the job. When Campaign is not selected as an aggregation level, campaign rows are pooled before KPI calculation.
+Operator aliases use the mapping snapshot saved with the job. When Campaign is not selected as a Split by level, campaign rows are pooled before KPI calculation.
 
 Unlike the source Prep flow's inner joins, the application preserves groups with missing measurements as N/A and reports their incomplete coverage.
 
@@ -601,14 +601,14 @@ For All Environments, only valid environment contributions common to both sides 
 | **Export to CSV** above the Scoring table | The scoring table shown: expanded results, category subtotals and totals of the selected scoring and environment |
 | **Export to CSV** above the GAP table | The GAP table shown: expanded GAP results and their existing numeric fields of the selected scoring and environment |
 | **Generate Scoring Report (PPT/Word)** (Calculation panel) | A report of one or more scenarios chosen in the report editor, from the CDRs, NR Mode, methodology and GAP reference selected in the Calculation panel |
-| **Export Selected Scoring Report (PPT/Word)** (Results panel) | The selected job as it was calculated (its CDRs, aggregation levels and filters), with editable tables and charts, covers and environment transitions, for both scorings; it only asks for PowerPoint or Word |
+| **Export Selected Scoring Report (PPT/Word)** (Results panel) | The selected job as it was calculated (its CDRs, Split by levels and filters), with editable tables and charts, covers and environment transitions, for both scorings; it only asks for PowerPoint or Word |
 | **Word** | The same report as the PowerPoint, one landscape page per slide exactly as in PowerPoint (rendered with LibreOffice, included in the Docker image; without it the slide tables and charts are rebuilt) |
 
 **Generate Scoring Report (PPT/Word)** opens the **report editor** (see [Report scenarios](#report-scenarios)) and calculates its scenarios from the CDRs, NR Mode, methodology and GAP reference selected in the Calculation panel. **Export Selected Scoring Report (PPT/Word)** exports the selected job without the editor. A progress dialog stays open while either document is generated.
 
 ### Report scenarios
 
-A report has one or more **scenarios**, in order: for example *National*, then *London*, then the *Main Cities*, then by Vendor. Every scenario uses the CDRs, NR Mode, methodology and GAP reference selected in the Calculation panel with its own **filters** (Operator, Operator_Vendor, Vendor_Operator, Vendor, Region, Cluster, City with **Main Cities**, Campaign) and **aggregation levels**. Each filter list has a search box that narrows the values as you type, **Select All / None** for the listed values, and closes when you click outside it or open another one. Its **All** option keeps no restriction, so the scenario always includes every value of the CDRs when the report is generated, also values that appear in later CDRs (for example a new Operator); **Main Cities** checks the workspace main cities and uses that list when the report is generated. The values stay editable with All or Main Cities checked: changing one keeps exactly the values checked. A closed list shows one chosen value by name and several by their number (for example `2/4 selected` or `Main Cities (5/12)`; hover it to see the values); campaigns are shown with the workspace [Campaign Maps](workspace-config.md#campaign-maps). When the document is generated, each scenario reuses an identical saved scoring job or calculates it, so it can take longer the first time. An aggregation level with a single value (for example **Campaign** when the CDRs hold one campaign, or **City** filtered to one city) splits nothing, so it is left out of the scenario, as it is of every chart, table and document of Scoring & GAP Analysis.
+A report has one or more **scenarios**, in order: for example *National*, then *London*, then the *Main Cities*, then by Vendor. Every scenario uses the CDRs, NR Mode, methodology and GAP reference selected in the Calculation panel with its own **filters** (Operator, Operator_Vendor, Vendor_Operator, Vendor, Region, Cluster, City with **Main Cities**, Campaign) and **Split by** levels. Each filter list has a search box that narrows the values as you type, **Select All / None** for the listed values, and closes when you click outside it or open another one. Its **All** option keeps no restriction, so the scenario always includes every value of the CDRs when the report is generated, also values that appear in later CDRs (for example a new Operator); **Main Cities** checks the workspace main cities and uses that list when the report is generated. The values stay editable with All or Main Cities checked: changing one keeps exactly the values checked. A closed list shows one chosen value by name and several by their number (for example `2/4 selected` or `Main Cities (5/12)`; hover it to see the values); campaigns are shown with the workspace [Campaign Maps](workspace-config.md#campaign-maps). When the document is generated, each scenario reuses an identical saved scoring job or calculates it, so it can take longer the first time. A Split by level with a single value (for example **Campaign** when the CDRs hold one campaign, or **City** filtered to one city) splits nothing, so it is left out of the scenario, as it is of every chart, table and document of Scoring & GAP Analysis.
 
 For each scenario and each scoring (**Best Network** and **Most Reliable Network**, which can be left out), choose:
 
@@ -619,7 +619,9 @@ For each scenario and each scoring (**Best Network** and **Most Reliable Network
 | Scoring Tables | Category table and Breakdown table (on), Show KPI values and Show GAP values (off), Campaign comparison (on) |
 | GAP Analysis | **Operators to compare** (Vodafone and Three when available; none chosen compares every operator), the table of all the chosen operators, the individual tables against the reference, the KPI GAP Profile and the Points lost per City map (all on) |
 
-With several scenarios, every setting whose value is not the same in all of them (a filter, an aggregation level, a scoring, its environments or one of its options) is highlighted in amber in each scenario, so what changes from one scenario to another stands out; the highlights follow every change.
+Below the Split by levels, each scenario has a small panel headed by **Include National & area summary**, which adds the National & Areas slide to each scoring of the scenario. It is only available for the whole country: including it clears and disables the Region, Cluster, City and Main Cities filters, and it is included by default in scenarios without them. Its settings are enabled only while it is included and apply to that slide and its calculations only. **Time split** says how the slide splits time: **All selected CDRs** aggregates every selected CDR into one value (for example 24 weekly CDRs into the score of those 24 weeks), **Campaign** (the default) splits by campaign, and **Daily**, **Weekly** (ISO weeks, such as `2026-W07`), **Monthly**, **Quarterly** and **Yearly** split by the period of the start time of each test, whatever the CDRs are (daily, weekly or per campaign), so 28 daily CDRs give four weekly points. **Breakdown** chooses the areas of the summary (**Region**, the default, Cluster, City or None) and **Separate cities** the cities shown on their own (**London** by default, any other city and the workspace **Main Cities**). The scenario's scoring job then also scores, from the CDR rows it reads once, the National scoring with that time split, the chosen cities and each value of the breakdown, every one with its own measurements: KPI values (rates, medians, P90…) are not additive and their points come from non-linear thresholds, so an area score is not a share of the National points.
+
+With several scenarios, every setting whose value is not the same in all of them (a filter, a Split by level, the area summary, a scoring, its environments or one of its options) is highlighted in amber in each scenario, so what changes from one scenario to another stands out; the highlights follow every change.
 
 The document starts with a cover listing the scenarios; each scenario then has a cover per scoring (for example *London — Best Network Scoring*) with its filters, and its slide subtitles name the scenario and the scoring. With All Environments only, the subtitles omit *All Environments*; each environment block names its environment. Show KPI values adds a **Value** column before each Score of the Breakdown tables.
 
@@ -642,6 +644,7 @@ Each block contains, as chosen in the scenario:
 
 The All Environments block also contains, when they apply and are chosen:
 
+- **National & Areas** first, for scenarios with the National & area summary: a table with the National scoring, the separate cities and each area of the breakdown (six per slide), with the score of the reference and of the operators to compare in the latest campaign or period of its time split, from the highest score, their change from the previous one (Δ vs, with two or more) and their GAP to the reference (Δ vs EE), and with several campaigns or periods a trend chart per area on the same scale. With **All Environments and each environment**, each environment block has its own.
 - **Scoring per City / Cluster / Region** after the service chart: a dark blue panel with the maximum points and up to 12 cards with Voice (amber) and Data (teal) stacked bars and the totals, labelled with the operator names of the mapping table, for the latest campaign.
 - **Scoring Trend** after the cards: a line chart per combination of the other levels (up to six).
 - **KPI GAP Profile** after the GAP tables: one slide per compared operator with the Gap to Maximum and Gap to reference tables and their gradient data bars in every column (the reference operator, when it is one of the **Operators to compare**, has its Gap to Maximum table only), for each combination of the other levels, such as each selected City, Cluster or Region (up to twelve; the latest campaign's when there are more). The note names the operator in its colour and the totals in bold.
@@ -650,7 +653,7 @@ The All Environments block also contains, when they apply and are chosen:
 
 Slide titles are blue, with the part that tells consecutive slides apart in bold: the focus (for example *Best Network Scoring **per City***) or what follows the dash (for example *GAP Analysis — **3 vs EE*** or *Scoring Tables — **Summary***). Subtitles name the scoring and the environment in bold.
 
-Covers and transitions show white titles and field labels, with **bold yellow filter, aggregation and campaign values**. The **Campaigns:** label is bold white. Long lists can be shortened visually without changing the calculation.
+Covers and transitions show white titles and field labels, with **bold yellow filter, Split by and campaign values**. The **Campaigns:** label is bold white. Long lists can be shortened visually without changing the calculation.
 
 The export follows Scoring Tables GAP visibility and column placement. Dedicated GAP slides remain included. Individual slides include the Priority arrow, mean KPI GAP and column-averaged total; every GAP table includes its column totals and color scale.
 
@@ -688,7 +691,7 @@ After a restart, interrupted jobs are retained as failed and can be recalculated
 | Expected vendor/city choices are missing | Check mappings and the selected CDRs; reprocess older incomplete catalogues |
 | GAP is N/A* | Verify the reference and matching context, including common valid environment coverage |
 | Maximum achievable points differ between columns | Read the excluded KPI list for each combination; unavailable contributions can differ |
-| Results differ from another report | Compare methodology revision, filters, aggregation, thresholds and coverage |
+| Results differ from another report | Compare methodology revision, filters, Split by levels, thresholds and coverage |
 | CDR changed during calculation | Wait for processing/mapping to finish and recalculate |
 | Older All Environments KPI values are N/A | Recalculate to save pooled global measurements |
 | Job failed after interruption | Recalculate the existing job; delete it only if no longer needed |

@@ -1,4 +1,4 @@
-// Scoring report editor: scenarios with their filters, aggregation levels and the
+// Scoring report editor: scenarios with their filters, Split by levels and the
 // content of each scoring. Used by the Scoring & GAP Analysis exports and by the
 // Scoring artifact of Reporting Jobs.
 (() => {
@@ -14,6 +14,16 @@
     ['summary', 'Category table'], ['breakdown', 'Breakdown table'], ['kpi_values', 'Show KPI values'],
     ['gap_values', 'Show GAP values'], ['campaign_comparison', 'Campaign comparison (two latest campaigns)'],
   ];
+  // The filters that leave out part of the country: the National & area summary needs none of them.
+  const GEOGRAPHIC_FILTERS = ['Region', 'Cluster', 'City'];
+  const AREA_BREAKDOWNS = ['None', 'Region', 'Cluster', 'City'];
+  // The time split of the National & area summary: every selected CDR in one value, per campaign or per period.
+  const TIME_SPLITS = [['All', 'All selected CDRs'], ['Campaign', 'Campaign'], ['Daily', 'Daily'], ['Weekly', 'Weekly'],
+    ['Monthly', 'Monthly'], ['Quarterly', 'Quarterly'], ['Yearly', 'Yearly']];
+  const hasGeographicFilters = (scenario) => Boolean(scenario.main_cities)
+    || GEOGRAPHIC_FILTERS.some((field) => (scenario.context_filters[field] || []).length);
+  const defaultAreaSummary = (scenario) => ({enabled: !scenario || !hasGeographicFilters(scenario), time_split: 'Campaign',
+    breakdown: 'Region', cities: ['London'], main_cities: false});
   const GAP_OPTIONS = [
     ['all_operators', 'Table comparing all the chosen operators'], ['individual', 'Individual tables against the reference'],
     ['profile', 'KPI GAP Profile'], ['points_loss_map', 'Points lost per City map'],
@@ -39,12 +49,14 @@
   }
 
   function defaultScenario({name = 'National', filters = {}, levels = ['Operator'], mainCities = false, operators = []} = {}) {
-    return {
+    const scenario = {
       name, context_filters: clone(filters), main_cities: mainCities,
       // Campaign is always included: a scenario with a single campaign leaves the level out.
       aggregation_levels: ['Operator', ...LEVELS.filter((level) => level !== 'Operator' && (levels.includes(level) || level === 'Campaign'))],
       scorings: Object.fromEntries(SCORINGS.map(([key]) => [key, defaultOptions(operators)])),
     };
+    scenario.area_summary = defaultAreaSummary(scenario);
+    return scenario;
   }
 
   function defaultConfiguration(context = {}) {
@@ -72,7 +84,7 @@
     });
   });
 
-  function checklist(label, values, selected, onChange, {preset = null, allOption = false} = {}) {
+  function checklist(label, values, selected, onChange, {preset = null, allOption = false, emptyLabel = 'All'} = {}) {
     const wrapper = el('details', 'scoring-report-picker');
     // One picker open at a time; it closes when opening another one or clicking outside.
     wrapper.addEventListener('toggle', () => {
@@ -115,7 +127,7 @@
       const chosen = [...known.filter((value) => selection.has(value)), ...[...selection].filter((value) => !known.includes(value))].map(display);
       const total = known.length;
       const text = preset?.checked ? `${preset.label} (${known.filter(inPreset).length}/${total})`
-        : allMode || !chosen.length ? 'All'
+        : allMode ? 'All' : !chosen.length ? emptyLabel
           : chosen.length === 1 ? chosen[0] : `${chosen.length}/${total} selected`;
       summary.textContent = `${label}: ${text}`;
       summary.title = preset?.checked || allMode || chosen.length < 2 ? summary.textContent : `${label}: ${chosen.join(', ')}`;
@@ -229,6 +241,14 @@
       return JSON.stringify([[...(scenario.context_filters[name] || [])].map(String).sort(), name === 'City' && Boolean(scenario.main_cities)]);
     }
     if (kind === 'level') return String(scenario.aggregation_levels.includes(name));
+    if (kind === 'area') {
+      const summary = scenario.area_summary;
+      if (name === 'enabled') return String(Boolean(summary.enabled));
+      if (!summary.enabled) return undefined;
+      if (name === 'time_split') return summary.time_split || 'Campaign';
+      return name === 'breakdown' ? summary.breakdown
+        : JSON.stringify([[...summary.cities].map(String).sort(), Boolean(summary.main_cities)]);
+    }
     const options = scenario.scorings[name];
     if (group === 'enabled') return String(Boolean(options.enabled));
     if (!options.enabled) return undefined;
@@ -333,6 +353,8 @@
     head.append(actions);
     card.append(head);
 
+    scenario.area_summary = scenario.area_summary || defaultAreaSummary(scenario);
+    scenario.area_summary.time_split = scenario.area_summary.time_split || 'Campaign';
     const filters = el('div', 'scoring-report-filters');
     // Operator_Vendor and Vendor_Operator hold the same values the other way round: they stay in sync.
     const pickers = {};
@@ -355,7 +377,7 @@
       filters.append(pickers[field]);
     }
     const levels = el('div', 'scoring-report-levels');
-    levels.append(el('span', 'scoring-report-label', 'Aggregation levels:'));
+    levels.append(el('span', 'scoring-report-label', 'Split by:'));
     for (const level of LEVELS) {
       const box = checkbox(level, scenario.aggregation_levels.includes(level), (checked) => {
         scenario.aggregation_levels = LEVELS.filter((item) => item === 'Operator'
@@ -365,9 +387,88 @@
       box.dataset.diffKey = `level:${level}`;
       levels.append(box);
     }
+
+    // The National & area summary: its checkbox heads the panel and enables its settings.
+    const subpanel = el('fieldset', 'scoring-report-subpanel');
+    const legend = el('legend');
+    const enabled = checkbox('Include National & area summary', scenario.area_summary.enabled, (checked) => {
+      scenario.area_summary.enabled = checked;
+      if (checked) {
+        // The National scoring needs the whole country: the geographic filters are cleared.
+        for (const field of GEOGRAPHIC_FILTERS) {
+          delete scenario.context_filters[field];
+          pickers[field].setSelection([]);
+        }
+        scenario.main_cities = false;
+      }
+      updateAreaSummary();
+    }, 'The National scoring next to the separate cities and each area of the breakdown, each scored with its own measurements');
+    enabled.dataset.diffKey = 'area:enabled';
+    legend.append(enabled);
+    subpanel.append(legend);
+    const row = el('div', 'scoring-report-subpanel-row');
+    const time = el('select');
+    time.setAttribute('aria-label', 'Time split of the National & area summary');
+    time.title = 'Only for the National & area summary. All selected CDRs aggregates every selected CDR into one value; '
+      + 'Campaign splits by campaign; Daily to Yearly split by the period of the start time of each test, '
+      + 'whatever the CDRs (daily, weekly or per campaign)';
+    for (const [value, text] of TIME_SPLITS) {
+      const option = el('option', '', `Time split: ${text}`);
+      option.value = value;
+      time.append(option);
+    }
+    time.value = scenario.area_summary.time_split;
+    time.addEventListener('change', () => { scenario.area_summary.time_split = time.value; });
+    time.dataset.diffKey = 'area:time_split';
+    const breakdown = el('select');
+    breakdown.setAttribute('aria-label', 'Area summary breakdown');
+    for (const value of AREA_BREAKDOWNS) {
+      const option = el('option', '', value === 'None' ? 'Breakdown: None' : `Breakdown: ${value}`);
+      option.value = value;
+      breakdown.append(option);
+    }
+    breakdown.value = scenario.area_summary.breakdown;
+    breakdown.addEventListener('change', () => { scenario.area_summary.breakdown = breakdown.value; });
+    breakdown.dataset.diffKey = 'area:breakdown';
+    const cities = checklist('Separate cities', context.filterOptions?.City || [], scenario.area_summary.cities, (values) => {
+      scenario.area_summary.cities = values;
+    }, {
+      emptyLabel: 'None',
+      preset: (context.mainCities || []).length ? {
+        label: 'Main Cities', checked: scenario.area_summary.main_cities, values: context.mainCities,
+        onChange: (checked) => { scenario.area_summary.main_cities = checked; },
+      } : null,
+    });
+    cities.dataset.diffKey = 'area:cities';
+    row.append(time, breakdown, cities);
+    const note = el('p', 'scoring-report-note', 'The National & area summary is only available for the whole country: '
+      + 'including it clears and disables the Region, Cluster, City and Main Cities filters. Its time split applies to its slide only.');
+    subpanel.append(row, note);
+    // A disabled picker cannot be opened.
+    const setPickerDisabled = (picker, disabled, title = '') => {
+      picker.dataset.disabled = disabled ? 'true' : '';
+      picker.title = disabled ? title : '';
+      if (disabled) picker.open = false;
+    };
+    for (const picker of [...GEOGRAPHIC_FILTERS.map((field) => pickers[field]), cities]) {
+      picker.querySelector('summary').addEventListener('click', (event) => {
+        if (picker.dataset.disabled === 'true') event.preventDefault();
+      });
+    }
+    function updateAreaSummary() {
+      const active = Boolean(scenario.area_summary.enabled);
+      for (const field of GEOGRAPHIC_FILTERS) {
+        setPickerDisabled(pickers[field], active, 'Disabled by the National & area summary, which needs the whole country');
+      }
+      time.disabled = !active;
+      breakdown.disabled = !active;
+      setPickerDisabled(cities, !active, 'Include the National & area summary to choose the separate cities');
+      subpanel.dataset.disabled = active ? '' : 'true';
+    }
+    updateAreaSummary();
     const scorings = el('div', 'scoring-report-scorings');
     for (const [key, label] of SCORINGS) scorings.append(scoringPanel(scenario, key, label, context.operators || [], rerender));
-    card.append(filters, levels, scorings);
+    card.append(filters, levels, subpanel, scorings);
     return card;
   }
 
@@ -577,7 +678,7 @@
       const load = (value) => {
         if (value === DEFAULT_VALUE) {
           state.scenarios = defaultConfiguration(context.defaults).scenarios;
-          setStatus('Default configuration: one scenario with the calculation filters and aggregation.', 'success');
+          setStatus('Default configuration: one scenario with the calculation filters and Split by levels.', 'success');
         } else {
           const item = savedConfigurations.find((entry) => entry.name === value);
           if (!item) return;

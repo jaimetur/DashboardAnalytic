@@ -50,7 +50,7 @@ def test_manual_combined_selection_explains_missing_roads_filters_and_aggregatio
     assert actual['cardWarnings'] == ['Selected Environment has incomplete coverage because one of its Environments (Roads) has no data with the selected filters.']
     message = actual['warnings'][-1]
     for text in ('Missing weighted environments', 'Roads', '650 of 1000',
-                 'saved City filter is Leeds, London', 'City is an aggregation level',
+                 'saved City filter is Leeds, London', 'City is a Split by level',
                  'not earned scores', 'not scaled up'):
         assert text in message
     assert 'Independent source warning.' in actual['warnings']

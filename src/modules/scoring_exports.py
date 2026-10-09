@@ -27,9 +27,10 @@ from src.modules.column_names import campaign_sort_key, compact_campaign_value
 from src.modules.scoring import most_reliable_result
 from src.modules.scoring_points_loss import map_background, map_boundaries
 from src.modules.scoring_insight_slides import (
-    TITLE_BLUE, add_campaign_comparison_slides, add_kpi_gap_profile_slides, add_location_card_slides,
-    add_points_loss_slides, add_trend_slides,
+    TITLE_BLUE, add_area_summary_slides, add_campaign_comparison_slides, add_kpi_gap_profile_slides,
+    add_location_card_slides, add_points_loss_slides, add_trend_slides,
 )
+from src.modules.scoring_area_summary import build_area_summary
 from src.modules.scoring_config import BEST_NETWORK_SCORING, MOST_RELIABLE_SCORING, SCORING_LABELS
 from src.modules.scoring_insights import operator_styles
 from src.modules.scoring_vendors import normalize_scoring_vendor_result
@@ -540,7 +541,7 @@ def _canonical_scope_filter_labels(payload: Any, fields: tuple[str, ...] = _SCOP
 def _context_filter_labels(job: dict[str, Any]) -> list[str]:
     labels: list[str] = []
     seen: set[str] = set()
-    reserved = {'period', 'quarter', 'nr mode', 'aggregation', 'aggregation level', 'baseline'}
+    reserved = {'period', 'quarter', 'nr mode', 'aggregation', 'aggregation level', 'split by', 'baseline'}
 
     def append(label: Any, value: Any, operator: Any = None) -> None:
         name = str(label or '').strip().replace('_', ' ')
@@ -606,7 +607,7 @@ def _scoring_filter_subtitle(job: dict[str, Any], environment: str | None = None
         selected = ', '.join(plan['values'][field])
         return selected + (', ...' if selected else '...') if plan['omitted'][field] else selected
     return '\n'.join([mode_label, *[
-        f'{field.title()}: {display(field)}'
+        f"{'Split by' if field == 'aggregation' else field.title()}: {display(field)}"
         for field in ('aggregation', 'operator', 'vendor', 'region', 'city')
     ]])
 
@@ -700,7 +701,7 @@ def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle:
     frame.clear()
     frame.word_wrap = False
     frame.auto_size = MSO_AUTO_SIZE.NONE
-    for index, line in enumerate(['Aggregations & Filters:', *lines[1:]]):
+    for index, line in enumerate(['Split by & Filters:', *lines[1:]]):
         paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
         paragraph.text = line
         paragraph.font.size = Pt(16 if index == 0 else _hierarchy_content_font(
@@ -2458,10 +2459,22 @@ def _add_scoring_block(presentation, job: dict[str, Any], result: dict[str, Any]
     def keep(environment_name: str) -> bool:
         return not combined_only or environment_name.casefold() in {'all environments', 'combined'}
 
+    area_summaries = build_area_summary(
+        job, result, operator_mapping_groups, vendor_mapping_groups=vendor_mapping_groups,
+        include_operator=lambda operator, label: _compared_operator(options, operator, label),
+    )
+
     def environment_cover(environment_name: str) -> None:
         # With All Environments only, the scoring cover already introduces the block.
         if not combined_only:
             _add_scoring_intro_slides(presentation, job, result, environment=environment_name, scoring=scoring)
+        # The National & Area Summary opens the block of its environment.
+        add_area_summary_slides(
+            presentation, [item for item in area_summaries if item['environment'] == environment_name
+                           or (item['environment'] == 'Combined' and environment_name == 'All Environments')],
+            scoring_label=SCORING_LABELS[scoring or BEST_NETWORK_SCORING],
+            subtitle=_scoring_block_subtitle(scoring, environment_name, configuration), new_slide=_slide,
+        )
 
     def score_tables(matrix: dict, render) -> None:
         for mode, title, key in (('summary', 'Scoring Tables — Summary', 'summary'),

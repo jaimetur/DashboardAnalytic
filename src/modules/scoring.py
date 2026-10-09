@@ -23,6 +23,9 @@ from src.modules.scoring_config import (
 # after the workspace snapshot has been supplied explicitly.
 METHOD_VERSION = 'campaign-gap-global-kpi-v7'
 AGGREGATION_CONTRACT_VERSION = 2
+# Time splits of the Campaign level: each test falls in the period of its start time.
+TIME_SPLITS = ('Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly')
+START_TIME_COLUMNS = ('Event_Start_Time', 'Call_Start_Time', 'Test_Start_Time')
 _SHARED = ['Operator', 'Campaign', 'G_Level_1', 'G_Level_2']
 _INCOMPLETE_COVERAGE_WARNING = (
     'Incomplete KPI or environment coverage: partial points are shown without renormalizing weights; '
@@ -42,6 +45,29 @@ _FIELDS = {
     'voice': ['Session_Type', 'Call_Status', 'Call_Setup_Time', 'Disturbed_and_Impaired_Call', 'Test_Status'],
     'speech': ['Session_Type', 'LQ'],
 }
+
+
+def normalize_time_split(value: object) -> str | None:
+    """Daily, Weekly, Monthly, Quarterly or Yearly; None splits the Campaign level by campaign."""
+    text = str(value or '').strip().casefold()
+    return next((name for name in TIME_SPLITS if name.casefold() == text), None)
+
+
+def period_labels(values: pd.Series, time_split: str) -> pd.Series:
+    """The period of each start time: 2026-07-15, 2026-W07 (ISO week), 2026-07, 2026-Q3 or 2026."""
+    times = pd.to_datetime(values, errors='coerce', format='mixed')
+    if time_split == 'Daily':
+        labels = times.dt.strftime('%Y-%m-%d')
+    elif time_split == 'Weekly':
+        weeks = times.dt.isocalendar()
+        labels = weeks['year'].astype('string') + '-W' + weeks['week'].astype('string').str.zfill(2)
+    elif time_split == 'Monthly':
+        labels = times.dt.strftime('%Y-%m')
+    elif time_split == 'Quarterly':
+        labels = times.dt.year.astype('Int64').astype('string') + '-Q' + times.dt.quarter.astype('Int64').astype('string')
+    else:
+        labels = times.dt.year.astype('Int64').astype('string')
+    return labels.astype(object).where(times.notna(), None)
 
 
 def required_input_columns(kind: str, levels: Iterable[str] = ()) -> list[str]:
@@ -262,10 +288,13 @@ def calculate_scoring(
     baseline_aliases: Iterable[str] = (),
     operator_mappings: dict[str, str] | None = None,
     map_areas=None,
+    time_split: str | None = None,
 ) -> dict:
     """Calculate KPI scores at the selected dimensions without reallocating missing weights.
 
     ``map_areas`` (a ``map_areas.AreaIndex``) places the tests in the map areas of their country.
+    ``time_split`` (Daily, Weekly, Monthly, Quarterly or Yearly) splits the Campaign level by the
+    period of each test's start time instead of by campaign.
     """
     config = _required_configuration(configuration)
     metrics = config['metrics']
@@ -314,6 +343,7 @@ def calculate_scoring(
                 campaign_values.setdefault(campaign.casefold(), campaign)
     for missing_kind in _FIELDS.keys() - frames.keys():
         warnings.append(f'{missing_kind.title()} source is missing; full benchmark coverage is unavailable.')
+    time_split = normalize_time_split(time_split) if campaign_selected else None
     for kind, source in frames.items():
         if kind not in _FIELDS or source.empty:
             continue
@@ -343,6 +373,14 @@ def calculate_scoring(
             )
         if not campaign_selected:
             frame['Campaign'] = None
+        elif time_split:
+            start = next((column for name in START_TIME_COLUMNS
+                          if (column := resolve_column_name(source.columns, name)) is not None), None)
+            if start is None:
+                warnings.append(f'{kind.title()}: no test start time; its rows cannot be split by {time_split.lower()} period.')
+                frame['Campaign'] = None
+            else:
+                frame['Campaign'] = period_labels(source[start], time_split)
         if 'Dataset Type' in dimensions:
             frame['Dataset Type'] = kind.title()
         missing_group = [field for field in _SHARED + [d for d in dimensions if d != 'Dataset Type'] if field not in frame]
@@ -532,7 +570,14 @@ def most_reliable_result(result: dict, baseline_operator: str = 'EE', configurat
     if any(not row['complete_coverage'] for row in totals):
         warnings.append(_INCOMPLETE_COVERAGE_WARNING)
     gap = _gap_rows(reliable_rows, keys, baseline_operator, aliases, [])
-    return {**result, 'scoring': reliable_rows,
+    reliable = {}
+    if 'area_summary' in result:
+        from src.modules.scoring_area_summary import most_reliable_area_summary
+        # The calculations of the National & Area Summary rate the same KPI subset.
+        reliable['area_summary'] = most_reliable_area_summary(
+            result['area_summary'], lambda item: most_reliable_result(item, baseline_operator, snapshot),
+        )
+    return {**result, **reliable, 'scoring': reliable_rows,
             'global_kpis': [row for row in result.get('global_kpis') or [] if row.get('kpi_code') in metrics],
             'totals': totals, 'charts': [dict(row) for row in totals], 'gap': gap,
             'gap_totals': _gap_totals(totals, keys, baseline_operator, aliases),

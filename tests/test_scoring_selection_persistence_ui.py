@@ -65,10 +65,10 @@ def test_scoring_calculation_picker_orders_cdr_aggregation_and_gap_reference_con
     parser.feed(template)
     elements = parser.elements
 
-    assert 'Select CDRs, filters, aggregation levels &amp; GAP reference' in template
+    assert 'Select CDRs, filters, Split by &amp; GAP reference' in template
     assert template.index('<label>NR Mode') < template.index('<strong>CDR datasets</strong>')
-    assert template.index('<strong>CDR datasets</strong>') < template.index('<strong>Aggregation levels</strong>')
-    assert template.index('<strong>Aggregation levels</strong>') < template.index('id="scoring-gap-reference-title"')
+    assert template.index('<strong>CDR datasets</strong>') < template.index('<strong>Split by</strong>')
+    assert template.index('<strong>Split by</strong>') < template.index('id="scoring-gap-reference-title"')
 
     buttons = [
         (attrs, ancestors) for tag, attrs, ancestors in elements

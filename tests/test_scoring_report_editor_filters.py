@@ -161,3 +161,65 @@ console.log(JSON.stringify(result));
     assert 'scoring:best_network:charts:service' in result['afterChange']
     # A single scenario has nothing to compare.
     assert result['single'] == []
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+def test_the_area_summary_shows_only_for_the_whole_country():
+    constants_start = SCRIPT.index('  const LEVELS = ')
+    constants_end = SCRIPT.index('  const clone = ')
+    el_start = SCRIPT.index('  const el = (tag, className, text) => {')
+    el_end = SCRIPT.index('  };\n', el_start) + 5
+    program = DOM + r'''
+Element.prototype.insertAdjacentHTML = function () {};
+Element.prototype.querySelector = function (selector) {
+  return this.descendants().find(node => node.tagName === selector.toUpperCase()) || null;
+};
+Element.prototype.dataset = undefined;
+const createElement = globalThis.document.createElement;
+globalThis.document.createElement = tag => Object.assign(createElement(tag), {dataset: {}, style: {}, value: ''});
+''' + SCRIPT[constants_start:constants_end] + "const clone = (value) => JSON.parse(JSON.stringify(value));\n" \
+        + SCRIPT[el_start:el_end] + "const campaignField = () => false;\n" + ''.join(
+            _function(name) for name in ('defaultOptions', 'defaultScenario', 'checkbox', 'checklist', 'optionGroup',
+                                         'settingValue', 'scoringPanel', 'scenarioCard')) + r'''
+const scenario = defaultScenario({operators: ['EE', '3']});
+scenario.area_summary.enabled = false;
+scenario.context_filters.Region = ['Vendor A'];
+const state = {scenarios: [scenario]};
+const context = {filterOptions: {City: ['Leeds', 'London'], Region: ['Vendor A']}, mainCities: ['Leeds'], operators: ['EE', '3']};
+const card = scenarioCard(state, 0, context, () => {});
+const nodes = card.descendants();
+const picker = label => nodes.find(node => node.tagName === 'SUMMARY' && node.textContent.startsWith(label));
+const details = label => nodes.find(node => node.tagName === 'DETAILS' && node.children[0] === picker(label));
+const labelled = text => nodes.find(node => node.tagName === 'LABEL' && node.text === text).querySelector('input');
+const selects = nodes.filter(node => node.tagName === 'SELECT');
+const [time, breakdown] = selects;
+const result = {defaults: defaultScenario().area_summary, scenarioTime: 'time_split' in defaultScenario(),
+  cities: picker('Separate cities:').textContent, tables: scenario.scorings.best_network.tables.area_summary,
+  before: {region: details('Region:').dataset.disabled, cities: details('Separate cities:').dataset.disabled,
+    breakdown: breakdown.disabled, time: time.disabled}, time: time.value};
+// Including the summary clears and disables the geographic filters and enables its settings.
+labelled('Include National & area summary').click();
+result.after = {region: details('Region:').dataset.disabled, cities: details('Separate cities:').dataset.disabled,
+  breakdown: breakdown.disabled, time: time.disabled, filters: scenario.context_filters, enabled: scenario.area_summary.enabled,
+  summary: picker('Region:').textContent};
+// The time split belongs to the summary: Split by keeps Campaign.
+time.value = 'Weekly'; time.dispatch('change');
+result.weekly = {levels: scenario.aggregation_levels, split: scenario.area_summary.time_split,
+  value: settingValue(scenario, 'area:time_split')};
+result.disabledValue = settingValue({...scenario, area_summary: {...scenario.area_summary, enabled: false}}, 'area:time_split');
+console.log(JSON.stringify(result));
+'''
+    completed = subprocess.run(['node', '-e', program], capture_output=True, text=True, check=True)
+    result = json.loads(completed.stdout)
+    # By default the summary breaks the country down by Region, shows London apart and splits by campaign.
+    assert result['defaults'] == {'enabled': True, 'time_split': 'Campaign', 'breakdown': 'Region', 'cities': ['London'],
+                                  'main_cities': False}
+    assert result['scenarioTime'] is False and result['time'] == 'Campaign'
+    assert result['cities'] == 'Separate cities: London' and 'tables' not in result
+    # Not included, its settings are disabled and the geographic filters can be used.
+    assert result['before'] == {'region': '', 'cities': 'true', 'breakdown': True, 'time': True}
+    # Included, the geographic filters are cleared and disabled.
+    assert result['after'] == {'region': 'true', 'cities': '', 'breakdown': False, 'time': False, 'filters': {},
+                               'enabled': True, 'summary': 'Region: All'}
+    assert result['weekly'] == {'levels': ['Operator', 'Campaign'], 'split': 'Weekly', 'value': 'Weekly'}
+    assert 'disabledValue' not in result

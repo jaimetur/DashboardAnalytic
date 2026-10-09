@@ -3,6 +3,9 @@
 A report has one or more scenarios (for example National, London, Main Cities and
 per Vendor). Each scenario uses the job's CDRs, NR Mode, methodology and GAP reference
 with its own filters and aggregation levels, and chooses the slides of each scoring.
+A scenario of the whole country (no Region, Cluster or City filters) can also include the
+National & area summary: the National scoring next to the scoring of chosen cities and of
+each Region, Cluster or City, with its own time split (all CDRs, per campaign or per period).
 Saved configurations and the last one used are kept in the workspace and travel with
 the Scoring & GAP Analysis Configuration.
 """
@@ -19,6 +22,13 @@ REPORT_CONFIGURATIONS_VERSION = 1
 SCORING_KINDS = ('best_network', 'most_reliable')
 REPORT_LEVELS = ('Operator', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign')
 REPORT_FILTER_FIELDS = ('Operator', 'Operator_Vendor', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign')
+# Filters that leave out part of the country: with any of them there is no National scoring.
+GEOGRAPHIC_FILTER_FIELDS = ('Region', 'Cluster', 'City')
+AREA_SUMMARY_BREAKDOWNS = ('None', 'Region', 'Cluster', 'City')
+DEFAULT_AREA_SUMMARY = {'enabled': True, 'time_split': 'Campaign', 'breakdown': 'Region', 'cities': ['London'],
+                        'main_cities': False}
+# The time split of the area summary: every selected CDR in one value, per campaign or per period of the tests' start time.
+AREA_SUMMARY_TIME_SPLITS = ('All', 'Campaign', 'Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly')
 MAX_SCENARIOS = 20
 MAX_SAVED_CONFIGURATIONS = 50
 _OPTION_DEFAULTS = {
@@ -70,6 +80,29 @@ def _normalize_options(raw: Any) -> dict[str, Any]:
     return options
 
 
+def _normalize_area_summary(raw: Any, whole_country: bool) -> dict[str, Any]:
+    """Whether the scenario has the National & area summary and its rows besides National:
+    the chosen cities, then each Region, Cluster or City. By default only scenarios of the whole country have it.
+    """
+    if not isinstance(raw, dict):
+        return {**copy.deepcopy(DEFAULT_AREA_SUMMARY), 'enabled': whole_country}
+    breakdown = str(raw.get('breakdown') or '').strip().casefold()
+    time_split = str(raw.get('time_split') or '').strip().casefold()
+    return {
+        'enabled': bool(raw['enabled']) if 'enabled' in raw else whole_country,
+        'time_split': next((name for name in AREA_SUMMARY_TIME_SPLITS if name.casefold() == time_split), 'Campaign'),
+        'breakdown': next((name for name in AREA_SUMMARY_BREAKDOWNS if name.casefold() == breakdown), 'None'),
+        'cities': _strings(raw.get('cities')),
+        'main_cities': bool(raw.get('main_cities')),
+    }
+
+
+def has_geographic_filters(scenario: dict[str, Any]) -> bool:
+    """Whether the scenario leaves out part of the country: Region, Cluster, City or Main Cities filters."""
+    filters = scenario.get('context_filters') or {}
+    return bool(scenario.get('main_cities')) or any(filters.get(field) for field in GEOGRAPHIC_FILTER_FIELDS)
+
+
 def default_scenario(*, name: str = 'National', context_filters: dict[str, Any] | None = None,
                      aggregation_levels: list[str] | None = None, main_cities: bool = False,
                      operators: list[str] | None = None) -> dict[str, Any]:
@@ -88,7 +121,7 @@ def normalize_scenario(raw: Any, index: int = 0) -> dict[str, Any]:
     filters = raw.get('context_filters') if isinstance(raw.get('context_filters'), dict) else {}
     levels = [level for level in _strings(raw.get('aggregation_levels')) if level in REPORT_LEVELS]
     scorings = raw.get('scorings') if isinstance(raw.get('scorings'), dict) else {}
-    return {
+    scenario = {
         'name': name,
         'context_filters': {field: _strings(filters.get(field)) for field in REPORT_FILTER_FIELDS
                             if _strings(filters.get(field))},
@@ -96,6 +129,8 @@ def normalize_scenario(raw: Any, index: int = 0) -> dict[str, Any]:
         'aggregation_levels': ['Operator', *[level for level in REPORT_LEVELS if level in levels and level != 'Operator']],
         'scorings': {kind: _normalize_options(scorings.get(kind)) for kind in SCORING_KINDS},
     }
+    scenario['area_summary'] = _normalize_area_summary(raw.get('area_summary'), not has_geographic_filters(scenario))
+    return scenario
 
 
 def normalize_report_configuration(raw: Any) -> dict[str, Any]:

@@ -708,7 +708,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert [slide.slide_layout.name for slide in intro_slides] == ['Title Page', 'Title Page']
     cover_text = _slide_text(presentation.slides[0]).replace('\x0b', '\n')
     transition_text = _slide_text(presentation.slides[1]).replace('\x0b', '\n')
-    expected_filter_text = 'Non-Standalone\nAggregations & Filters:\nAggregation: Operator\nOperator: All Operators\nVendor: All Vendors\nRegion: All Regions\nCity: All Cities'
+    expected_filter_text = 'Non-Standalone\nSplit by & Filters:\nSplit by: Operator\nOperator: All Operators\nVendor: All Vendors\nRegion: All Regions\nCity: All Cities'
     assert expected_filter_text in cover_text
     assert expected_filter_text in transition_text
     assert 'Campaigns: 2026-Q2' in cover_text
@@ -967,7 +967,7 @@ def test_cover_campaigns_prefer_scored_contexts_and_include_context_filters():
     presentation = _export(result, levels=('Operator',), job_fields=job_fields)
     for slide in (presentation.slides[index] for index in range(2)):
         text = _slide_text(slide).replace('\x0b', '\n')
-        assert 'Standalone' in text and 'Aggregation: Operator, City' in text
+        assert 'Standalone' in text and 'Split by: Operator, City' in text
         assert 'City: London' in text
         assert 'Campaigns: 2026-Q2' in text
         assert 'Wrong_source_campaign' not in text
@@ -994,7 +994,7 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
         assert 'Campaign: UK_Q2_2026, UK_Q3_2026' not in text
         assert 'Campaigns: 2026-Q2' in text
         ordered_labels = [
-            'Aggregation: Operator', 'Operator: O2 UK', 'Vendor: All Vendors',
+            'Split by: Operator', 'Operator: O2 UK', 'Vendor: All Vendors',
             'Region: North, South', 'City: All Cities',
         ]
         assert [text.index(label) for label in ordered_labels] == sorted(
@@ -1010,10 +1010,10 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
         mode_paragraph = subtitle_shape.text_frame.paragraphs[0]
         title_shape = slide.shapes.title
         assert subtitle_shape.top - (title_shape.top + title_shape.height) == Inches(.05)
-        assert 'Aggregation:' not in subtitle_shape.text
+        assert 'Split by:' not in subtitle_shape.text
         filters_shape = next(shape for shape in slide.shapes
                              if shape.name == 'Scoring Aggregations and Filters')
-        assert filters_shape.text.startswith('Aggregations & Filters:')
+        assert filters_shape.text.startswith('Split by & Filters:')
         assert filters_shape.text_frame.paragraphs[0]._p.get_or_add_pPr().get('marL') == '0'
         assert all(int(paragraph._p.get_or_add_pPr().get('marL')) > 0
                    for paragraph in filters_shape.text_frame.paragraphs[1:])
@@ -1051,7 +1051,7 @@ def test_intro_dimension_lines_keep_requested_order_independent_of_hierarchy_con
     }
     presentation = _export(_result(), job_fields=job_fields)
     expected = [
-        'Aggregation: Operator', 'Operator: O2 UK', 'Vendor: Telefonica',
+        'Split by: Operator', 'Operator: O2 UK', 'Vendor: Telefonica',
         'Region: North', 'City: London',
     ]
     for index in (0, 1):

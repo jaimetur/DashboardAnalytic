@@ -16532,7 +16532,7 @@ def scoring_jobs_result(job_id: int, user: SessionUser = Depends(current_user)) 
     result['coverage_notes'] = scoring_coverage_notes(result)
     # The points-lost shares and polygons reach the page through the views' insights and the boundaries endpoint.
     return {'job': {key: value for key, value in job.items() if key != 'result'},
-            **{key: value for key, value in result.items() if key != 'points_loss'},
+            **{key: value for key, value in result.items() if key not in {'points_loss', 'area_summary'}},
             'views': views, 'scorings': scorings}
 
 
@@ -16738,6 +16738,7 @@ def _scenario_scoring_job(task_repository: Repository, base: dict[str, Any], sce
     from src.modules.scoring_views import single_value_levels
 
     context_filters = {field: list(values) for field, values in scenario['context_filters'].items()}
+    area_summary = _scenario_area_summary(task_repository, scenario)
     if scenario.get('main_cities'):
         context_filters['City'] = list(task_repository.list_main_cities())
     try:
@@ -16747,22 +16748,41 @@ def _scenario_scoring_job(task_repository: Repository, base: dict[str, Any], sce
     except ValueError as exc:
         raise ValueError(f'Scenario "{scenario["name"]}": {exc}') from exc
     levels = list(scenario['aggregation_levels'])
-    job = _completed_scenario_job(task_repository, base, scenario, selected, levels, context_filters, username)
+    job = _completed_scenario_job(task_repository, base, scenario, selected, levels, context_filters, username,
+                                  area_summary)
     single = single_value_levels(levels, job.get('result') or {})
     if single:
         levels = [level for level in levels if level not in single]
-        job = _completed_scenario_job(task_repository, base, scenario, selected, levels, context_filters, username)
+        job = _completed_scenario_job(task_repository, base, scenario, selected, levels, context_filters, username,
+                                      area_summary)
     return job
+
+
+def _scenario_area_summary(task_repository: Repository, scenario: dict[str, Any]) -> dict[str, Any] | None:
+    """The National & Area Summary of a scenario of the whole country that includes it, or None."""
+    from src.modules.scoring_reports import has_geographic_filters
+
+    summary = scenario.get('area_summary') or {}
+    if not summary.get('enabled') or has_geographic_filters(scenario):
+        return None
+    cities = list(summary.get('cities') or [])
+    if summary.get('main_cities'):
+        cities.extend(task_repository.list_main_cities())
+    breakdown = summary.get('breakdown')
+    if (not breakdown or breakdown == 'None') and not cities:
+        return None
+    return {'breakdown': None if breakdown == 'None' else breakdown, 'cities': cities,
+            'time_split': summary.get('time_split') or 'Campaign'}
 
 
 def _completed_scenario_job(task_repository: Repository, base: dict[str, Any], scenario: dict[str, Any],
                             selected: Any, levels: list[str], context_filters: dict[str, Any],
-                            username: str) -> dict[str, Any]:
+                            username: str, area_summary: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
         job, cached = create_scoring_job(
             task_repository, selected, levels, base['nr_mode'], username=username,
             baseline_operator=base.get('baseline_operator') or 'EE', context_filters=context_filters,
-            scoring_profile_id=base.get('scoring_profile_id') or None,
+            scoring_profile_id=base.get('scoring_profile_id') or None, area_summary=area_summary,
         )
     except ValueError as exc:
         raise ValueError(f'Scenario "{scenario["name"]}": {exc}') from exc

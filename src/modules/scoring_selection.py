@@ -229,14 +229,14 @@ def _normalize_selection(
     raw_levels = raw_selection.get('aggregation_levels', defaults['aggregation_levels'])
     if not isinstance(raw_levels, (list, tuple, set)):
         raw_levels = []
-        warnings.append('Saved aggregation levels were invalid and have been reset.')
+        warnings.append('Saved Split by levels were invalid and have been reset.')
     selected_level_ids = {column_identity(value) for value in raw_levels if str(value).strip()}
     aggregation_levels = [
         level for level in hierarchy
         if column_identity(level) == column_identity('Operator') or column_identity(level) in selected_level_ids
     ]
     if any(identity not in hierarchy_by_identity for identity in selected_level_ids):
-        warnings.append('Aggregation levels from the previous methodology were removed.')
+        warnings.append('Split by levels from the previous methodology were removed.')
     if not aggregation_levels:
         aggregation_levels = ['Operator']
 

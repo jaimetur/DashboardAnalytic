@@ -908,7 +908,7 @@
     } else if (selectionStatus.key && selectionStatus.key === JSON.stringify(calculationPayload())) {
       setMessage(selectionStatus.text, selectionStatus.kind);
     } else if (message.dataset.kind !== 'error' && message.dataset.kind !== 'success') {
-      setMessage(`${selectedCount} CDR${selectedCount === 1 ? '' : 's'} selected across Data, Voice and Speech. Operator aggregation is included automatically.`);
+      setMessage(`${selectedCount} CDR${selectedCount === 1 ? '' : 's'} selected across Data, Voice and Speech. Results are always split by Operator.`);
     }
   }
 
@@ -1157,7 +1157,7 @@
       const aggregation = document.createElement('span');
       aggregation.className = 'scoring-job-aggregation';
       const aggregationLabel = document.createElement('span');
-      aggregationLabel.textContent = 'Aggregation levels:';
+      aggregationLabel.textContent = 'Split by:';
       const aggregationLevels = document.createElement('strong');
       aggregationLevels.textContent = jobLevels(job);
       aggregation.append(aggregationLabel, aggregationLevels);
@@ -1395,9 +1395,9 @@
   }
 
   // Export Selected Scoring Report (Results panel) exports the selected job as it was calculated (its
-  // CDRs, aggregation levels and filters): it only asks for PowerPoint or Word.
+  // CDRs, Split by levels and filters): it only asks for PowerPoint or Word.
   async function exportSelectedScoringReport(link) {
-    const message = 'Export the selected scoring report with the CDRs, aggregation levels and filters it was calculated with.';
+    const message = 'Export the selected scoring report with the CDRs, Split by levels and filters it was calculated with.';
     const choice = typeof showConfirmDialog === 'function'
       ? await showConfirmDialog(message, {
         title: 'Export Selected Scoring Report', confirmLabel: 'PowerPoint', secondaryLabel: 'Word', cancelLabel: 'Cancel',
@@ -5840,7 +5840,7 @@
       visible.push(message);
       return visible;
     }
-    let message = `${environmentLabel(environment)} has incomplete coverage in ${incomplete.length} of ${totals.length} scoring groups (operator and selected aggregation levels).`;
+    let message = `${environmentLabel(environment)} has incomplete coverage in ${incomplete.length} of ${totals.length} scoring groups (operator and selected Split by levels).`;
     if (missing.size) message += ` Missing weighted environments in one or more groups: ${[...missing].map(environmentLabel).join(', ')}.`;
     if (partial.size) message += ` Environments with missing valid KPI measurements: ${[...partial].map(environmentLabel).join(', ')}.`;
     if (!missing.size && !partial.size) message += ' One or more required KPI measurements are missing or have no valid samples.';
@@ -5856,7 +5856,7 @@
       message += ` The saved City filter is ${cities.join(', ')}. Only matching City names are included; road routes with different City names are excluded.`;
     }
     if (environment === 'Combined' && (payload.aggregation_levels || job?.aggregation_levels || []).includes('City')) {
-      message += ' City is an aggregation level: cities and road routes are scored separately, and environment coverage is checked within each group.';
+      message += ' City is a Split by level: cities and road routes are scored separately, and environment coverage is checked within each group.';
     }
     message += ' Available points keep their original weights; missing contributions are not scaled up to a complete benchmark.';
     visible.push(message);

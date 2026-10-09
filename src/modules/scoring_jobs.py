@@ -14,6 +14,9 @@ from typing import Any, Iterable
 import pandas as pd
 
 from src.modules.column_names import campaign_sort_key, column_identity, resolve_column_name
+from src.modules.scoring_area_summary import (
+    area_summary_levels, calculate_area_summary, normalize_area_summary_request,
+)
 from src.modules.scoring_vendors import scoring_vendor_name, scoring_vendor_operators
 from src.modules.cdr_stage import combined_dataset_ids
 from src.modules.nr_mode import NR_MODES, normalize_nr_mode
@@ -511,7 +514,7 @@ def _normalize_levels(
         else:
             resolved = None
         if not resolved:
-            raise ValueError(f"Aggregation level '{requested}' is not available in the selected CDR datasets.")
+            raise ValueError(f"Split by level '{requested}' is not available in the selected CDR datasets.")
         resolved_identity = column_identity(resolved)
         if resolved_identity not in seen:
             resolved_levels.append(resolved)
@@ -539,6 +542,7 @@ def _job_payload(
     operator_mappings: dict[str, str] | None = None,
     scoring_profile_id: str = '',
     scoring_profile_name: str = '',
+    area_summary: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     key_payload = {
         'method_version': method_version,
@@ -559,6 +563,8 @@ def _job_payload(
         key_payload['scoring_profile_id'] = scoring_profile_id
     if scoring_profile_name:
         key_payload['scoring_profile_name'] = scoring_profile_name
+    if area_summary:
+        key_payload['area_summary'] = area_summary
     normalized_filters = _normalize_context_filters(context_filters)
     resolved_filters = _normalize_context_filters(resolved_context_filters or context_filters)
     if any(normalized_filters.values()):
@@ -589,6 +595,7 @@ def _row_to_job(
         aggregation_hierarchy = source_metadata_payload.get('aggregation_hierarchy', [])
         aggregation_contract_version = source_metadata_payload.get('aggregation_contract_version', 1)
         operator_mappings = source_metadata_payload.get('operator_mappings', {})
+        area_summary = source_metadata_payload.get('area_summary')
     else:
         metadata_list = source_metadata_payload if isinstance(source_metadata_payload, list) else []
         configuration_payload = None
@@ -600,6 +607,7 @@ def _row_to_job(
         aggregation_hierarchy = []
         aggregation_contract_version = 1
         operator_mappings = {}
+        area_summary = None
     if not isinstance(context_filters, dict):
         context_filters = {}
     if not isinstance(resolved_context_filters, dict):
@@ -644,6 +652,7 @@ def _row_to_job(
         },
         'aggregation_hierarchy': [str(value) for value in aggregation_hierarchy if str(value).strip()],
         'aggregation_contract_version': aggregation_contract_version,
+        'area_summary': area_summary if isinstance(area_summary, dict) else None,
         'dataset_names': [str(item.get('name') or '') for item in metadata_list if isinstance(item, dict)],
         'campaigns': sorted({
             str(campaign).strip()
@@ -693,10 +702,12 @@ def _prepare_scoring_job(
     baseline_operator: str = DEFAULT_BASELINE_OPERATOR,
     context_filters: dict[str, list[str]] | None = None,
     scoring_profile_id: str | None = None,
+    area_summary: dict[str, Any] | None = None,
 ) -> tuple[str, str, str, list[int], dict[str, Any], str, list[str], str]:
     """Prepare the canonical identity and snapshot shared by matching and submission."""
     normalized_ids = list(dict.fromkeys(int(dataset_id) for dataset_id in dataset_ids))
     normalized_context_filters = _normalize_context_filters(context_filters)
+    normalized_area_summary = normalize_area_summary_request(area_summary, normalized_context_filters)
     vendor_catalogues = repository.cdr_catalogues_by_dataset(normalized_ids)
     vendor_operators = scoring_vendor_operators(vendor_catalogues, repository.list_operator_mapping_groups())
     normalized_context_filters['Vendor'] = sorted({
@@ -744,7 +755,7 @@ def _prepare_scoring_job(
     cache_key, _canonical = _job_payload(
         normalized_levels, selected_mode, baseline, version, source_fingerprint, config_hash, baseline_aliases,
         normalized_context_filters, resolved_context_filters, operator_mappings,
-        str(scoring_profile.get('id') or ''), str(scoring_profile.get('name') or ''),
+        str(scoring_profile.get('id') or ''), str(scoring_profile.get('name') or ''), normalized_area_summary,
     )
     source_metadata = [source['metadata'] for source in sources]
     source_snapshot = {
@@ -759,6 +770,8 @@ def _prepare_scoring_job(
         'aggregation_contract_version': AGGREGATION_CONTRACT_VERSION,
         'operator_mappings': operator_mappings,
     }
+    if normalized_area_summary:
+        source_snapshot['area_summary'] = normalized_area_summary
     return (cache_key, version, source_fingerprint, normalized_ids, source_snapshot,
             selected_mode, normalized_levels, baseline)
 
@@ -783,6 +796,7 @@ def _matching_saved_job(connection: Any, cache_key: str, version: str,
                 job['source_fingerprint'], configuration_hash(job['configuration']),
                 job['baseline_aliases'], job['context_filters'], job['resolved_context_filters'],
                 job['operator_mappings'], job['scoring_profile_id'], job['scoring_profile_name'],
+                job.get('area_summary'),
             )
         except (ValueError, TypeError, KeyError):
             continue
@@ -796,11 +810,12 @@ def find_matching_scoring_job(
     *, baseline_operator: str = DEFAULT_BASELINE_OPERATOR,
     context_filters: dict[str, list[str]] | None = None,
     scoring_profile_id: str | None = None,
+    area_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Find a saved calculation using the same identity as job submission."""
     cache_key, version, source_fingerprint, normalized_ids, *_ = _prepare_scoring_job(
         repository, dataset_ids, levels, nr_mode, baseline_operator=baseline_operator,
-        context_filters=context_filters, scoring_profile_id=scoring_profile_id,
+        context_filters=context_filters, scoring_profile_id=scoring_profile_id, area_summary=area_summary,
     )
     with repository.connection() as connection:
         row = _matching_saved_job(connection, cache_key, version, normalized_ids, source_fingerprint)
@@ -818,12 +833,17 @@ def create_scoring_job(
     username: str = 'system',
     context_filters: dict[str, list[str]] | None = None,
     scoring_profile_id: str | None = None,
+    area_summary: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], bool]:
-    """Reuse a matching result, requeue the existing job, or create a new calculation."""
+    """Reuse a matching result, requeue the existing job, or create a new calculation.
+
+    ``area_summary`` (a breakdown level, chosen cities and a time split) adds the National & Area
+    Summary calculations to a job without Region, Cluster or City filters.
+    """
     (cache_key, version, source_fingerprint, normalized_ids, source_snapshot,
      selected_mode, normalized_levels, baseline) = _prepare_scoring_job(
         repository, dataset_ids, levels, nr_mode, baseline_operator=baseline_operator,
-        context_filters=context_filters, scoring_profile_id=scoring_profile_id,
+        context_filters=context_filters, scoring_profile_id=scoring_profile_id, area_summary=area_summary,
     )
     now = local_now_iso()
     with repository.connection() as connection:
@@ -1125,8 +1145,9 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
         engine = _scoring_engine()
         # The points-lost map also reads the area and coordinate columns.
         required_columns = getattr(engine, 'load_input_columns', None) or getattr(engine, 'required_input_columns')
+        # The area summary also reads its breakdown and City columns, and the test start time for its time split.
         for source in sources:
-            source['levels'] = job['levels']
+            source['levels'] = [*job['levels'], *area_summary_levels(job['levels'], job.get('area_summary'))]
         frames = _load_source_frames(
             repository, sources, update_progress, required_columns,
             job.get('resolved_context_filters', job.get('context_filters', {})),
@@ -1158,6 +1179,11 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
         result = calculate(frames, job['levels'], **call_kwargs)
         if not isinstance(result, dict):
             raise TypeError('The scoring engine must return a result object.')
+        if job.get('area_summary'):
+            summary = calculate_area_summary(calculate, frames, job['levels'], job['area_summary'], call_kwargs,
+                                             update_progress)
+            result['warnings'] = [*(result.get('warnings') or []), *summary.pop('warnings')]
+            result['area_summary'] = summary
         _attach_mapping_boundaries(repository, dataset_ids, result)
         result.setdefault('configuration', configuration)
         result.setdefault('configuration_hash', configuration_hash(configuration))

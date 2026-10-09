@@ -480,6 +480,183 @@ def add_campaign_comparison_slides(presentation, comparisons: list[dict[str, Any
             _comparison_table(slide, comparison, left=left, width=width)
 
 
+MAX_SUMMARY_AREAS = 6
+MAX_SUMMARY_SLIDES = 4
+NATIONAL_FILL = '#FFF4D6'
+AREA_FILLS = ('#FFFFFF', '#F2F3F5')
+
+
+def _summary_number(value: float | None, *, signed: bool = False) -> str:
+    if value is None:
+        return '—'
+    return f'{value:+,.1f}' if signed else f'{value:,.1f}'
+
+
+def _signed_color(value: float | None) -> str:
+    if value is None or round(value, 1) == 0:
+        return '#4A5B65'
+    return WIN_COLOR if value > 0 else LOSS_COLOR
+
+
+def _area_summary_table(slide, summary: dict[str, Any], areas: list[dict[str, Any]], *, left: float,
+                        width: float) -> bool:
+    """The score of each operator per area, with its GAP to the reference and its change from the previous campaign."""
+    from src.modules.scoring_insights import _display
+    latest, previous = summary['latest_campaign'], summary['previous_campaign']
+    reference = summary.get('reference_label') or 'reference'
+    headers = ['Area', 'Operator', f"Score\n{_display('Campaign', latest)}" if latest else 'Score']
+    if previous:
+        headers.append(f"Δ vs\n{_display('Campaign', previous)}")
+    headers.append(f'Δ vs\n{reference}')
+    fixed = [1.0] * (len(headers) - 2)
+    names = (width - sum(fixed)) / 2
+    widths = [names, names, *fixed]
+    count = sum(len(area['rows']) for area in areas)
+    top, header_height = 1.95, .46
+    row_height = min(.3, (6.8 - top - header_height) / max(1, count))
+    size = 10 if row_height >= .3 else 9 if row_height >= .26 else 8
+    shape, table = _table(slide, count + 1, len(headers), left, top, width, row_height, widths)
+    shape.name = 'Scoring Area Summary Table'
+    table.rows[0].height = Inches(header_height)
+    for column, text in enumerate(headers):
+        _cell(table.cell(0, column), text, size=size, bold=True, fill='#E9ECEF',
+              align=PP_ALIGN.LEFT if column < 2 else PP_ALIGN.CENTER)
+        table.cell(0, column).text_frame.word_wrap = True
+    incomplete = False
+    row = 1
+    for index, area in enumerate(areas):
+        fill = NATIONAL_FILL if area['kind'] == 'National' else AREA_FILLS[index % 2]
+        first = row
+        for item in area['rows']:
+            color = item.get('color') or '#263746'
+            marker = '' if item['complete'] else '*'
+            incomplete = incomplete or not item['complete']
+            _cell(table.cell(row, 1), item['label'], size=size, bold=item['is_reference'], color=color, fill=fill)
+            _cell(table.cell(row, 2), _summary_number(item['points']) + marker, size=size, bold=True, color=color,
+                  fill=fill, align=PP_ALIGN.CENTER)
+            values = ([item['delta']] if previous else []) + [None if item['is_reference'] else item['gap']]
+            for offset, value in enumerate(values, start=3):
+                _cell(table.cell(row, offset), '' if item['is_reference'] and offset == len(headers) - 1
+                      else _summary_number(value, signed=True), size=size, color=_signed_color(value), fill=fill,
+                      align=PP_ALIGN.CENTER)
+            row += 1
+        if row - 1 > first:
+            table.cell(first, 0).merge(table.cell(row - 1, 0))
+        _cell(table.cell(first, 0), area['label'], size=size + 1, bold=True, fill=fill)
+        table.cell(first, 0).vertical_anchor = MSO_ANCHOR.TOP
+        table.cell(first, 0).margin_top = Inches(.04)
+    return incomplete
+
+
+def _area_summary_chart(slide, area: dict[str, Any], campaigns: list[str], *, left: float, top: float,
+                        width: float, height: float, low: float, high: float, unit: float) -> None:
+    """The points of each operator of one area in every campaign."""
+    from src.modules.scoring_insights import _display
+    heading = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(.26))
+    _write(heading.text_frame, [(area['label'], 10, True, TITLE_BLUE)])
+    data = CategoryChartData()
+    data.categories = [_display('Campaign', campaign) for campaign in campaigns]
+    for item in area['rows']:
+        data.add_series(item['label'], item['trend'])
+    chart_shape = slide.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS, Inches(left), Inches(top + .22), Inches(width),
+                                         Inches(height - .22), data)
+    chart_shape.name = f'Scoring Area Summary Chart {area["label"]}'
+    chart = chart_shape.chart
+    chart.has_legend = False
+    chart.font.name = _FONT
+    chart.font.size = Pt(7)
+    chart.value_axis.minimum_scale = low
+    chart.value_axis.maximum_scale = high
+    chart.value_axis.major_unit = unit
+    chart.value_axis.tick_labels.number_format = '0'
+    chart.value_axis.tick_labels.number_format_is_linked = False
+    chart.value_axis.major_gridlines.format.line.color.rgb = _rgb('#E3E6E9')
+    chart.value_axis.format.line.fill.background()
+    chart.category_axis.major_tick_mark = XL_TICK_MARK.NONE
+    chart.category_axis.format.line.color.rgb = _rgb('#BFC6CC')
+    for index, (plot_series, item) in enumerate(zip(chart.series, area['rows'])):
+        color = item.get('color') or FALLBACK_COLORS[index % len(FALLBACK_COLORS)]
+        plot_series.smooth = False
+        plot_series.format.line.color.rgb = _rgb(color)
+        plot_series.format.line.width = Pt(1.75)
+        plot_series.marker.size = 4
+        plot_series.marker.format.fill.solid()
+        plot_series.marker.format.fill.fore_color.rgb = _rgb(color)
+        plot_series.marker.format.line.color.rgb = _rgb(color)
+        # The latest points labelled at the end of each line, as the Crowd charts do.
+        last = max((position for position, value in enumerate(item['trend']) if value is not None), default=None)
+        if last is not None:
+            label = plot_series.points[last].data_label
+            label.position = XL_DATA_LABEL_POSITION.RIGHT
+            label.text_frame.text = f"{item['trend'][last]:,.0f}"
+            for paragraph in label.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    run.font.size = Pt(7)
+                    run.font.bold = True
+                    run.font.color.rgb = _rgb(color)
+
+
+def add_area_summary_slides(presentation, summaries: list[dict[str, Any]], *, scoring_label: str, subtitle: str,
+                            new_slide: Callable) -> None:
+    """The National scoring next to the chosen cities and each area: a table with each operator's score,
+    its change from the previous campaign and its GAP to the reference, and with several campaigns a
+    trend chart per area, up to six areas per slide.
+    """
+    for summary in summaries:
+        areas = summary['areas']
+        pages = [areas[start:start + MAX_SUMMARY_AREAS]
+                 for start in range(0, len(areas), MAX_SUMMARY_AREAS)][:MAX_SUMMARY_SLIDES]
+        campaigns = summary['campaigns']
+        trend = len(campaigns) >= 2
+        values = [value for area in areas for item in area['rows'] for value in item['trend'] if value is not None]
+        # The same scale in every chart, in round steps.
+        lowest, highest = min(values, default=0), max(values, default=1)
+        padding = max(1.0, (highest - lowest) * .15)
+        unit = next((step for step in (1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500)
+                     if step * 5 >= highest - lowest + 2 * padding), 1000)
+        low = floor((lowest - padding) / unit) * unit
+        high = ceil((highest + padding) / unit) * unit
+        for number, page in enumerate(pages, start=1):
+            suffix = f' · {number}/{len(pages)}' if len(pages) > 1 else ''
+            slide = new_slide(presentation, f'{scoring_label} — National & Areas', subtitle + suffix)
+            width = 6.3 if trend else 8.4
+            incomplete = _area_summary_table(slide, summary, page, left=.45 if trend else 2.45, width=width)
+            split = summary.get('time_split') or 'Campaign'
+            period = ('every selected CDR aggregated' if split == 'All'
+                      else 'per campaign' if split == 'Campaign' else f'{split.lower()} periods of the test start time')
+            notes = ['Each area is scored with its own measurements, as the National scoring is: the area scores are '
+                     'not shares of the National points',
+                     f'time split: {period}',
+                     f"maximum scoring: {_points(summary['maximum'])} points"
+                     + (' (environments without measurements in an area are scaled)' if summary['scaled'] else '')]
+            if incomplete:
+                notes.append('* incomplete KPI coverage')
+            intro = slide.shapes.add_textbox(Inches(.45), Inches(1.5), Inches(12.4), Inches(.36))
+            details = ' · '.join(notes[1:])
+            _write(intro.text_frame, [(f'{notes[0]}. {details[:1].upper()}{details[1:]}.', 9, False, '#4A5B65')])
+            intro.text_frame.margin_left = 0
+            if trend:
+                columns = 2
+                rows = ceil(len(page) / columns)
+                gap = .12
+                chart_left, chart_top, chart_width, chart_height = 6.95, 1.95, 5.95, 4.9
+                cell_width = (chart_width - gap) / columns
+                cell_height = (chart_height - gap * (rows - 1)) / rows
+                for index, area in enumerate(page):
+                    _area_summary_chart(slide, area, campaigns,
+                                        left=chart_left + (index % columns) * (cell_width + gap),
+                                        top=chart_top + (index // columns) * (cell_height + gap),
+                                        width=cell_width, height=cell_height, low=low, high=high, unit=unit)
+                legend = list(summary['operators'].values())
+                step = min(1.35, chart_width / max(1, len(legend)))
+                for index, style in enumerate(legend):
+                    key_left = chart_left + index * step
+                    _box(slide, key_left, 6.98, .14, .14, style.get('color') or FALLBACK_COLORS[index % len(FALLBACK_COLORS)])
+                    key = slide.shapes.add_textbox(Inches(key_left + .18), Inches(6.94), Inches(step - .2), Inches(.24))
+                    _write(key.text_frame, [(style['label'], 8, False, '#4A5B65')])
+                    key.text_frame.margin_left = 0
+
+
 LOSS_LOW = (249, 214, 92)
 LOSS_HIGH = (200, 16, 46)
 MAX_LOSS_BARS = 30
