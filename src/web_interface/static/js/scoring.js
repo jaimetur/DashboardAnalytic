@@ -5048,8 +5048,31 @@
       const high = Math.ceil((Math.max(...values) + padding) / step) * step;
       const grid = document.createElement('div');
       grid.className = 'scoring-area-trend-grid';
-      for (const area of areaChartOrder(summary.areas || [])) grid.append(makeAreaTrendChart(area, campaigns, low, high, step));
+      const chartAreas = areaChartOrder(summary.areas || []);
+      let chartHeight = 170;
+      const drawCharts = () => grid.replaceChildren(
+        ...chartAreas.map(area => makeAreaTrendChart(area, campaigns, low, high, step, chartHeight)));
+      drawCharts();
       view.append(grid);
+      // Beside the table, the charts grow to take its height (never shorter than their usual size).
+      const fitCharts = () => {
+        const first = grid.firstElementChild;
+        if (!view.isConnected || !first) return;
+        const chartWidth = first.querySelector('svg')?.getBoundingClientRect().width || 0;
+        if (!chartWidth) return;
+        let height = 170;
+        if (getComputedStyle(view).gridTemplateColumns.split(' ').length > 1) {
+          const chartRows = Math.ceil(chartAreas.length / 2);
+          const gap = parseFloat(getComputedStyle(grid).rowGap) || 0;
+          const caption = first.querySelector('figcaption')?.getBoundingClientRect().height || 0;
+          const available = (tableWrap.getBoundingClientRect().height - gap * (chartRows - 1)) / chartRows - caption;
+          height = Math.max(170, Math.min(420, Math.round(available * 360 / chartWidth)));
+        }
+        if (Math.abs(height - chartHeight) < 6) return;
+        chartHeight = height;
+        drawCharts();
+      };
+      if (typeof ResizeObserver === 'function') new ResizeObserver(() => fitCharts()).observe(view);
     }
     const note = document.createElement('p');
     note.className = 'scoring-note';
@@ -5068,7 +5091,7 @@
     return [...areas.filter(area => area.kind !== 'City'), ...cities];
   }
 
-  function makeAreaTrendChart(area, campaigns, low, high, step) {
+  function makeAreaTrendChart(area, campaigns, low, high, step, height = 170) {
     const figure = document.createElement('figure');
     figure.className = 'scoring-area-trend';
     const caption = document.createElement('figcaption');
@@ -5076,7 +5099,15 @@
     caption.className = area.kind === 'National' ? 'is-national' : area.kind === 'City' ? 'is-city' : 'is-breakdown';
     caption.textContent = area.label;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    const width = 360, height = 170, left = 42, right = 34, top = 10, bottom = 26;
+    const width = 360, right = 34, top = 10;
+    // Campaign or period labels that do not fit side by side are tilted, with room for them below the axis and,
+    // for the first one, on the left.
+    const spacing = (width - 42 - right) / Math.max(1, campaigns.length - 1);
+    const labelWidth = Math.max(0, ...campaigns.map(campaign => String(campaign).length)) * 5.1;
+    const tilted = campaigns.length > 1 && labelWidth > spacing - 4;
+    const angle = Math.PI * 40 / 180;
+    const left = tilted ? Math.max(42, Math.round(labelWidth * Math.cos(angle)) + 4) : 42;
+    const bottom = tilted ? Math.round(16 + labelWidth * Math.sin(angle)) : 26;
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', `${area.label} scoring trend`);
@@ -5089,7 +5120,10 @@
       svg.append(label);
     }
     campaigns.forEach((campaign, index) => {
-      const label = svgElement(svg, 'text', {x: x(index), y: height - 8, 'text-anchor': 'middle', 'font-size': 9, fill: '#263746'});
+      const labelY = height - bottom + 13;
+      const label = svgElement(svg, 'text', tilted
+        ? {x: x(index), y: labelY, 'text-anchor': 'end', 'font-size': 9, fill: '#263746', transform: `rotate(-40 ${x(index)} ${labelY})`}
+        : {x: x(index), y: height - 8, 'text-anchor': 'middle', 'font-size': 9, fill: '#263746'});
       label.textContent = campaign;
       svg.append(label);
     });

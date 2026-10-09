@@ -1761,3 +1761,13 @@ def test_the_scoring_trend_comes_before_the_national_and_areas():
     chart = _function_source(SCORING_SCRIPT.read_text(encoding='utf-8'), 'makeAreaTrendChart')
     assert "area.kind === 'National' ? 'is-national' : area.kind === 'City' ? 'is-city' : 'is-breakdown'" in chart
 
+
+def test_the_area_charts_take_the_height_of_the_table_and_tilt_crowded_labels():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    view = _function_source(script, 'makeAreaSummaryView')
+    assert "new ResizeObserver(() => fitCharts()).observe(view)" in view
+    assert "height = Math.max(170, Math.min(420, Math.round(available * 360 / chartWidth)));" in view
+    chart = _function_source(script, 'makeAreaTrendChart')
+    assert "const tilted = campaigns.length > 1 && labelWidth > spacing - 4;" in chart
+    assert "transform: `rotate(-40 ${x(index)} ${labelY})`" in chart
+
