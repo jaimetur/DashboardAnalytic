@@ -640,6 +640,7 @@ class Repository:
             self._migrate_legacy_vendor_mapping_profiles(conn)
             self._migrate_vendor_field_names(conn)
             self._refresh_vendor_filter_options(conn)
+            self._rename_mixed_vendor_labels(conn)
             conn.execute(
                 """
                 INSERT OR IGNORE INTO dataset_profiles (dataset_id, status, progress, updated_at)
@@ -711,8 +712,8 @@ class Repository:
             'vendor': (
                 ('Ericsson', '#2E8B57', ()), ('Huawei', '#E15759', ()),
                 ('Samsung', '#7B3FB5', ()), ('NSN', '#4E79A7', ()),
-                ('Ericsson_Mixed', '#D9A514', ('Ericsson Mixed',)),
-                ('Non-Ericsson_Mixed', '#B9770E', ('Non-Ericsson Mixed', 'Non Ericsson Mixed')),
+                ('Ericsson (Mixed)', '#D9A514', ('Ericsson Mixed',)),
+                ('Mixed (non-Ericsson)', '#B9770E', ('Non-Ericsson Mixed', 'Non Ericsson Mixed')),
                 ('Mixed Vendor', '#D9A514', ('Mixed',)),
                 ('Other Vendor', '#D9A514', ('Other',)),
                 ('(blank)', '#7A8791', ('Blank', 'nan', 'none')),
@@ -755,7 +756,7 @@ class Repository:
                 "INSERT INTO workspace_state (key, value) VALUES ('chart_mapping_defaults_v1', '1')"
             )
         # Workspaces seeded before the unified Vodafone/Three vendor rule also
-        # receive its Ericsson_Mixed and Non-Ericsson_Mixed groups, once.
+        # receive its Ericsson (Mixed) and Mixed (non-Ericsson) groups, once.
         if not conn.execute("SELECT 1 FROM workspace_state WHERE key = 'vendor_mixed_groups_v2'").fetchone():
             for canonical, color, aliases in defaults['vendor'][4:6]:
                 position = int(conn.execute(
@@ -1318,6 +1319,71 @@ class Repository:
             conn.execute(f'UPDATE dataset_profiles SET updated_at = ? WHERE dataset_id IN ({marks})', [local_now_iso(), *dataset_ids])
             conn.execute('DELETE FROM dashboard_filter_selections')
         conn.execute('INSERT OR REPLACE INTO workspace_state (key, value) VALUES (?, ?)', (self.VENDOR_FIELDS_MIGRATION_KEY, '1'))
+
+    MIXED_VENDOR_LABELS_MIGRATION_KEY = 'vendor_mixed_labels_v3'
+    # Former labels of the mixed Vendor groups; the one containing the other goes first.
+    MIXED_VENDOR_LABEL_RENAMES = (('Non-Ericsson_Mixed', 'Mixed (non-Ericsson)'), ('Ericsson_Mixed', 'Ericsson (Mixed)'))
+
+    def _rename_mixed_vendor_labels(self, conn: sqlite3.Connection) -> None:
+        """Store the mixed Vendor groups with the labels shown in the interface, once per workspace.
+
+        CDR rows, Vendor Maps, report templates, saved queries, filters and every other stored
+        setting replace ``Non-Ericsson_Mixed`` with ``Mixed (non-Ericsson)`` and ``Ericsson_Mixed``
+        with ``Ericsson (Mixed)``. The audit log keeps its history.
+        """
+        if conn.execute('SELECT 1 FROM workspace_state WHERE key = ?', (self.MIXED_VENDOR_LABELS_MIGRATION_KEY,)).fetchone():
+            return
+
+        def renamed(value):
+            if isinstance(value, bytes):
+                for old, new in self.MIXED_VENDOR_LABEL_RENAMES:
+                    value = value.replace(old.encode(), new.encode())
+                return value
+            for old, new in self.MIXED_VENDOR_LABEL_RENAMES:
+                value = value.replace(old, new)
+            return value
+
+        tables = [str(row[0]) for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'audit_logs'"
+        ).fetchall()]
+        for table in tables:
+            quoted_table = self._quote_identifier(table)
+            columns = [str(row['name']) for row in conn.execute(f'PRAGMA table_info({quoted_table})')]
+            if table.startswith(('dataset_rows_', 'reporting_rows_')):
+                # CDR rows hold the mixed groups in their vendor fields only, renamed in one pass per table.
+                assignments, matches = [], []
+                for column in [column for column in columns if 'vendor' in column.casefold()]:
+                    quoted_column = self._quote_identifier(column)
+                    expression = quoted_column
+                    for old, new in self.MIXED_VENDOR_LABEL_RENAMES:
+                        expression = f"REPLACE({expression}, '{old}', '{new}')"
+                    found = f"(typeof({quoted_column}) = 'text' AND instr({quoted_column}, 'Ericsson_Mixed') > 0)"
+                    assignments.append(f'{quoted_column} = CASE WHEN {found} THEN {expression} ELSE {quoted_column} END')
+                    matches.append(found)
+                if assignments:
+                    conn.execute(f"UPDATE {quoted_table} SET {', '.join(assignments)} WHERE {' OR '.join(matches)}")
+                continue
+            matches = ' OR '.join(
+                f"instr(CAST({self._quote_identifier(column)} AS TEXT), 'Ericsson_Mixed') > 0" for column in columns
+            )
+            if not matches:
+                continue
+            for row in conn.execute(f'SELECT rowid AS row_id, * FROM {quoted_table} WHERE {matches}').fetchall():
+                changes = {
+                    column: renamed(row[column]) for column in columns
+                    if isinstance(row[column], (str, bytes)) and renamed(row[column]) != row[column]
+                }
+                if not changes:
+                    continue
+                assignments = ', '.join(f'{self._quote_identifier(column)} = ?' for column in changes)
+                values = [sqlite3.Binary(value) if isinstance(value, bytes) else value for value in changes.values()]
+                conn.execute(f'UPDATE OR IGNORE {quoted_table} SET {assignments} WHERE rowid = ?', [*values, row['row_id']])
+        # A renamed Vendor Maps label that already existed keeps the existing row.
+        conn.execute("DELETE FROM vendor_mappings WHERE instr(source_value, 'Ericsson_Mixed') > 0 OR instr(canonical_value, 'Ericsson_Mixed') > 0")
+        conn.execute("DELETE FROM chart_mapping_groups WHERE instr(canonical_value, 'Ericsson_Mixed') > 0")
+        # Cached selections are rebuilt from the renamed values.
+        conn.execute('DELETE FROM dashboard_filter_selections')
+        conn.execute('INSERT OR REPLACE INTO workspace_state (key, value) VALUES (?, ?)', (self.MIXED_VENDOR_LABELS_MIGRATION_KEY, '1'))
 
     VENDOR_FILTER_OPTIONS_MIGRATION_KEY = 'dataset_filter_options_vendor_fields_v1'
 

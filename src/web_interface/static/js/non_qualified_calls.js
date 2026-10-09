@@ -200,6 +200,33 @@
       fieldHost.append(label);
     });
     fieldHost.hidden = !filterable.length;
+    $('nq-field-filters-title').hidden = fieldHost.hidden;
+    // A filter for every optional and CDR column of the table (Region, Cluster and CDR have theirs).
+    const columnHost = $('nq-column-filters');
+    const cdrColumnHost = $('nq-cdr-column-filters');
+    const columns = columnFilters();
+    const wanted = new Set(columns.map((column) => column.filter));
+    [columnHost, cdrColumnHost].forEach((host) => host.querySelectorAll('[data-nq-filter]').forEach((select) => {
+      if (!wanted.has(select.dataset.nqFilter)) select.closest('label').remove();
+    }));
+    columns.forEach((column) => {
+      entries[column.filter] = [[state.unassigned, 'Empty'], ...(values[column.filter] || []).map((value) => [value, value])];
+      // CDR columns add no filter to the panel: they filter from their header only.
+      const host = column.filter.startsWith('column:cdr:') ? cdrColumnHost : columnHost;
+      if (host.querySelector(`[data-nq-filter="${CSS.escape(column.filter)}"]`)) return;
+      const label = node('label', column.label);
+      const select = node('select');
+      select.multiple = true;
+      select.size = 1;
+      select.dataset.nqFilter = column.filter;
+      select.dataset.multiselectNoValuesLabel = 'No values available';
+      select.dataset.multiselectEmptyLabel = 'All values';
+      select.setAttribute('aria-label', column.label);
+      label.append(select);
+      host.append(label);
+    });
+    columnHost.hidden = !columnHost.querySelector('[data-nq-filter]');
+    $('nq-column-filters-title').hidden = columnHost.hidden;
     // New selects get the checkbox menu of every multi-select of the page.
     if (typeof globalThis.setupCustomMultiSelects === 'function') globalThis.setupCustomMultiSelects();
     filterSelects().forEach((select) => {
@@ -219,8 +246,9 @@
       // Every value or none means no restriction.
       if (!chosen.length || chosen.length >= enabled.length) return;
       const field = select.dataset.nqFilter;
-      // Analysis fields travel together: {fields: {key: [values]}}.
+      // Analysis fields travel together: {fields: {key: [values]}}; so do the table columns: {columns: {key: [values]}}.
       if (field.startsWith('field:')) (filters.fields ||= {})[field.slice(6)] = chosen;
+      else if (field.startsWith('column:')) (filters.columns ||= {})[field.slice(7)] = chosen;
       else filters[field] = chosen;
     });
     root.querySelectorAll('[data-nq-flag]').forEach((box) => { if (box.checked) filters[box.dataset.nqFlag] = true; });
@@ -231,7 +259,8 @@
   };
   // The selection is shared by every user of the workspace and restored in every session.
   // The values of a filter, including the analysis fields ("field:key").
-  const filterValues = (filters, field) => (field.startsWith('field:') ? (filters.fields || {})[field.slice(6)] : filters[field]);
+  const filterValues = (filters, field) => (field.startsWith('field:') ? (filters.fields || {})[field.slice(6)]
+    : field.startsWith('column:') ? (filters.columns || {})[field.slice(7)] : filters[field]);
   const applySavedFilters = (saved) => {
     filterSelects().forEach((select) => {
       const values = new Set(filterValues(saved, select.dataset.nqFilter) || []);
@@ -338,8 +367,9 @@
     const host = $('nq-active-filters');
     const chips = [];
     const flagLabels = {open_only: 'Open calls only', mine: 'Assigned to me', without_comments: 'Without comments'};
-    const entries = Object.entries(filters).filter(([field]) => field !== 'fields');
+    const entries = Object.entries(filters).filter(([field]) => !['fields', 'columns'].includes(field));
     Object.entries(filters.fields || {}).forEach(([key, values]) => entries.push([`field:${key}`, values]));
+    Object.entries(filters.columns || {}).forEach(([key, values]) => entries.push([`column:${key}`, values]));
     entries.forEach(([field, value]) => {
       let text;
       if (field === 'search') text = `Search: “${value}”`;
@@ -348,7 +378,8 @@
         const select = root.querySelector(`[data-nq-filter="${field}"]`);
         const labels = value.map((item) => (EXTRA_FILTERS.includes(field) ? extraLabel(field, item)
           : [...(select?.options || [])].find((option) => option.value === item)?.textContent || item));
-        const name = field.startsWith('field:') ? historyLabel(field) : (FIELD_LABELS[field] || field);
+        const name = field.startsWith('field:') ? historyLabel(field)
+          : field.startsWith('column:') ? (select?.getAttribute('aria-label') || field.slice(7)) : (FIELD_LABELS[field] || field);
         text = `${name}: ${labels.length > 3 ? `${labels.slice(0, 3).join(', ')} +${labels.length - 3}` : labels.join(', ')}`;
       }
       const chip = node('button', text, 'nq-filter-chip');
@@ -781,6 +812,11 @@
     ...state.tableColumns.cdr.map((name) => ({key: `cdr:${name}`, label: name, sort: `cdr:${name}`})),
   ];
   const fieldColumns = () => state.fields.filter((field) => field.in_table);
+  // The filter of each optional column: CDR uses the CDRs filter, the others filter by their own values.
+  const OWN_COLUMN_FILTERS = {cdr: 'datasets'};
+  const columnFilterKey = (column) => OWN_COLUMN_FILTERS[column.key] || `column:${column.key}`;
+  const columnFilters = () => optionalColumns().filter((column) => !OWN_COLUMN_FILTERS[column.key])
+    .map((column) => ({label: column.label, filter: columnFilterKey(column)}));
   const optionColorOf = (field, value) => field.options?.find((option) => option.name === value)?.color || '';
   const bindSort = (header) => {
     if (header.dataset.sortBound) return;
@@ -813,7 +849,7 @@
     const after = (sortKey) => row.querySelector(`[data-sort="${sortKey}"]`)?.closest('th');
     let anchor = after('result');
     optionalColumns().forEach((column) => {
-      const cell = headerCell(column.label, column.sort);
+      const cell = headerCell(column.label, column.sort, columnFilterKey(column));
       anchor.after(cell);
       anchor = cell;
     });
@@ -996,7 +1032,7 @@
       const root = node('td', undefined, 'nq-tracking-cell');
       root.append(rootCauseControl(call));
       row.append(
-        start, stacked(call.operator, call.vendor), stacked(call.city, campaignLabel(call.campaign)),
+        start, stacked(call.operator, call.vendor), stacked(call.region, call.cluster), stacked(call.city, campaignLabel(call.campaign)),
         stacked(call.test_name, call.technology), failure, ...optionalColumns().map((column) => optionalCell(call, column)),
         status, tracking('team', 'assignee'), root, ...fieldColumns().map((field) => fieldCell(call, field)), comments,
       );
@@ -2675,9 +2711,17 @@
   // -- table columns dialog -------------------------------------------------------------------
   const columnsDialog = $('nq-columns-dialog');
   const syncColumnCount = () => {
-    const chosen = columnsDialog.querySelectorAll('#nq-columns-cdr input:checked').length;
-    $('nq-columns-count').textContent = `(${chosen} of at most ${state.maxCdrColumns})`;
-    columnsDialog.querySelectorAll('#nq-columns-cdr input:not(:checked)').forEach((box) => { box.disabled = chosen >= state.maxCdrColumns; });
+    const tableBoxes = [...columnsDialog.querySelectorAll('#nq-columns-cdr input[data-target="table"]')];
+    const chosen = tableBoxes.filter((box) => box.checked).length;
+    // A column of the table is always exported.
+    tableBoxes.forEach((box) => {
+      const excel = box.closest('.nq-cdr-column-row').querySelector('input[data-target="excel"]');
+      if (box.checked) excel.checked = true;
+      excel.disabled = box.checked;
+      if (!box.checked) box.disabled = chosen >= state.maxCdrColumns;
+    });
+    const exported = columnsDialog.querySelectorAll('#nq-columns-cdr input[data-target="excel"]:checked').length;
+    $('nq-columns-count').textContent = `(${chosen} of at most ${state.maxCdrColumns} in the table · ${exported} in Excel)`;
   };
   if (columnsDialog) {
     $('nq-columns-open').addEventListener('click', () => {
@@ -2692,9 +2736,24 @@
       };
       $('nq-columns-builtin').replaceChildren(...Object.entries(state.optionalColumns).map(([key, label]) => checkbox(key, label,
         state.tableColumns.builtin.includes(key))));
-      const chosen = new Set(state.tableColumns.cdr);
-      const names = [...new Set([...state.tableColumns.cdr, ...state.cdrColumns])];
-      $('nq-columns-cdr').replaceChildren(...names.map((name) => checkbox(name, name, chosen.has(name))));
+      const inTable = new Set(state.tableColumns.cdr);
+      const inExcel = new Set(state.tableColumns.export_cdr || []);
+      const names = [...new Set([...state.tableColumns.cdr, ...(state.tableColumns.export_cdr || []), ...state.cdrColumns])];
+      const target = (name, kind, checked) => {
+        const box = node('input');
+        box.type = 'checkbox';
+        box.value = name;
+        box.dataset.target = kind;
+        box.checked = checked;
+        box.setAttribute('aria-label', `${name} in the ${kind === 'table' ? 'table' : 'Excel export'}`);
+        return box;
+      };
+      $('nq-columns-cdr').replaceChildren(...names.map((name) => {
+        const row = node('div', undefined, 'nq-cdr-column-row');
+        row.dataset.name = name;
+        row.append(node('span', name), target(name, 'table', inTable.has(name)), target(name, 'excel', inTable.has(name) || inExcel.has(name)));
+        return row;
+      }));
       if (!names.length) $('nq-columns-cdr').append(node('p', 'No CDR is indexed yet.', 'form-note'));
       $('nq-columns-search').value = '';
       $('nq-columns-error').textContent = '';
@@ -2704,8 +2763,8 @@
     $('nq-columns-cdr').addEventListener('change', syncColumnCount);
     $('nq-columns-search').addEventListener('input', () => {
       const query = $('nq-columns-search').value.trim().toLowerCase();
-      $('nq-columns-cdr').querySelectorAll('label').forEach((label) => {
-        label.hidden = Boolean(query) && !label.textContent.toLowerCase().includes(query);
+      $('nq-columns-cdr').querySelectorAll('.nq-cdr-column-row').forEach((row) => {
+        row.hidden = Boolean(query) && !row.dataset.name.toLowerCase().includes(query);
       });
     });
     $('nq-columns-cancel').addEventListener('click', () => columnsDialog.close());
@@ -2716,10 +2775,12 @@
       try {
         await api('/api/non-qualified-calls/table-columns', {method: 'PUT', body: JSON.stringify({
           builtin: [...$('nq-columns-builtin').querySelectorAll('input:checked')].map((box) => box.value),
-          cdr: [...$('nq-columns-cdr').querySelectorAll('input:checked')].map((box) => box.value),
+          cdr: [...$('nq-columns-cdr').querySelectorAll('input[data-target="table"]:checked')].map((box) => box.value),
+          export_cdr: [...$('nq-columns-cdr').querySelectorAll('input[data-target="excel"]:checked')]
+            .filter((box) => !box.closest('.nq-cdr-column-row').querySelector('input[data-target="table"]').checked).map((box) => box.value),
         })});
         columnsDialog.close();
-        toast('Table columns saved.');
+        toast('Additional columns saved.');
         await loadState();
       } catch (error) {
         $('nq-columns-error').textContent = error.message;

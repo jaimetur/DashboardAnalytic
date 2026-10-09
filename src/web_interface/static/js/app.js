@@ -90,6 +90,9 @@ function vendorOnlyFilterChoices(field, values, additionalOperators = []) {
   const operatorLabels = Object.keys(configured.operators || {}).sort((left, right) => right.length - left.length);
   const isOperatorVendor = ['operatorvendor', 'opvendor'].includes(identity(field));
   const isVendorOperator = identity(field) === 'vendoroperator';
+  // The mixed groups of no Vendor (Mixed (non-Ericsson)) come last: after the Operators without a Vendor,
+  // and last within each Operator in Operator_Vendor (as mapping_order.py).
+  const otherMixed = (vendor) => /^Mixed\s*\(/i.test(String(vendor).trim());
   const mapKey = (entry) => {
     const label = String(entry.label ?? '').replace(/\s+- All(?: Vendors)?$/i, '');
     const entryRank = rank(entry);
@@ -97,20 +100,20 @@ function vendorOnlyFilterChoices(field, values, additionalOperators = []) {
     if (isVendorOperator) {
       const operator = operatorLabels.find((name) => label.toLocaleLowerCase().endsWith(`_${name.toLocaleLowerCase()}`));
       const vendor = operator ? label.slice(0, label.length - operator.length - 1) : label;
-      // The mixed group of a Vendor follows that Vendor of each Operator (Ericsson_3, Ericsson_Mixed_3, Ericsson_VF);
-      // the other mixed groups (Non-Ericsson_Mixed) come last of all, after the Operators without a Vendor.
-      const base = (vendor.match(/^(.+?)[\s_]+Mixed$/i) || [])[1] || '';
-      const family = base && !/^non/i.test(base) && !/mixed|othervendor|allvendor/.test(identity(base)) ? base : '';
+      // The mixed group of a Vendor follows that Vendor of each Operator (Ericsson_3, Ericsson (Mixed)_3, Ericsson_VF);
+      // the other mixed groups (Mixed (non-Ericsson)) come last of all, after the Operators without a Vendor.
+      const base = (vendor.match(/^(.+?)\s*\(\s*Mixed\s*\)$/i) || [])[1] || '';
+      const family = base && !/mixed|othervendor|allvendor/.test(identity(base)) ? base : '';
       const operatorPosition = operator ? position(operatorOrder, operatorAliases, operator) : operatorOrder.length;
-      return [base && !family ? 2 : 0, family ? 0 : entryRank, position(vendorOrder, vendorCanonical, family || vendor), operatorPosition * 2 + (family ? 1 : 0)];
+      return [otherMixed(vendor) ? 2 : 0, family ? 0 : entryRank, position(vendorOrder, vendorCanonical, family || vendor), operatorPosition * 2 + (family ? 1 : 0)];
     }
     if (isOperatorVendor) {
       const operator = operatorLabels.find((name) => label.toLocaleLowerCase().startsWith(`${name.toLocaleLowerCase()}_`));
       const vendor = operator ? label.slice(operator.length + 1) : label;
       return [0, operator ? position(operatorOrder, operatorAliases, operator) : operatorOrder.length,
-        entryRank, position(vendorOrder, vendorCanonical, vendor)];
+        otherMixed(vendor) ? 3 : entryRank, position(vendorOrder, vendorCanonical, vendor)];
     }
-    return [entryRank, position(vendorOrder, vendorCanonical, label), 0, 0];
+    return [otherMixed(label) ? 3 : entryRank, position(vendorOrder, vendorCanonical, label), 0, 0];
   };
   return entries.sort((left, right) => {
     const [a, b] = [mapKey(left), mapKey(right)];
@@ -8014,6 +8017,48 @@ function bindConfirmForm(form) {
 }
 
 document.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
+
+// Reset Application (Admin, super-admins): the dialog submits only after the confirmation phrase is typed exactly.
+(() => {
+  const dialog = document.querySelector('[data-app-reset-dialog]');
+  const openButton = document.querySelector('[data-app-reset-open]');
+  if (!(dialog instanceof HTMLDialogElement) || !openButton) return;
+  const form = dialog.querySelector('[data-app-reset-form]');
+  const input = dialog.querySelector('[data-app-reset-input]');
+  const submit = dialog.querySelector('[data-app-reset-submit]');
+  // The button stays left of the hero's shield icon, which grows with the hero's height.
+  const hero = openButton.closest('.module-hero-admin');
+  if (hero) {
+    const fitIcon = () => {
+      const icon = getComputedStyle(hero, '::before');
+      // The icon keeps its 172:217 viewBox inside the ::before box, 1.5rem from the hero's right edge.
+      const width = Math.min(parseFloat(icon.width) || 0, (parseFloat(icon.height) || 0) * 172 / 217);
+      const space = width + 24 + 12 - (parseFloat(getComputedStyle(hero).paddingRight) || 0);
+      hero.style.setProperty('--app-reset-icon-space', `${Math.max(0, space)}px`);
+    };
+    fitIcon();
+    new ResizeObserver(fitIcon).observe(hero);
+  }
+  const matches = () => input.value.trim() === input.dataset.expected;
+  const sync = () => { submit.disabled = !matches(); dialog.classList.toggle('app-reset-armed', matches()); };
+  openButton.addEventListener('click', () => {
+    input.value = '';
+    sync();
+    dialog.showModal();
+    input.focus();
+  });
+  input.addEventListener('input', sync);
+  dialog.querySelector('[data-app-reset-cancel]')?.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
+  form.addEventListener('submit', (event) => {
+    if (!matches()) {
+      event.preventDefault();
+      return;
+    }
+    dialog.close();
+    showLoadingOverlay('Resetting the application', 'Deleting every database, workspace and the config and data folders, then starting as a new deployment…');
+  });
+})();
 
 function isChartMappingForm(form) {
   try {

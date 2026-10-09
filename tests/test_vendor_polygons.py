@@ -53,9 +53,9 @@ def test_vendor_polygons_follow_the_cell_inventory_rule_at_both_ends(tmp_path):
     endpoints = polygon_vendor_endpoints(frame, 'voice', [(path, None)], frame['Operator'].tolist(), operator_key)
     mapped = assign_cdr_vendors(frame, polygon_vendors=endpoints)
     assert mapped['Operator_Vendor'].tolist() == [
-        'Vodafone_Ericsson', 'VF SA_Ericsson_Mixed', 'Vodafone_Nokia', 'O2_Unknown', 'O2_Ericsson', 'EE - All', 'Vodafone_Unknown',
+        'Vodafone_Ericsson', 'VF SA_Ericsson (Mixed)', 'Vodafone_Nokia', 'O2_Unknown', 'O2_Ericsson', 'EE - All', 'Vodafone_Unknown',
     ]
-    assert mapped['Vendor'].tolist() == ['Ericsson', 'Ericsson_Mixed', 'Nokia', 'Unknown', 'Ericsson', 'EE - All', 'Unknown']
+    assert mapped['Vendor'].tolist() == ['Ericsson', 'Ericsson (Mixed)', 'Nokia', 'Unknown', 'Ericsson', 'EE - All', 'Unknown']
 
 
 def test_vendor_polygons_without_an_operator_attribute_belong_to_the_chosen_operator(tmp_path):

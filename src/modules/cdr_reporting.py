@@ -1602,10 +1602,12 @@ def _split_operator_vendor(
         if candidate[0].strip().casefold() in operators or candidate[2].strip().casefold() in vendors
     ]
     if recognised:
+        # The longest configured Operator first (VF_UK_Huawei is Operator VF_UK even when VF is configured
+        # too); otherwise the longest configured Vendor.
         return max(recognised, key=lambda candidate: (
             candidate[0].strip().casefold() in operators,
             candidate[2].strip().casefold() in vendors,
-            len(candidate[0]),
+            len(candidate[0]) if candidate[0].strip().casefold() in operators else -len(candidate[0]),
         ))
     return candidates[0]
 
@@ -1689,8 +1691,8 @@ def normalise_operator_aliases(frame: pd.DataFrame, mappings: dict[str, str] | N
 
 # Vendor identities of samples whose first and last cells have different
 # or missing vendors.
-VENDOR_ERICSSON_MIXED = "Ericsson_Mixed"
-VENDOR_NON_ERICSSON_MIXED = "Non-Ericsson_Mixed"
+VENDOR_ERICSSON_MIXED = "Ericsson (Mixed)"
+VENDOR_NON_ERICSSON_MIXED = "Mixed (non-Ericsson)"
 VENDOR_UNKNOWN = "Unknown"
 
 
@@ -1730,8 +1732,8 @@ def vendor_from_cells(operator: object, cells: object, vendor_lookup: dict[str, 
     Both operators follow the same rule: the same non-empty Vendor at both
     endpoints returns ``<Operator>_<Vendor>``; Ericsson at either endpoint with
     a different or missing Vendor at the other returns
-    ``<Operator>_Ericsson_Mixed``; every other different or missing combination
-    returns ``<Operator>_Non-Ericsson_Mixed``.
+    ``<Operator>_Ericsson (Mixed)``; every other different or missing combination
+    returns ``<Operator>_Mixed (non-Ericsson)``.
     """
     if _vendor_mapping_family(operator) is None:
         return _normalise_operator(operator)
@@ -1755,7 +1757,7 @@ def _vendor_prefix(operator: object) -> str:
 
 
 def _vendor_from_ends(prefix: str, first: str | None, last: str | None) -> str:
-    """The same non-empty Vendor at both ends, Ericsson_Mixed with Ericsson at one end, else Non-Ericsson_Mixed."""
+    """The same non-empty Vendor at both ends, Ericsson (Mixed) with Ericsson at one end, else Mixed (non-Ericsson)."""
     if first and first == last:
         return f"{prefix}_{first}"
     if "Ericsson" in {first, last}:

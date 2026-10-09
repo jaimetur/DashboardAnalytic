@@ -107,7 +107,7 @@ The engine pools raw rows before calculating ratios, averages, medians and P90. 
 
 ### Vendor filtering
 
-The **Operator_Vendor** selector filters the `<Operator>_<Vendor>` identity, **Vendor_Operator** the same identity as `<Vendor>_<Operator>` and the **Vendor** selector the vendor alone, using cached per-CDR values; **Cluster** follows Region and **City** offers **Main Cities** first. Choices appear in this order: real vendors, Ericsson_Mixed (and the former Mixed Vendor), Non-Ericsson_Mixed (and the former Other Vendor), All Vendor(s), then operators without assigned vendors labelled **Operator - All**.
+The **Operator_Vendor** selector filters the `<Operator>_<Vendor>` identity, **Vendor_Operator** the same identity as `<Vendor>_<Operator>` and the **Vendor** selector the vendor alone, using cached per-CDR values; **Cluster** follows Region and **City** offers **Main Cities** first. Choices appear in this order: real vendors, Ericsson (Mixed) (and the former Mixed Vendor), the former Other Vendor, All Vendor(s), operators without assigned vendors labelled **Operator - All**, and finally Mixed (non-Ericsson).
 
 **Operator_Vendor** and **Vendor_Operator** stay in sync: selecting values in one selects the same identities in the other. The Scoring report scenarios of Reporting Jobs follow the same rule.
 

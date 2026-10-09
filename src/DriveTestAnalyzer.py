@@ -2788,7 +2788,7 @@ def workspace_cache_version_signature() -> dict[str, int | str]:
     """Describe every persistent Dashboard cache format used by this release."""
     return {
         'application': __version__,
-        'workspace_cache': 1,
+        'workspace_cache': 2,
         'dashboard_render': DASHBOARD_RENDER_CACHE_VERSION,
         'dashboard_selection': DASHBOARD_SELECTION_CACHE_VERSION,
         'dashboard_chart_model': DASHBOARD_CHART_MODEL_CACHE_VERSION,
@@ -2930,6 +2930,8 @@ def idle_dashboard_warmup_loop(stop_event: Event) -> None:
 
 STARTUP_READY = Event()
 STARTUP_GRACE_SECONDS = 3.0
+DEPLOYMENT_STORAGE_PATH_NAMES = ('database_path', 'input_dir', 'output_dir', 'export_dir', 'slides_templates_dir')
+DEPLOYMENT_STORAGE_PATHS: dict[str, Path] = {}
 STARTUP_STATUS: dict[str, str] = {'message': 'Starting DriveTest Analyzer…', 'error': ''}
 
 
@@ -2964,6 +2966,8 @@ def _prepare_active_workspace() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     APP_SHUTTING_DOWN.clear()
+    # The storage paths of the deployment, before a workspace points them at its own folders.
+    DEPLOYMENT_STORAGE_PATHS.update({name: getattr(settings, name) for name in DEPLOYMENT_STORAGE_PATH_NAMES})
     with QUERY_BUILDER_EXECUTIONS_LOCK:
         QUERY_BUILDER_JOBS.clear()
     ensure_directories([
@@ -10156,6 +10160,8 @@ def render_admin_template(
             'recovered_transfer_packages': recovered_transfer_packages() if user.role == 'super-admin' else [],
             'import_export_notice': request.query_params.get('import_export_notice') or None,
             'import_export_error': request.query_params.get('import_export_error') or None,
+            'app_reset_roots': [str(root) for root in application_reset_roots()] if user.role == 'super-admin' else [],
+            'app_reset_confirmation': APP_RESET_CONFIRMATION,
             'error': error,
         },
         status_code=status_code,
@@ -10558,7 +10564,10 @@ def login_page(request: Request) -> HTMLResponse:
     return render_template(
         request, 'login.html',
         {
-            'error': None,
+            # After Reset Application only the accounts of a new deployment exist.
+            'error': 'The application was reset to a new deployment: sign in with one of its default accounts.'
+            if request.query_params.get('reset') == '1' else None,
+            'error_tone': 'warning',
             'default_access_accounts': build_default_access_accounts(),
             'workspaces': workspaces,
             'active_workspace': active_workspace,
@@ -18213,6 +18222,126 @@ def save_configuration(
 @app.get('/admin', response_class=HTMLResponse)
 def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HTMLResponse:
     return render_admin_template(request, user)
+
+
+APP_RESET_CONFIRMATION = 'RESET APPLICATION'
+
+
+def application_reset_roots() -> list[Path]:
+    """The config and data folders a reset empties: those of the application database and of the workspaces.
+
+    A folder holding the code or the user's home (a misconfigured storage path) is never emptied.
+    """
+    roots = [application_config_dir, workspace_registry.registry_path.parent.parent, application_data_dir]
+    kept = [PROJECT_ROOT.resolve(), Path.home().resolve()]
+    return [
+        root for root in dict.fromkeys(Path(item).resolve() for item in roots)
+        if root != Path(root.anchor) and not any(root == item or root in item.parents for item in kept)
+    ]
+
+
+def _reset_protected_paths() -> list[Path]:
+    """Folders a reset never deletes: the code, the shipped assets and the user's home."""
+    paths = [PROJECT_ROOT, settings.template_dir, settings.static_dir, settings.ppt_templates_dir, settings.assets_dir, Path.home()]
+    return [Path(path).resolve() for path in paths]
+
+
+def _reset_delete(path: Path) -> None:
+    """Delete one file or folder of a reset, keeping the code, the shipped assets and the filesystem root."""
+    resolved = path.resolve()
+    protected = _reset_protected_paths()
+    if resolved == Path(resolved.anchor) or any(resolved == item or resolved in item.parents for item in protected):
+        return
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def reset_application(username: str) -> None:
+    """Delete every database, workspace and the whole config and data folders, then start as a new deployment.
+
+    Background work is stopped first and every session ends; the application then opens a new
+    Default workspace with the bootstrap accounts, as on its first start.
+    """
+    global BACKGROUND_TASK_SCHEDULER, EXPORT_TASK_SCHEDULER, active_workspace, workspace_registry, application_config_dir
+    with QUERY_BUILDER_EXECUTIONS_LOCK:
+        for cancellation in QUERY_BUILDER_EXECUTIONS.values():
+            cancellation.set()
+    with ACTIVE_DATASET_WORKERS_LOCK:
+        workers = list(ACTIVE_DATASET_WORKERS)
+    for worker in workers:
+        if worker.poll() is None:
+            worker.terminate()
+    for worker in workers:
+        try:
+            worker.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            worker.kill()
+    previous_schedulers = (BACKGROUND_TASK_SCHEDULER, EXPORT_TASK_SCHEDULER)
+    for scheduler in previous_schedulers:
+        scheduler.shutdown(wait=False, cancel_futures=True)
+    # Running tasks get a moment to notice that their work was cancelled before their files go.
+    deadline = monotonic() + 10
+    while monotonic() < deadline and not all(scheduler.is_idle for scheduler in previous_schedulers):
+        time_module.sleep(0.1)
+    BACKGROUND_TASK_SCHEDULER = BackgroundTaskScheduler(max_workers=1)
+    EXPORT_TASK_SCHEDULER = BackgroundTaskScheduler(max_workers=1)
+
+    workspace_roots = [workspace.database_path.parent for workspace in workspace_registry.list()]
+    roots = application_reset_roots()
+    with WORKSPACE_ACTIVATION_LOCK:
+        active_workspace = None
+        for root in roots:
+            if root.is_dir():
+                for child in root.iterdir():
+                    _reset_delete(child)
+        # Workspaces moved outside the data folder go too.
+        for workspace_root in workspace_roots:
+            if workspace_root.exists() and not any(root == workspace_root.resolve() or root in workspace_root.resolve().parents for root in roots):
+                _reset_delete(workspace_root)
+        for registry in (
+            SESSIONS, ANALYSIS_CACHE, PREPARED_ANALYSIS_FRAME_CACHE, DATAFRAME_CACHE, STOP_REQUESTS, QUERY_BUILDER_EXECUTIONS,
+            QUERY_BUILDER_JOBS, ACTIVE_DATASET_PROCESSING, QUEUED_DATASET_FUTURES, ACTIVE_DATASET_WORKERS,
+            INITIALIZED_WORKSPACE_DATABASES, CATALOGUE_LAYOUT_NAMES_CACHE, EXPORT_JOBS, IMPORT_UPLOADS, IMPORT_JOBS,
+            AUTO_CALCULATED_FIELD_JOBS, WORKSPACE_DIMENSION_MATERIALIZATION_THREADS, TRANSFER_JOBS, TRANSFER_OFFERS,
+            WORKSPACE_LIFECYCLE_JOBS, WORKSPACE_DUPLICATION_STOP_REQUESTS, BULK_REPORT_DELETION_JOBS,
+            MANUAL_BACKUP_JOBS, SCHEDULED_BACKUP_JOBS, MANUAL_RESTORE_JOBS, ACTIVE_TRANSFER_IMPORTS,
+        ):
+            registry.clear()
+        _clear_chart_preview_caches()
+        for name, path in DEPLOYMENT_STORAGE_PATHS.items():
+            object.__setattr__(settings, name, path)
+        repository.db_path = settings.database_path
+        application_config_dir = settings.database_path.parent
+        application_config_dir.mkdir(parents=True, exist_ok=True)
+        workspace_registry = WorkspaceRegistry(
+            settings.input_dir.parent / 'workspaces' / 'workspace-registry.db',
+            settings.input_dir.parent, settings.slides_templates_dir,
+            legacy_workspace_registry_path(),
+        )
+        workspace_registry.initialize()
+        repository.set_global_database(application_config_dir / 'application.db')
+        repository.set_workspace_registry_database(workspace_registry.registry_path)
+    # Without stored settings, the deployment defaults apply again.
+    apply_runtime_configuration(runtime_configuration())
+    export_package_dir().mkdir(parents=True, exist_ok=True)
+    activate_workspace(workspace_registry.active_id() or workspace_registry.most_recent().id)
+    repository.try_add_log(username, 'reset_application', json.dumps({'deleted': [str(root) for root in roots]}))
+
+
+@app.post('/admin/reset-application')
+def reset_application_route(
+    request: Request, confirmation: str = Form(default=''), user: SessionUser = Depends(admin_user),
+) -> Response:
+    if user.role != 'super-admin':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only super-admins can reset the application.')
+    if confirmation.strip() != APP_RESET_CONFIRMATION:
+        return render_admin_template(request, user, error=f'Type {APP_RESET_CONFIRMATION} to reset the application.', status_code=400)
+    reset_application(user.username)
+    response = RedirectResponse('/login?reset=1', status_code=status.HTTP_303_SEE_OTHER)
+    response.delete_cookie(SESSION_COOKIE)
+    return response
 
 
 @app.get('/workspace-config', response_class=HTMLResponse)

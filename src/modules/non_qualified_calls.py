@@ -527,14 +527,31 @@ def sample_key_for(call_key: str, sample: str) -> str:
 TABLE_COLUMNS_STATE_KEY = 'nq_calls_table_columns'
 # Optional columns of the Calls table, with their labels.
 OPTIONAL_COLUMNS = {
-    'join_id': 'JOIN_ID', 'region': 'Region', 'cluster': 'Cluster', 'nr_mode': 'NR Mode', 'cell_id': 'Cell ID',
+    'join_id': 'JOIN_ID', 'nr_mode': 'NR Mode', 'cell_id': 'Cell ID',
     'direction': 'Direction', 'end_time': 'End Time', 'cdr': 'CDR',
 }
 MAX_CDR_COLUMNS = 12
+# CDR columns exported to Excel besides those of the table.
+MAX_EXPORT_CDR_COLUMNS = 100
+# The optional columns filtered by their own values; CDR uses the CDRs filter.
+COLUMN_FILTER_SQL = {
+    'join_id': 'join_id', 'nr_mode': 'nr_mode', 'cell_id': 'cell_id', 'direction': 'direction', 'end_time': 'end_time',
+}
+MAX_COLUMN_FILTER_VALUES = 5000
+
+
+def column_filter_sql(key: str) -> str | None:
+    """The SQL value of a filterable table column: an optional column, or a CDR column (``cdr:<name>``)."""
+    if key in COLUMN_FILTER_SQL:
+        return f"COALESCE(CAST({COLUMN_FILTER_SQL[key]} AS TEXT), '')"
+    if key.startswith('cdr:') and key[4:].strip():
+        name = key[4:].replace('"', '').replace("'", '')
+        return f"COALESCE(CAST(json_extract(extra_json, '$.\"{name}\"') AS TEXT), '')"
+    return None
 
 
 def table_columns(repository: Any) -> dict[str, list[str]]:
-    """The optional Calls table columns of the workspace: built-in ones and CDR columns."""
+    """The Additional Columns of the workspace: built-in and CDR columns of the table, and CDR columns only exported to Excel."""
     try:
         stored = json.loads(repository.get_workspace_state(TABLE_COLUMNS_STATE_KEY) or '{}')
     except (TypeError, ValueError):
@@ -542,17 +559,30 @@ def table_columns(repository: Any) -> dict[str, list[str]]:
     stored = stored if isinstance(stored, dict) else {}
     builtin = [column for column in _strings(stored.get('builtin')) if column in OPTIONAL_COLUMNS]
     cdr = [column for column in _strings(stored.get('cdr')) if column.strip()][:MAX_CDR_COLUMNS]
-    return {'builtin': builtin, 'cdr': cdr}
+    export_cdr = [column for column in _strings(stored.get('export_cdr')) if column.strip() and column not in cdr][:MAX_EXPORT_CDR_COLUMNS]
+    return {'builtin': builtin, 'cdr': cdr, 'export_cdr': export_cdr}
 
 
-def save_table_columns(repository: Any, builtin: Any, cdr: Any, username: str) -> dict[str, list[str]]:
+def indexed_cdr_columns(repository: Any) -> list[str]:
+    """The CDR columns kept with every call: those of the table, then those only exported to Excel."""
+    columns = table_columns(repository)
+    return [*columns['cdr'], *columns['export_cdr']]
+
+
+def save_table_columns(repository: Any, builtin: Any, cdr: Any, username: str, export_cdr: Any = ()) -> dict[str, list[str]]:
     unknown = [column for column in _strings(builtin) if column not in OPTIONAL_COLUMNS]
     if unknown:
         raise ValueError(f'Unknown columns: {", ".join(unknown)}.')
     cdr_columns = list(dict.fromkeys(column.strip()[:120] for column in _strings(cdr) if column.strip()))
     if len(cdr_columns) > MAX_CDR_COLUMNS:
-        raise ValueError(f'Choose at most {MAX_CDR_COLUMNS} CDR columns.')
-    repository.set_workspace_state(TABLE_COLUMNS_STATE_KEY, json.dumps({'builtin': _strings(builtin), 'cdr': cdr_columns}))
+        raise ValueError(f'Choose at most {MAX_CDR_COLUMNS} CDR columns for the table.')
+    # The table's CDR columns are always exported; these are exported to Excel only.
+    export_columns = [column for column in dict.fromkeys(column.strip()[:120] for column in _strings(export_cdr) if column.strip())
+                      if column not in cdr_columns]
+    if len(export_columns) > MAX_EXPORT_CDR_COLUMNS:
+        raise ValueError(f'Choose at most {MAX_EXPORT_CDR_COLUMNS} CDR columns for Excel only.')
+    repository.set_workspace_state(TABLE_COLUMNS_STATE_KEY, json.dumps(
+        {'builtin': _strings(builtin), 'cdr': cdr_columns, 'export_cdr': export_columns}))
     if hasattr(repository, 'try_add_log'):
         repository.try_add_log(username, 'nq_table_columns', 'Non-Qualified Calls table columns updated.')
     return table_columns(repository)
@@ -793,7 +823,7 @@ def sync_nq_calls(task_repository: Any) -> dict[str, Any]:
     with _sync_locks_guard:
         lock = _sync_locks.setdefault(path, Lock())
     with lock:
-        cdr_columns = table_columns(task_repository)['cdr']
+        cdr_columns = indexed_cdr_columns(task_repository)
         signature = _columns_signature(cdr_columns)
         datasets = {int(row['id']): row for row in _cdr_datasets(task_repository)}
         with task_repository.connection() as connection:
@@ -1638,6 +1668,11 @@ def normalize_saved_filters(filters: Any) -> dict[str, Any]:
     chosen = {str(key): _strings(values)[:5000] for key, values in fields.items() if _strings(values)}
     if chosen:
         saved['fields'] = chosen
+    columns = filters.get('columns') if isinstance(filters.get('columns'), dict) else {}
+    chosen_columns = {str(key): _strings(values)[:MAX_COLUMN_FILTER_VALUES] for key, values in columns.items()
+                      if column_filter_sql(str(key)) and _strings(values)}
+    if chosen_columns:
+        saved['columns'] = chosen_columns
     saved.update({flag: True for flag in FLAG_FILTERS if filters.get(flag) is True})
     search = str(filters.get('search') or '').strip()[:200]
     if search:
@@ -1778,6 +1813,14 @@ def _filter_sql(filters: dict[str, Any], username: str, closed_statuses: list[st
                          "AND f.field_key = ? AND f.value <> '')")
             params.append(str(key))
         clauses.append('(' + ' OR '.join(parts) + ')')
+    # The optional and CDR columns of the table, filtered by their values ("Empty" for blank ones).
+    columns = filters.get('columns') if isinstance(filters.get('columns'), dict) else {}
+    for key, values in columns.items():
+        expression = column_filter_sql(str(key))
+        values = ['' if value == UNASSIGNED else value for value in _strings(values)]
+        if expression and values:
+            clauses.append(f"{expression} IN ({', '.join('?' for _ in values)})")
+            params.extend(values)
     states = _strings(filters.get('state'))
     for state in states:
         if state == 'closed':
@@ -1970,6 +2013,15 @@ def filter_options(task_repository: Any) -> dict[str, list[str]]:
         assignees = connection.execute(
             f"SELECT DISTINCT assignee FROM {NQ_CALL_TRACKING_TABLE} WHERE assignee <> '' ORDER BY assignee COLLATE NOCASE"
         ).fetchall()
+        # The values of every optional and CDR column of the table, for their header filters.
+        chosen = table_columns(task_repository)
+        for key in [*(column for column in chosen['builtin'] if column in COLUMN_FILTER_SQL), *(f'cdr:{name}' for name in chosen['cdr'])]:
+            expression = column_filter_sql(key)
+            rows = connection.execute(
+                f"SELECT DISTINCT {expression} AS value FROM {NQ_CALLS_TABLE} WHERE {expression} <> '' "
+                f"ORDER BY value COLLATE NOCASE LIMIT {MAX_COLUMN_FILTER_VALUES}"
+            ).fetchall()
+            values[f'column:{key}'] = [str(row['value']) for row in rows]
     values['assignee'] = [str(row['assignee']) for row in assignees]
     return values
 
@@ -2766,7 +2818,8 @@ def delete_comment(task_repository: Any, comment_id: int, username: str, moderat
 # ---------------------------------------------------------------------------
 EXPORT_COLUMNS = (
     ('Service', 'service_label'), ('Start Time', 'start_time'), ('End Time', 'end_time'), ('Operator', 'operator'),
-    ('Vendor', 'vendor'), ('Campaign', 'campaign'), ('NR Mode', 'nr_mode'), ('Region', 'region'), ('City', 'city'),
+    ('Operator_Vendor', 'operator_vendor'), ('Vendor_Operator', 'vendor_operator'), ('Vendor', 'vendor'),
+    ('Campaign', 'campaign'), ('NR Mode', 'nr_mode'), ('Region', 'region'), ('Cluster', 'cluster'), ('City', 'city'),
     ('Technology', 'technology'), ('Test Name', 'test_name'), ('Direction', 'direction'), ('Result', 'result'),
     ('Failure Phase', 'failure_phase'), ('Failure Technology', 'failure_technology'),
     ('Failure Classification', 'failure_classification'), ('Failure Category', 'failure_category'),
@@ -2864,9 +2917,16 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
     position = next(index for index, (_label, key) in enumerate(EXPORT_COLUMNS) if key == 'suggested_cause') + 1
     columns = [*EXPORT_COLUMNS[:position], *((field['label'], f"field:{field['key']}") for field in definitions),
                *EXPORT_COLUMNS[position:]]
+    # The CDR columns of the table and those only exported, before the call key.
+    columns[-1:-1] = [(name, f'cdr:{name}') for name in indexed_cdr_columns(task_repository)]
 
     def cell(call: dict[str, Any], key: str) -> Any:
-        value = call.get('fields', {}).get(key[6:], '') if key.startswith('field:') else call.get(key)
+        if key.startswith('field:'):
+            value = call.get('fields', {}).get(key[6:], '')
+        elif key.startswith('cdr:'):
+            value = (call.get('extra') or {}).get(key[4:], '')
+        else:
+            value = call.get(key)
         return value if value is not None else ''
 
     write_sheet(
@@ -3181,6 +3241,7 @@ def install_non_qualified_calls_routes(core: Any) -> None:
     class TableColumnsPayload(BaseModel):
         builtin: list[str] = Field(default_factory=list)
         cdr: list[str] = Field(default_factory=list)
+        export_cdr: list[str] = Field(default_factory=list)
 
     def workspace_repository(user):
         if not core.active_workspace:
@@ -3386,7 +3447,7 @@ def install_non_qualified_calls_routes(core: Any) -> None:
     def nq_save_table_columns(payload: TableColumnsPayload, user=Depends(editor_user)) -> JSONResponse:
         """The optional columns of the Calls table: built-in ones and CDR columns (indexed again)."""
         repository = workspace_repository(user)
-        columns = translate(lambda: save_table_columns(repository, payload.builtin, payload.cdr, user.username))
+        columns = translate(lambda: save_table_columns(repository, payload.builtin, payload.cdr, user.username, payload.export_cdr))
         sync_nq_calls(repository)
         return JSONResponse({'table_columns': columns})
 

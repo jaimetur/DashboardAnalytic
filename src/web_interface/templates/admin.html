@@ -22,10 +22,47 @@
         <p class="eyebrow">Administration</p>
         <h2>Administrator Config</h2>
       </div>
+      {% if user.role == 'super-admin' %}
+      <button type="button" class="app-reset-button" data-app-reset-open title="Delete every database, workspace and the config and data folders">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 22 20H2Z"></path><path d="M12 10v4.5"></path><circle cx="12" cy="17.2" r=".6"></circle></svg>
+        <span>Reset Application</span>
+      </button>
+      {% endif %}
     </div>
     <p class="lede">Manage user access, portable packages, backups, databases and datasets for the active workspace.</p>
     {% if error %}<span hidden data-admin-error>{{ error }}</span>{% endif %}
   </article>
+  {% if user.role == 'super-admin' %}
+  <dialog class="app-reset-dialog" data-app-reset-dialog aria-labelledby="app-reset-title">
+    <form method="post" action="/admin/reset-application" class="app-reset-card" data-app-reset-form>
+      <div class="app-reset-hazard" aria-hidden="true"></div>
+      <div class="app-reset-body">
+        <div class="app-reset-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 3 22 20H2Z"></path><path d="M12 10v4.5"></path><circle cx="12" cy="17.2" r=".6"></circle></svg>
+        </div>
+        <p class="app-reset-eyebrow">Irreversible action · Danger zone</p>
+        <h2 id="app-reset-title">Reset the whole application?</h2>
+        <p class="app-reset-lede">DriveTest Analyzer starts again from zero, as a <strong>new deployment</strong>. Nothing can be recovered afterwards.</p>
+        <ul class="app-reset-list">
+          <li><strong>Every workspace</strong> ({{ workspaces|length }}) with its CDRs, datasets, Dashboards, Reporting Jobs, Scoring jobs, Non-Qualified Calls follow-up and generated reports.</li>
+          <li><strong>Every database</strong>: the application database with its users, groups, Features Activation and settings, and each workspace database.</li>
+          <li><strong>The whole config and data folders</strong>, scheduled backups and transfer packages included:
+            <span class="app-reset-paths">{% for root in app_reset_roots %}<code>{{ root }}</code>{% endfor %}</span>
+          </li>
+          <li><strong>Every session ends</strong>: only the default accounts of a new deployment remain.</li>
+        </ul>
+        <p class="app-reset-tip">To keep anything, download an export from <strong>Import / Export / Transfer</strong> first, or copy a backup of <strong>Database Management → Backup Protection</strong> out of the data folder: backups inside it are deleted too.</p>
+        <label class="app-reset-confirm"><span>Type <strong>{{ app_reset_confirmation }}</strong> to confirm</span>
+          <input type="text" name="confirmation" autocomplete="off" spellcheck="false" data-app-reset-input data-expected="{{ app_reset_confirmation }}" placeholder="{{ app_reset_confirmation }}">
+        </label>
+        <div class="app-reset-actions">
+          <button type="button" class="app-reset-cancel" data-app-reset-cancel>Cancel</button>
+          <button type="submit" class="app-reset-submit" data-app-reset-submit disabled>Delete everything and reset</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+  {% endif %}
 
   <details class="panel collapsible-panel admin-create-user-panel" open data-panel-state-key="admin:create-user">
     <summary class="collapsible-summary">

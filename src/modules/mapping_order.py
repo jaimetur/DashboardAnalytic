@@ -5,11 +5,13 @@ Vendor Maps table. ``Operator_Vendor`` values are ordered by their Operator and,
 within one Operator, by their Vendor. Labels missing from the maps follow the
 mapped ones (pure Vendors before mixed, other and all-vendor groups), and
 Operators without a Vendor (``<Operator> - All``) come after every Operator with
-Vendors, in Operator Map order. ``Vendor_Operator`` (``<Vendor>_<Operator>``, the same
+Vendors, in Operator Map order. A Vendor's own mixed group (``Ericsson (Mixed)``) stays among the
+Vendors, while the mixed groups of no Vendor (``Mixed (non-Ericsson)``) come last of all: after the
+``<Operator> - All`` values in Vendor, and last within each Operator in ``Operator_Vendor``. ``Vendor_Operator`` (``<Vendor>_<Operator>``, the same
 identity the other way round) is ordered by its Vendor and, within one Vendor, by its
 Operator, with the Operators without a Vendor last in the same ``<Operator> - All`` form;
-there, the mixed group of a Vendor (``Ericsson_Mixed``) is ordered with that Vendor and the
-other mixed groups (``Non-Ericsson_Mixed``) come last of all, after the Operators without a Vendor.
+there, the mixed group of a Vendor (``Ericsson (Mixed)``) is ordered with that Vendor and the
+other mixed groups (``Mixed (non-Ericsson)``) come last of all, after the Operators without a Vendor.
 """
 from __future__ import annotations
 
@@ -20,7 +22,8 @@ from src.modules.column_names import column_identity, vendor_filter_rank
 
 _ALL_SUFFIX = re.compile(r'\s+- All(?: Vendors)?$', re.IGNORECASE)
 _SEPARATOR = re.compile(r'^\s*[_·|/]\s*')
-_MIXED_SUFFIX = re.compile(r'^(.+?)[\s_]+Mixed$', re.IGNORECASE)
+_MIXED_SUFFIX = re.compile(r'^(.+?)\s*\(\s*Mixed\s*\)$', re.IGNORECASE)
+_OTHER_MIXED = re.compile(r'^Mixed\s*\(', re.IGNORECASE)
 UNMAPPED = 1_000_000
 
 
@@ -52,6 +55,9 @@ def vendor_order_key(
 ) -> tuple[Any, ...]:
     text = _ALL_SUFFIX.sub('', str(value or '').strip())
     group = mapping_group(text, vendor_groups)
+    # The mixed groups of no Vendor (Mixed (non-Ericsson)) come last of all, after the Operators without a Vendor.
+    if not _ALL_SUFFIX.search(str(value or '')) and _OTHER_MIXED.match(text):
+        return 3, _position(group), text.casefold()
     if group:
         return 0, _position(group), text.casefold()
     operator = mapping_group(text, operator_groups)
@@ -111,10 +117,10 @@ def swap_vendor_operator(value: object, operator_groups: Iterable[dict[str, Any]
 
 
 def _vendor_family(vendor: str, vendor_groups: Iterable[dict[str, Any]] | None) -> tuple[str, int]:
-    """The Vendor a mixed group belongs to (``Ericsson_Mixed`` → ``Ericsson``) and 1, or the Vendor itself and 0."""
+    """The Vendor a mixed group belongs to (``Ericsson (Mixed)`` → ``Ericsson``) and 1, or the Vendor itself and 0."""
     match = _MIXED_SUFFIX.match(vendor.strip())
     base = match.group(1).strip() if match else ''
-    if base and (mapping_group(base, vendor_groups) or (vendor_filter_rank(base) == 0 and not base.casefold().startswith('non'))):
+    if base and (mapping_group(base, vendor_groups) or vendor_filter_rank(base) == 0):
         return base, 1
     return vendor, 0
 
@@ -125,10 +131,10 @@ def vendor_operator_order_key(
     vendor, operator = split_vendor_operator(value, operator_groups)
     if not vendor:
         return (1, 3, UNMAPPED, '', *operator_order_key(operator, operator_groups))
-    # The mixed group of a Vendor follows that Vendor of each Operator (Ericsson_3, Ericsson_Mixed_3, Ericsson_VF);
-    # the other mixed groups (Non-Ericsson_Mixed) come last of all, after the Operators without a Vendor.
+    # The mixed group of a Vendor follows that Vendor of each Operator (Ericsson_3, Ericsson (Mixed)_3, Ericsson_VF);
+    # the other mixed groups (Mixed (non-Ericsson)) come last of all, after the Operators without a Vendor.
     family, mixed = _vendor_family(vendor, vendor_groups)
-    block = 2 if not mixed and _MIXED_SUFFIX.match(vendor.strip()) else 0
+    block = 2 if _OTHER_MIXED.match(vendor.strip()) else 0
     return (block, *vendor_order_key(family, vendor_groups, operator_groups), *operator_order_key(operator, operator_groups), mixed)
 
 

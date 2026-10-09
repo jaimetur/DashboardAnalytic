@@ -8,7 +8,7 @@ from src.modules.scoring_reports import default_report_configuration
 
 SETTINGS = {
     'operator_mapping_groups': [{'canonical': name, 'aliases': []} for name in ('EE', '3', 'VF_UK', 'VF_SA', 'O2')],
-    'vendor_mapping_groups': [{'canonical': name, 'aliases': []} for name in ('Ericsson', 'Ericsson_Mixed', 'Samsung')],
+    'vendor_mapping_groups': [{'canonical': name, 'aliases': []} for name in ('Ericsson', 'Ericsson (Mixed)', 'Samsung')],
 }
 
 
@@ -24,14 +24,14 @@ def test_operator_and_vendor_renames_change_only_the_renamed_label():
     assert operator('operator', 'VF_SA') == 'VF_SA'
     assert operator('operator_vendor', 'VF_UK_Ericsson') == 'VF_Ericsson'
     assert operator('operator_vendor', 'VF_SA_Ericsson') == 'VF_SA_Ericsson'
-    assert operator('vendor_operator', 'Ericsson_Mixed_VF_UK') == 'Ericsson_Mixed_VF'
+    assert operator('vendor_operator', 'Ericsson (Mixed)_VF_UK') == 'Ericsson (Mixed)_VF'
     assert operator('vendor_operator', 'Samsung_VF_SA') == 'Samsung_VF_SA'
     assert operator('vendor', 'VF_UK - All') == 'VF - All'
     vendor = value_renamer('vendor', 'Ericsson', 'ERI', SETTINGS)
     assert vendor('vendor', 'Ericsson') == 'ERI'
-    assert vendor('vendor', 'Ericsson_Mixed') == 'Ericsson_Mixed'
+    assert vendor('vendor', 'Ericsson (Mixed)') == 'Ericsson (Mixed)'
     assert vendor('operator_vendor', 'VF_UK_Ericsson') == 'VF_UK_ERI'
-    assert vendor('operator_vendor', 'VF_UK_Ericsson_Mixed') == 'VF_UK_Ericsson_Mixed'
+    assert vendor('operator_vendor', 'VF_UK_Ericsson (Mixed)') == 'VF_UK_Ericsson (Mixed)'
     assert vendor('vendor_operator', 'Ericsson_3') == 'ERI_3'
     assert vendor('operator', 'Ericsson') == 'Ericsson'
     # Only the filter fields change; other settings that name a field keep their value.
@@ -84,3 +84,45 @@ def test_job_editor_drafts_of_a_changed_job_are_discarded_and_close_is_labelled(
     assert 'if (task && draft.editingUpdatedAt !== task.updated_at) {' in script
     template = (root / 'src/web_interface/templates/report_jobs.html').read_text(encoding='utf-8')
     assert 'id="rj-editor-close"' in template and '<span>Close</span></button>' in template
+
+
+def test_mixed_vendor_groups_are_stored_with_their_interface_labels(tmp_path):
+    import sqlite3
+
+    from src.modules.repository import SCHEMA, Repository
+
+    database_path = tmp_path / 'workspace.db'
+    repository = Repository(database_path)
+    with sqlite3.connect(database_path) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.executescript(SCHEMA)
+        connection.execute('CREATE TABLE dataset_rows_1 (Operator TEXT, Operator_Vendor TEXT, Vendor TEXT, Vendor_Operator TEXT, Note TEXT)')
+        connection.execute("INSERT INTO dataset_rows_1 VALUES ('3', '3_Ericsson_Mixed', 'Ericsson_Mixed', 'Ericsson_Mixed_3', 'Ericsson_Mixed')")
+        connection.execute("INSERT INTO dataset_rows_1 VALUES ('VF', 'VF_Non-Ericsson_Mixed', 'Non-Ericsson_Mixed', 'Non-Ericsson_Mixed_VF', '')")
+        connection.executemany('INSERT INTO vendor_mappings (source_value, canonical_value) VALUES (?, ?)', [
+            ('Ericsson_Mixed', 'Ericsson_Mixed'), ('Non-Ericsson_Mixed', 'Non-Ericsson_Mixed'), ('Mixed', 'Non-Ericsson_Mixed'),
+        ])
+        connection.execute("INSERT INTO chart_mapping_groups (mapping_type, canonical_value, position, color) VALUES ('vendor', 'Non-Ericsson_Mixed', 5, '#B9770E')")
+        template = b'Vendor,Filter\nVendor,Vendor NOT IN (Non-Ericsson_Mixed, Ericsson_Mixed)\n'
+        connection.execute("INSERT INTO report_templates (technology, name, content, is_default) VALUES ('sa', 'Template', ?, 1)", (template,))
+        connection.execute(
+            "INSERT INTO workspace_state (key, value) VALUES ('nq_calls_filters', ?)",
+            (json.dumps({'vendor': ['Ericsson_Mixed', 'Non-Ericsson_Mixed']}),),
+        )
+
+        repository._rename_mixed_vendor_labels(connection)
+
+        rows = [tuple(row) for row in connection.execute('SELECT Operator_Vendor, Vendor, Vendor_Operator, Note FROM dataset_rows_1')]
+        # CDR rows change in their vendor fields only.
+        assert rows == [('3_Ericsson (Mixed)', 'Ericsson (Mixed)', 'Ericsson (Mixed)_3', 'Ericsson_Mixed'),
+                        ('VF_Mixed (non-Ericsson)', 'Mixed (non-Ericsson)', 'Mixed (non-Ericsson)_VF', '')]
+        assert dict(connection.execute('SELECT source_value, canonical_value FROM vendor_mappings').fetchall()) == {
+            'Ericsson (Mixed)': 'Ericsson (Mixed)', 'Mixed (non-Ericsson)': 'Mixed (non-Ericsson)', 'Mixed': 'Mixed (non-Ericsson)'}
+        assert [tuple(row) for row in connection.execute('SELECT canonical_value, position FROM chart_mapping_groups')] == [
+            ('Mixed (non-Ericsson)', 5)]
+        stored = connection.execute('SELECT content FROM report_templates').fetchone()[0]
+        assert isinstance(stored, bytes) and stored == b'Vendor,Filter\nVendor,Vendor NOT IN (Mixed (non-Ericsson), Ericsson (Mixed))\n'
+        assert json.loads(connection.execute("SELECT value FROM workspace_state WHERE key = 'nq_calls_filters'").fetchone()[0]) == {
+            'vendor': ['Ericsson (Mixed)', 'Mixed (non-Ericsson)']}
+        # Once per workspace.
+        assert connection.execute("SELECT value FROM workspace_state WHERE key = 'vendor_mixed_labels_v3'").fetchone()[0] == '1'

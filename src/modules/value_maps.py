@@ -59,8 +59,11 @@ class ValueMapper:
             operator = _normalise_operator_label(operator, self.operator_mappings)
             if not vendor:
                 return f'{operator} - All'
-            # The whole Vendor is one label: Ericsson_Mixed is not an Operator_Vendor value.
+            # The whole Vendor is one label (Ericsson (Mixed)), never an Operator_Vendor value.
             return f'{_normalise_operator_label(vendor, self.vendor_mappings)}_{operator}'
+        if kind == 'vendor' and not re.search(r'\s+- All(?: Vendors)?$', str(value).strip(), flags=re.IGNORECASE):
+            # The Vendor alone is one label, never split as an Operator_Vendor value (Operator "VF" with Vendor "Mixed").
+            return _normalise_operator_label(value, self.vendor_mappings)
         return _normalise_vendor(value, self.operator_mappings, self.vendor_mappings)
 
     def vendor_operators(self, operator_vendors: Iterable[Any]) -> list[str]:

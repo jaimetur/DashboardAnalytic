@@ -287,11 +287,11 @@ def test_vendor_formula_is_shared_by_vodafone_and_three() -> None:
     for operator, prefix in (('Vodafone UK', 'Vodafone'), ('3', '3')):
         assert vendor_from_cells(operator, 'eri -> eri', lookup) == f'{prefix}_Ericsson'
         assert vendor_from_cells(operator, 'nok -> nok', lookup) == f'{prefix}_Nokia'
-        assert vendor_from_cells(operator, 'eri -> unknown', lookup) == f'{prefix}_Ericsson_Mixed'
-        assert vendor_from_cells(operator, 'nok -> eri', lookup) == f'{prefix}_Ericsson_Mixed'
-        assert vendor_from_cells(operator, 'nok -> hua', lookup) == f'{prefix}_Non-Ericsson_Mixed'
-        assert vendor_from_cells(operator, 'unknown -> nok', lookup) == f'{prefix}_Non-Ericsson_Mixed'
-        assert vendor_from_cells(operator, '', lookup) == f'{prefix}_Non-Ericsson_Mixed'
+        assert vendor_from_cells(operator, 'eri -> unknown', lookup) == f'{prefix}_Ericsson (Mixed)'
+        assert vendor_from_cells(operator, 'nok -> eri', lookup) == f'{prefix}_Ericsson (Mixed)'
+        assert vendor_from_cells(operator, 'nok -> hua', lookup) == f'{prefix}_Mixed (non-Ericsson)'
+        assert vendor_from_cells(operator, 'unknown -> nok', lookup) == f'{prefix}_Mixed (non-Ericsson)'
+        assert vendor_from_cells(operator, '', lookup) == f'{prefix}_Mixed (non-Ericsson)'
     assert vendor_from_cells('O2', 'eri -> unknown', lookup) == 'O2'
 
 
@@ -556,7 +556,7 @@ def test_session_classification_and_multivendor_enrichment() -> None:
     assert len(nsa) == 1
     assert len(sa) == 1
     assert enrich_multivendor(nsa, vodafone_mapping, three_mapping)['Operator_Vendor'].tolist() == ['Vodafone_Ericsson']
-    assert enrich_multivendor(sa, vodafone_mapping, three_mapping)['Operator_Vendor'].tolist() == ['3_Ericsson_Mixed']
+    assert enrich_multivendor(sa, vodafone_mapping, three_mapping)['Operator_Vendor'].tolist() == ['3_Ericsson (Mixed)']
 
 
 def test_speech_session_classification_uses_call_mode_when_sample_rat_is_blank() -> None:
@@ -646,8 +646,8 @@ def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> Non
 
     mapped = assign_cdr_vendors(cdr, vodafone_mapping, three_mapping)
 
-    assert mapped['Operator_Vendor'].tolist() == ['Vodafone_Ericsson', '3_Ericsson_Mixed', 'O2 (UK) - All']
-    assert mapped['Vendor'].tolist() == ['Ericsson', 'Ericsson_Mixed', 'O2 (UK) - All']
+    assert mapped['Operator_Vendor'].tolist() == ['Vodafone_Ericsson', '3_Ericsson (Mixed)', 'O2 (UK) - All']
+    assert mapped['Vendor'].tolist() == ['Ericsson', 'Ericsson (Mixed)', 'O2 (UK) - All']
     assert mapped.columns[:3].tolist() == ['Operator_Vendor', 'Vendor', 'Operator']
 
 
@@ -665,9 +665,9 @@ def test_vendor_mapping_files_apply_to_every_spelling_of_their_operator() -> Non
     mapped = assign_cdr_vendors(cdr, vodafone_mapping, three_mapping)
 
     assert mapped['Operator_Vendor'].tolist() == [
-        'Vodafone VoNR_Ericsson', 'VF_SA_Ericsson', 'Vodafone SA_Ericsson_Mixed', 'Three SA_Nokia', 'O2 (UK) - All',
+        'Vodafone VoNR_Ericsson', 'VF_SA_Ericsson', 'Vodafone SA_Ericsson (Mixed)', 'Three SA_Nokia', 'O2 (UK) - All',
     ]
-    assert mapped['Vendor'].tolist() == ['Ericsson', 'Ericsson', 'Ericsson_Mixed', 'Nokia', 'O2 (UK) - All']
+    assert mapped['Vendor'].tolist() == ['Ericsson', 'Ericsson', 'Ericsson (Mixed)', 'Nokia', 'O2 (UK) - All']
 
 
 def test_workspace_vendor_assignment_replaces_source_vendor_collisions() -> None:

@@ -171,10 +171,10 @@ VFUK mappings materialise `GCID` as:
 Every Vodafone Operator (any name starting with Vodafone or VF) uses the VFUK mapping and every Three Operator (any name starting with Three or 3) the 3UK mapping. Vodafone UK (`Vodafone_`), Three UK (`3_`) and the other spellings (their own name as prefix, for example `Vodafone VoNR_` or `VF_SA_`) resolve the first and last cell with the same rule, stored in `Operator_Vendor`:
 
 - Same first/last vendor → `<Operator>_<Vendor>`.
-- Ericsson at either end and a different or missing vendor at the other → `<Operator>_Ericsson_Mixed`.
-- Any other different or missing combination → `<Operator>_Non-Ericsson_Mixed`.
+- Ericsson at either end and a different or missing vendor at the other → `<Operator>_Ericsson (Mixed)`.
+- Any other different or missing combination → `<Operator>_Mixed (non-Ericsson)`.
 
-O2 and EE store `<Operator> - All` because this workflow has no corresponding multivendor mapping source for them. `Vendor` keeps the vendor alone (`Ericsson`, `Ericsson_Mixed`, `Non-Ericsson_Mixed`) and `Vendor_Operator`, derived when the CDRs are read, the same identity as `<Vendor>_<Operator>`.
+O2 and EE store `<Operator> - All` because this workflow has no corresponding multivendor mapping source for them. `Vendor` keeps the vendor alone (`Ericsson`, `Ericsson (Mixed)`, `Mixed (non-Ericsson)`) and `Vendor_Operator`, derived when the CDRs are read, the same identity as `<Vendor>_<Operator>`.
 
 ### Remapping
 

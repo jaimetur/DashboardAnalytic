@@ -63,6 +63,12 @@ def selection_lines(filters: dict[str, Any], dataset_names: dict[str, str], gran
         values = ['Empty' if value == '__unassigned__' else str(value) for value in chosen or [] if str(value).strip()]
         if values:
             lines.append(f'{(field_labels or {}).get(key, key)}: {", ".join(values)}')
+    # The optional and CDR columns of the table ("cdr:<name>" is the CDR column <name>).
+    column_labels = {'join_id': 'JOIN_ID', 'nr_mode': 'NR Mode', 'cell_id': 'Cell ID', 'direction': 'Direction', 'end_time': 'End Time'}
+    for key, chosen in (filters.get('columns') or {}).items():
+        values = ['Empty' if value == '__unassigned__' else str(value) for value in chosen or [] if str(value).strip()]
+        if values:
+            lines.append(f'{column_labels.get(key, str(key).removeprefix("cdr:"))}: {", ".join(values)}')
     lines.extend(text for key, text in FLAG_LABELS.items() if filters.get(key))
     if filters.get('search'):
         lines.append(f"Search: {filters['search']}")

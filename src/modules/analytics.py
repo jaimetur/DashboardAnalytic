@@ -417,7 +417,7 @@ def _chart_mapping_group(df: pd.DataFrame, dimension: str, value: object) -> dic
         return None
     text = str(value or '').strip()
     if dimension == 'operator_vendor':
-        # The Vendor is what follows the Operator prefix (``3_Ericsson_Mixed`` -> ``Ericsson_Mixed``);
+        # The Vendor is what follows the Operator prefix (``3_Ericsson (Mixed)`` -> ``Ericsson (Mixed)``);
         # a Vendor column already holds the Vendor itself.
         text = split_operator_vendor(text, df.attrs.get('operator_mapping_groups', []))[1]
     groups = df.attrs.get(f'{mapping_type}_mapping_groups', [])

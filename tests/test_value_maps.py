@@ -42,18 +42,29 @@ def test_mapped_selections_expand_to_every_source_spelling():
 
 
 def test_vendor_operator_is_operator_vendor_the_other_way_round():
-    assert swap_operator_vendor('VF_SA_Ericsson_Mixed', OPERATORS) == 'Ericsson_Mixed_VF_SA'
-    assert swap_vendor_operator('Ericsson_Mixed_VF_SA', OPERATORS) == 'VF_SA_Ericsson_Mixed'
+    assert swap_operator_vendor('VF_SA_Ericsson (Mixed)', OPERATORS) == 'Ericsson (Mixed)_VF_SA'
+    assert swap_vendor_operator('Ericsson (Mixed)_VF_SA', OPERATORS) == 'VF_SA_Ericsson (Mixed)'
     assert swap_operator_vendor('EE - All', OPERATORS) == 'EE - All'
     values = mapper()
     assert values.map('vendor_operator', 'ERIC_Vodafone UK') == 'Ericsson_VF'
     assert values.operator_vendors(['Ericsson_VF']) == ['VF_Ericsson']
     # Vendors with underscores keep their whole name (they are not split again at their last underscore).
-    mixed = ValueMapper({}, {'mixed': 'Non-Ericsson_Mixed', 'ericsson_mixed': 'Ericsson_Mixed'}, OPERATORS, VENDORS)
-    assert mixed.map('vendor_operator', 'Ericsson_Mixed_3') == 'Ericsson_Mixed_3'
-    assert mixed.values('vendor_operator', mixed.vendor_operators(['3_Ericsson_Mixed', '3_Non-Ericsson_Mixed'])) == [
-        'Ericsson_Mixed_3', 'Non-Ericsson_Mixed_3']
+    mixed = ValueMapper({}, {'mixed': 'Mixed (non-Ericsson)', 'ericsson_mixed': 'Ericsson (Mixed)'}, OPERATORS, VENDORS)
+    assert mixed.map('vendor_operator', 'Ericsson (Mixed)_3') == 'Ericsson (Mixed)_3'
+    assert mixed.values('vendor_operator', mixed.vendor_operators(['3_Ericsson (Mixed)', '3_Mixed (non-Ericsson)'])) == [
+        'Ericsson (Mixed)_3', 'Mixed (non-Ericsson)_3']
     # By Vendor, then Operator; Operators without a Vendor last, in the same "<Operator> - All" form.
     vendor_operators = ['EE - All', 'Nokia_3', 'Ericsson_3', 'Nokia_VF', 'Ericsson_VF', 'VF - All']
     assert sorted(vendor_operators, key=lambda value: dimension_order_key('Vendor_Operator', value, OPERATORS, VENDORS)) == [
         'Ericsson_VF', 'Ericsson_3', 'Nokia_VF', 'Nokia_3', 'VF - All', 'EE - All']
+
+
+def test_mixed_vendor_groups_keep_their_whole_label():
+    from src.modules.value_maps import ValueMapper
+
+    # "Mixed" alone is a Vendor spelling of Mixed (non-Ericsson); Ericsson (Mixed) is a Vendor of its own.
+    mapper = ValueMapper({'vodafone uk': 'VF'}, {'Mixed': 'Mixed (non-Ericsson)', 'Ericsson (Mixed)': 'Ericsson (Mixed)', 'Nokia': 'NSN'})
+    assert [mapper.map('vendor', value) for value in ('Ericsson (Mixed)', 'Mixed (non-Ericsson)', 'Mixed', 'Nokia', 'Vodafone UK - All')] == [
+        'Ericsson (Mixed)', 'Mixed (non-Ericsson)', 'Mixed (non-Ericsson)', 'NSN', 'VF - All']
+    assert [mapper.map('operator_vendor', value) for value in ('3_Ericsson (Mixed)', 'Vodafone UK_Mixed', 'Vodafone UK_Nokia')] == [
+        '3_Ericsson (Mixed)', 'VF_Mixed (non-Ericsson)', 'VF_NSN']

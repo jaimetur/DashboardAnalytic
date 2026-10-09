@@ -19,6 +19,7 @@ Administrator Config centralises user, portability, database and dataset adminis
 | Interface Settings | [Open section](#interface-settings) |
 | Database Management | [Open section](#database-management) |
 | Datasets Management | [Open section](#datasets-management) |
+| Reset Application | [Open section](#reset-application) |
 | Operational checklist | [Open section](#operational-checklist) |
 
 ## Roles
@@ -240,6 +241,20 @@ Saving or deleting a row clears analysis caches so later Dashboard and Reporting
 - Open Ready Data, Voice or Speech CDRs in CDR Analysis.
 - Apply available VFUK/3UK mappings to an eligible CDR or clear its persisted Vendor mapping.
 - Delete a dataset after confirmation whenever it is not processing; stop active processing from Workspace first.
+
+## Reset Application
+
+> [!CAUTION]
+> **Irreversible.** Resetting deletes every workspace and database and the whole config and data folders. Download an export from **Import / Export / Transfer** first, or copy a backup out of the data folder: backups stored inside it are deleted too.
+
+Super-admins see a **Reset Application** button in the Administrator Config header. It opens a confirmation listing what is deleted and the config and data folders of the deployment; the reset runs only after typing `RESET APPLICATION`. The application then:
+
+- stops background work (dataset processing, queued jobs and Query Builder runs);
+- deletes every workspace, the application database (users, groups, Features Activation and settings) and the whole config and data folders, scheduled backups and transfer packages included; the code and the shipped assets are kept;
+- starts as a new deployment, with an empty **Default** workspace and the default accounts;
+- ends every session and opens the login page, which says the application was reset.
+
+App Logs of the new deployment record who reset the application.
 
 ## Operational checklist
 

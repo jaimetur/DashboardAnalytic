@@ -31,8 +31,8 @@ def test_network_inventories_map_the_vendor_of_their_operator():
     })
     lookups = {operator_key('O2'): {'1001': 'Ericsson', '1002': 'Nokia'}}
     mapped = assign_cdr_vendors(frame, inventory_lookups=lookups)
-    assert mapped['Operator_Vendor'].tolist() == ['O2_Ericsson', 'O2_Ericsson_Mixed', 'O2_Non-Ericsson_Mixed', 'EE - All', 'Vodafone UK - All']
-    assert mapped['Vendor'].tolist() == ['Ericsson', 'Ericsson_Mixed', 'Non-Ericsson_Mixed', 'EE - All', 'Vodafone UK - All']
+    assert mapped['Operator_Vendor'].tolist() == ['O2_Ericsson', 'O2_Ericsson (Mixed)', 'O2_Mixed (non-Ericsson)', 'EE - All', 'Vodafone UK - All']
+    assert mapped['Vendor'].tolist() == ['Ericsson', 'Ericsson (Mixed)', 'Mixed (non-Ericsson)', 'EE - All', 'Vodafone UK - All']
 
 
 def test_network_inventory_upload_with_its_operator_and_map_cdrs(client, tmp_path):
@@ -71,6 +71,6 @@ def test_network_inventory_upload_with_its_operator_and_map_cdrs(client, tmp_pat
     assert mapped.status_code == 303
     wait_for_background_dataset_work()
     result = core.repository.load_dataset_rows(cdr_id, ['Operator_Vendor'], {})
-    assert result['Operator_Vendor'].tolist() == ['O2_Ericsson', 'O2_Ericsson_Mixed', 'EE - All']
+    assert result['Operator_Vendor'].tolist() == ['O2_Ericsson', 'O2_Ericsson (Mixed)', 'EE - All']
     options = json.loads(core.repository.get_dataset(cdr_id)['processing_options_json'])
     assert options['network_inventory_dataset_ids'] == [uploaded['id']]

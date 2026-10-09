@@ -26,6 +26,19 @@
 
 /* Filters */
 .nq-filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 14px; }
+/* The Default Filters and the filters of the Additional Columns, each under its title. */
+.nq-filter-group-title { margin: 4px 0 8px; color: var(--nq-dark, #7d1238); font-size: 0.76rem; font-weight: 850; letter-spacing: 0.04em; text-transform: uppercase; }
+.nq-filter-group-title[hidden] { display: none; }
+#nq-field-filters-title, #nq-column-filters-title { margin-top: 16px; }
+/* Additional Columns: every CDR column in the table and/or in the Excel export. */
+.nq-cdr-column-head, .nq-cdr-column-row { display: grid; grid-template-columns: minmax(0, 1fr) 56px 56px; align-items: center; gap: 6px; }
+.nq-cdr-column-head { margin-top: 8px; padding: 0 4px 4px; border-bottom: 1px solid rgba(16, 49, 74, 0.12); color: #6a5a62; font-size: 0.74rem; font-weight: 800; }
+.nq-cdr-column-head span:not(:first-child), .nq-cdr-column-row input { justify-self: center; }
+.nq-cdr-columns { max-height: 46vh; overflow: auto; }
+.nq-cdr-column-row { padding: 3px 4px; border-radius: 6px; font-size: 0.86rem; }
+.nq-cdr-column-row[hidden] { display: none; }
+.nq-cdr-column-row:hover { background: rgba(156, 28, 71, 0.06); }
+.nq-cdr-column-row span { overflow-wrap: anywhere; }
 .nq-filter-grid label, .nq-search, .nq-page-size { display: grid; gap: .35rem; font-size: .86rem; font-weight: 800; }
 .nq-filter-grid select, .nq-search input { box-sizing: border-box; width: 100%; min-width: 0; }
 .nq-filter-row { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 18px; margin-top: 16px; }

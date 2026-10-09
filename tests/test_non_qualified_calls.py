@@ -947,10 +947,32 @@ def test_cdr_columns_and_optional_columns_of_the_calls_table(client, tmp_path):
     login(client)
     state = client.get('/api/non-qualified-calls/state').json()
     assert 'Cellname_A' in state['cdr_columns'] and 'join_id' in state['optional_columns']
-    saved = client.put('/api/non-qualified-calls/table-columns', json={'builtin': ['join_id', 'region'], 'cdr': ['Cellname_A']})
-    assert saved.status_code == 200 and saved.json()['table_columns'] == {'builtin': ['join_id', 'region'], 'cdr': ['Cellname_A']}
+    saved = client.put('/api/non-qualified-calls/table-columns', json={'builtin': ['join_id', 'nr_mode'], 'cdr': ['Cellname_A']})
+    assert saved.status_code == 200 and saved.json()['table_columns'] == {'builtin': ['join_id', 'nr_mode'], 'cdr': ['Cellname_A'], 'export_cdr': []}
+    # Region and Cluster are always in the table, in one column after Operator / Vendor.
+    page = client.get('/non-qualified-calls').text
+    assert page.index('data-sort="vendor"') < page.index('data-sort="region"') < page.index('data-sort="cluster"') < page.index('data-sort="city"')
+    assert 'region' not in client.get('/api/non-qualified-calls/state').json()['optional_columns']
     calls = query(client, sort='cdr:Cellname_A', direction='asc')['calls']
     assert [call['extra']['Cellname_A'] for call in calls] == ['LEEDS_3', 'YORK_2']
+    # Every optional and CDR column can be filtered by its values, like the other columns.
+    options = client.get('/api/non-qualified-calls/state').json()['filter_options']
+    assert options['column:cdr:Cellname_A'] == ['LEEDS_3', 'YORK_2'] and 'column:join_id' in options
+    filtered = query(client, filters={'columns': {'cdr:Cellname_A': ['YORK_2']}})['calls']
+    assert [call['extra']['Cellname_A'] for call in filtered] == ['YORK_2']
+    assert query(client, filters={'columns': {'join_id': [nq.UNASSIGNED]}})['summary']['total'] >= 0
+    saved_filters = client.put('/api/non-qualified-calls/filters', json={'filters': {'columns': {'cdr:Cellname_A': ['YORK_2'], 'bad key': ['x']}}})
+    assert saved_filters.status_code == 200 and nq.saved_filters(core.repository)['columns'] == {'cdr:Cellname_A': ['YORK_2']}
+    # More CDR columns can be exported to Excel only; the table's are exported too, with Cluster and both vendor identities.
+    saved = client.put('/api/non-qualified-calls/table-columns', json={
+        'builtin': ['join_id'], 'cdr': ['Cellname_A'], 'export_cdr': ['Cellname_A', 'Call_Status']})
+    assert saved.json()['table_columns'] == {'builtin': ['join_id'], 'cdr': ['Cellname_A'], 'export_cdr': ['Call_Status']}
+    sheet = load_workbook(io.BytesIO(client.post('/api/non-qualified-calls/export', json={'filters': {}}).content))['NQ Calls']
+    headers = [cell.value for cell in sheet[1]]
+    assert {'Cluster', 'Operator_Vendor', 'Vendor_Operator', 'CDR', 'Cellname_A', 'Call_Status'} <= set(headers)
+    assert headers.index('Call_Status') == headers.index('Cellname_A') + 1 and headers[-1] == 'Call Key'
+    rows = [dict(zip(headers, (cell.value for cell in row))) for row in sheet.iter_rows(min_row=2)]
+    assert {row['Cellname_A'] for row in rows} == {'LEEDS_3', 'YORK_2'} and all(row['Call_Status'] for row in rows)
     assert client.put('/api/non-qualified-calls/table-columns', json={'builtin': ['unknown'], 'cdr': []}).status_code == 400
 
 
