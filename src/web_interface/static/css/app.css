@@ -74,6 +74,12 @@ label { display: grid; gap: 0.45rem; color: var(--muted); }
 .topnav { display: flex; gap: 0.8rem; flex-wrap: wrap; justify-content: flex-end; align-self: flex-start; margin-top: 1.5rem; }
 .topnav .topnav-link, .pill, .ghost-link { padding: 0.65rem 0.95rem; border-radius: 999px; background: rgba(255, 255, 255, 0.72); border: 1px solid var(--line); }
 .topnav-link { display: inline-flex; align-items: center; justify-content: center; font-weight: 600; box-shadow: 0 8px 20px rgba(18, 32, 43, 0.08); }
+/* Sign in, on the documents read without an account: a large call to action in the brand colours, gently pulsing. */
+.topnav .topnav-link-signin { gap: .55rem; padding: .8rem 1.5rem; border: 0; border-radius: 999px; background: linear-gradient(135deg, #10314a, #08736d 55%, #20a08f); color: #fff; font-size: 1.05rem; font-weight: 800; letter-spacing: .01em; box-shadow: 0 12px 28px rgba(8, 115, 109, .35); animation: signin-pulse 2.4s ease-in-out infinite; transition: transform .2s ease, box-shadow .2s ease; }
+.topnav .topnav-link-signin svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.topnav .topnav-link-signin:hover, .topnav .topnav-link-signin:focus-visible { color: #fff; transform: translateY(-2px); box-shadow: 0 16px 34px rgba(8, 115, 109, .45); animation: none; outline: none; }
+@keyframes signin-pulse { 0%, 100% { box-shadow: 0 12px 28px rgba(8, 115, 109, .35), 0 0 0 0 rgba(32, 160, 143, .45); } 50% { box-shadow: 0 12px 28px rgba(8, 115, 109, .35), 0 0 0 10px rgba(32, 160, 143, 0); } }
+@media (prefers-reduced-motion: reduce) { .topnav .topnav-link-signin { animation: none; } }
 .topnav-user-control { display: inline-flex; min-width: 0; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 999px; background: transparent; color: inherit; font: inherit; box-shadow: none; cursor: pointer; }
 .topnav-user-control:hover:not(:disabled), .topnav-user-control:focus-visible { background: transparent; box-shadow: none; transform: none; }
 .topnav-user-control .topnav-user-badge { cursor: pointer; transition: filter 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease; }

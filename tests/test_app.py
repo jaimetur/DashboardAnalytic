@@ -11022,3 +11022,11 @@ def test_every_tab_lists_its_sections_with_icons_in_the_colour_of_its_module(cli
                     for heading in re.findall(r'<h[123][^>]*>(.*?)</h[123]>', (templates / pages[module]).read_text(encoding='utf-8'), re.S)}
         for heading, *_rest in sections:
             assert section_anchor(heading) in headings, (module, heading)
+
+
+def test_documents_read_without_an_account_show_a_prominent_sign_in(client):
+    page = client.get('/documents/view/help')
+    assert page.status_code == 200
+    assert 'class="topnav-link topnav-link-signin" href="/login"' in page.text
+    assert '<span>Sign in</span>' in page.text
+

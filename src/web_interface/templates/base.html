@@ -64,7 +64,8 @@
         <a class="topnav-link topnav-link-logout" href="/logout" title="Log out of DriveTest Analyzer">Logout</a>
       </nav>
       {% elif request.url.path.startswith('/documents/view/') %}
-      <nav class="topnav"><a class="topnav-link" href="/login" title="Sign in to DriveTest Analyzer">Sign in</a></nav>
+      {# The documents are readable without signing in; the way in stands out so nobody misses it. #}
+      <nav class="topnav"><a class="topnav-link topnav-link-signin" href="/login" title="Sign in to DriveTest Analyzer"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l4-4-4-4"/><path d="M14 12H4"/></svg><span>Sign in</span></a></nav>
       {% endif %}
     </header>
     {% endif %}

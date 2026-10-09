@@ -49,7 +49,7 @@ Other tabs:
 - Config (dropdown with Application Config and Workspace Config, each with the list of its sections on hover), for `user-editor`, `admin` and `super-admin` roles
 - Admin, for `admin` and `super-admin` roles
 
-Help Home opens by default after login. Help, the Readme and the Changelog are also available without signing in, with a **Sign in** link. Every module except Workspace requires an open workspace.
+Help Home opens by default after login. Help, the Readme and the Changelog are also available without signing in, with a prominent **Sign in** button at the top right. Every module except Workspace requires an open workspace.
 
 Hovering a tab, or focusing it with the keyboard, opens below it the list of its sections, each with an icon and in the colour of the module: the panels of each main module (for example Scoring Calculation, Scoring Results and Scoring Jobs in Scoring & GAP Analysis, where Scoring Results lists beside it Scoring Charts, Scoring Tables and GAP Analysis to open that results tab), App Events and Execution Log in App Logs, the panels of Admin, the chapters of the Readme and the latest releases of the Changelog. Help lists Help Home and, beside each group, the chapters of General, Main Modules, Administrative Modules and Reference (with the Readme and the Changelog), and ends with **About**, the credits of the application: its logo, name, version, release date and author. Choosing one opens that page at that section, unfolding it when it was folded; clicking the tab itself still opens the module, at its top when it is the page being shown. **Builders** and **Config** open their menu on hover too, and so does the **User** badge, with **Change password**.
 
