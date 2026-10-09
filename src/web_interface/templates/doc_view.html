@@ -192,6 +192,40 @@
     if (scrollIntoView) release.scrollIntoView({block: 'start'});
   }
 
+  // The release being read (the one taking most of the window) is highlighted in the release lists
+  // like the open document in Help Navigation; with no release in view the highlight stays.
+  let readChangelogReleaseId = '';
+  function highlightChangelogRelease() {
+    const releases = [...contentEl.querySelectorAll('.changelog-release')];
+    let current = null;
+    let currentHeight = 0;
+    releases.forEach((release) => {
+      const box = release.getBoundingClientRect();
+      const visible = Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0);
+      if (visible > currentHeight) [current, currentHeight] = [release, visible];
+    });
+    readChangelogReleaseId = current?.id || readChangelogReleaseId || releases[0]?.id || '';
+    changelogNavLists.forEach((navList) => navList.querySelectorAll('a').forEach((link) => {
+      const active = Boolean(readChangelogReleaseId) && link.getAttribute('href') === `#${readChangelogReleaseId}`;
+      link.classList.toggle('active', active);
+      if (active) link.setAttribute('aria-current', 'location');
+      else link.removeAttribute('aria-current');
+    }));
+  }
+  let changelogHighlightFrame = 0;
+  function scheduleChangelogHighlight() {
+    if (changelogHighlightFrame) return;
+    changelogHighlightFrame = requestAnimationFrame(() => {
+      changelogHighlightFrame = 0;
+      highlightChangelogRelease();
+    });
+  }
+  if (changelogNavLists.length) {
+    document.addEventListener('scroll', scheduleChangelogHighlight, {capture: true, passive: true});
+    window.addEventListener('resize', scheduleChangelogHighlight);
+    contentEl.addEventListener('toggle', scheduleChangelogHighlight, true);
+  }
+
   function makeChangelogReleasesCollapsible() {
     const headings = [...contentEl.querySelectorAll('h2')].filter((heading) => /^Release:\s*v.+$/i.test(heading.textContent));
     headings.forEach((heading, index) => {
@@ -231,6 +265,7 @@
           if (match) heading.id = `release-v${match[1].trim()}`;
         });
         makeChangelogReleasesCollapsible();
+        scheduleChangelogHighlight();
       }
       if (window.location.hash) {
         const targetId = window.location.hash.slice(1);
@@ -341,11 +376,15 @@
             link.append(Object.assign(document.createElement('span'), {className: 'release-nav-date', textContent: release.date}));
           }
           link.addEventListener('click', () => {
-            requestAnimationFrame(() => openChangelogRelease(release.id, true, true));
+            requestAnimationFrame(() => {
+              openChangelogRelease(release.id, true, true);
+              scheduleChangelogHighlight();
+            });
           });
           item.appendChild(link);
           navList.appendChild(item);
         }));
+        scheduleChangelogHighlight();
       })
       .catch(() => { changelogNavLists.forEach((navList) => { navList.innerHTML = '<li>Unable to load releases.</li>'; }); });
   }

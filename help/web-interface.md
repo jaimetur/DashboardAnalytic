@@ -63,6 +63,8 @@ Help Navigation lists unnumbered documents under General, Main Modules, Administ
 
 The Help Home link stays above the groups. Every chapter is available to every reader except Reporting (old), which only users with that feature see.
 
+The Changelog adds a **Releases** list that jumps to each release; it highlights the release being read, as Help Navigation highlights the open document. Both lists grow down to the end of the document and only scroll beyond it.
+
 ## Header controls
 
 - Click the active-workspace badge to switch workspace.
