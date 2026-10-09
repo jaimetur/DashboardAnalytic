@@ -416,7 +416,8 @@ span.nq-root-suggestion { cursor: default; }
 :is(.non-qualified-calls, .nq-drawer) .nq-cause-picker-button:hover:not(:disabled) { border-color: var(--nq-color); background: #fff; color: var(--nq-text); }
 :is(.non-qualified-calls, .nq-drawer) .nq-cause-picker-button.is-empty { color: var(--nq-muted); font-weight: 650; }
 :is(.non-qualified-calls, .nq-drawer) .nq-cause-picker-button::after { content: ''; position: absolute; top: 50%; right: .65rem; width: .4rem; height: .4rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; opacity: .7; transform: translateY(-70%) rotate(45deg); }
-.nq-cause-picker { width: 18rem; grid-template-rows: auto minmax(0, 1fr); }
+/* Above the call drawer (z-index 81), whose root cause opens it too. */
+.nq-cause-picker { z-index: 90; width: 18rem; grid-template-rows: auto minmax(0, 1fr); }
 /* A block list: grid rows would shrink the options when the list scrolls. */
 .nq-cause-picker .nq-column-filter-list { position: relative; display: block; max-height: none; overflow-y: auto; }
 .nq-cause-picker .nq-cause-option { display: block; width: 100%; min-height: 0; height: auto; margin: 0 0 .1rem; line-height: 1.3; overflow: visible; padding: .3rem .5rem .3rem 1.6rem; border: 0; border-radius: 7px; background: transparent; color: #263746; font-size: .82rem; font-weight: 650; text-align: left; box-shadow: none; cursor: pointer; }
