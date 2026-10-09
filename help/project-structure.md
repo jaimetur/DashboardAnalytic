@@ -35,6 +35,7 @@ DriveTestAnalyzer/
 ├── assets/
 │   ├── autocalculated-fields/
 │   ├── labels-campaigns/
+│   ├── labels-operators/
 │   ├── labels-vendors/
 │   ├── map-areas/
 │   ├── powerpoint-templates/
@@ -181,6 +182,7 @@ Workspaces, backups and transfer packages created with the former layout (module
 - `assets/powerpoint-templates/Template_01.pptx` supplies slide masters, named layouts and placeholders.
 - `assets/autocalculated-fields/default-autocalculated-fields.json` holds the Auto-calculated Fields every new workspace starts with (the only source of default fields).
 - Starter content added to every workspace that does not have it yet (see `src/modules/starter_content.py`): `assets/scoring-methodologies/*.json` (Scoring methodologies in the portable configuration format), `assets/ppt-templates/<nsa|sa>/*.csv` (Report Templates, named after their file), `assets/ppt-dashboards/*.json` (Dashboards without CDRs, dates or Operator and Vendor filters), `assets/scoring-report-configurations/*.json` (saved Scoring report configurations), `assets/query-builder-queries/*.json` (saved Query Builder queries) and `assets/reporting-jobs/*.json` (Reporting Jobs, naming their Dashboards and Scoring report configuration). Adding a file to these folders ships it.
+- `assets/labels-operators/operators-by-country.json` holds the operators (labels, corporate colours and CDR spellings) of the 50 main countries, which a workspace created for one of them starts with (see `src/modules/workspace_countries.py`).
 - `assets/labels-vendors/default-vendor-maps.json` holds the Vendor Maps (labels, colours and CDR spellings) a new workspace starts with.
 - `assets/labels-campaigns/default-campaign-map.json` holds the default Campaign Maps (label format, order of the radio modes and exceptions) of the workspaces without their own.
 - `assets/map-areas/` holds the Map Areas shipped with the application (one `<ISO3>.json.gz` per country, such as the UK ITL3 areas, listed in `manifest.json`) and the world country polygons that find the country of each test (see its README).

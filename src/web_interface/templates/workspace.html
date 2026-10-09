@@ -50,6 +50,12 @@
                 {% for option in cdr_type_options %}<option value="{{ option.value }}"{% if not option.supported %} disabled{% endif %}{% if option.value == 'netcheck' %} selected{% endif %}>{{ option.label }}{% if not option.supported %} (coming soon){% endif %}</option>{% endfor %}
               </select>
             </label>
+            <label>Country
+              <select name="country" class="workspace-create-country" aria-label="Country of the new workspace" title="The new workspace starts with the Operator Maps of its country; without a country it has none">
+                <option value="">None (no operators)</option>
+                {% for option in country_options | default([], true) %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+              </select>
+            </label>
             {% if user.role == 'super-admin' %}<div class="workspace-create-access"><span>Access</span><details class="workspace-user-picker" data-workspace-user-picker>
               <summary><span>Roles, groups and users</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
               <div class="workspace-user-picker-menu">
@@ -73,6 +79,7 @@
                 <th class="workspace-name-column">Workspace</th>
                 {% if user.role == 'super-admin' %}<th class="workspace-access-column">Access</th>{% endif %}
                 <th class="workspace-cdr-type-column">CDR Type</th>
+                <th class="workspace-country-column">Country</th>
                 <th>Size</th>
                 <th>Cache Size</th>
                 <th>Status</th>
@@ -110,6 +117,13 @@
                   {% set item_cdr_type = (workspace_cdr_types | default({}, true)).get(item.id, 'netcheck') %}
                   <select form="workspace-save-{{ item.id }}" name="cdr_type" aria-label="CDR type of {{ item.name }}" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>
                     {% for option in cdr_type_options %}<option value="{{ option.value }}"{% if not option.supported %} disabled{% endif %}{% if option.value == item_cdr_type %} selected{% endif %}>{{ option.label }}{% if not option.supported %} (coming soon){% endif %}</option>{% endfor %}
+                  </select>
+                </td>
+                <td class="workspace-country-column" data-label="Country">
+                  {% set item_country = (workspace_countries | default({}, true)).get(item.id, '') %}
+                  <select form="workspace-save-{{ item.id }}" name="country" aria-label="Country of {{ item.name }}" title="Choosing a country adds its operators that the Operator Maps do not have yet" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>
+                    <option value="">None</option>
+                    {% for option in country_options | default([], true) %}<option value="{{ option.value }}"{% if option.value == item_country %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
                   </select>
                 </td>
                 <td data-label="Size"><span class="workspace-size" data-workspace-size data-workspace-id="{{ item.id }}">{{ workspace_sizes.get(item.id, '0 MB') }}</span></td>
@@ -610,7 +624,7 @@
         </article>
       </div>
       <div class="auto-calculated-field-progress-footer">
-        <p class="form-note">Auto-calculated Fields, combined table recreations and the In Combined? changes are each shown separately while they run.</p>
+        <p class="form-note">Each update of the CDR tables has its own progress bar here while it runs: recalculating the Auto-calculated Fields, rebuilding the combined tables and applying In Combined? changes.</p>
       </div>
     </section>
   </details>

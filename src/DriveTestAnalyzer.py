@@ -68,6 +68,7 @@ from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis, shared_frame_attrs
 from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
+from src.modules.workspace_countries import country_options
 from src.modules.cdr_types import (
     CDR_TYPES, DEFAULT_CDR_TYPE, cdr_type_options, normalize_cdr_type, set_workspace_cdr_type, workspace_cdr_type,
 )
@@ -5460,6 +5461,7 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
             'max_short_title_length': MAX_SHORT_TITLE_LENGTH,
         } if isinstance(template_user, SessionUser) and template_user.role == 'super-admin' else None,
         'cdr_type_options': cdr_type_options(),
+        'country_options': country_options(),
         'vendor_filter_identities': {
             'operators': {str(value): str(group['canonical'])
                           for group in repository.list_operator_mapping_groups()
@@ -10522,6 +10524,7 @@ def render_admin_template(
             'operator_mapping_groups': repository.list_operator_mapping_groups() if active_workspace else [],
             'operator_mapping_notice': request.query_params.get('operator_mapping_notice') or None,
             'cdr_type_options': cdr_type_options(),
+            'country_options': country_options(),
             'workspace_cdr_type': workspace_cdr_type(repository) if active_workspace else DEFAULT_CDR_TYPE,
             'cdr_type_notice': request.query_params.get('cdr_type_notice') or None,
             'operator_mapping_error': request.query_params.get('operator_mapping_error') or None,
@@ -11240,7 +11243,7 @@ def workspace(
                 'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [], 'region_mapping_datasets': [], 'cluster_mapping_datasets': [], 'vendor_polygon_datasets': [], 'network_inventory_datasets': [], 'operator_options': [],
                 'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [], 'mappable_region_cdr_datasets': [], 'clearable_region_cdr_datasets': [],
                 'calculated_dimensions': [], 'combined_tables': [],
-                'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_cache_sizes': workspace_cache_sizes, 'workspace_statuses': workspace_statuses, 'workspace_users': workspace_users, 'workspace_cdr_types': workspace_cdr_types(workspaces), 'workspace_access_rules': repository.workspace_access_rules(), 'access_roles': FEATURE_ROLES, 'access_groups': repository.list_user_groups(), 'workspace_notice': request.query_params.get('workspace_notice'),
+                'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_cache_sizes': workspace_cache_sizes, 'workspace_statuses': workspace_statuses, 'workspace_users': workspace_users, 'workspace_cdr_types': workspace_cdr_types(workspaces), 'workspace_countries': workspace_countries(workspaces), 'workspace_access_rules': repository.workspace_access_rules(), 'access_roles': FEATURE_ROLES, 'access_groups': repository.list_user_groups(), 'workspace_notice': request.query_params.get('workspace_notice'),
                 'workspace_warning': request.query_params.get('workspace_warning'),
                 'workspace_error': request.query_params.get('workspace_error'),
             },
@@ -11302,6 +11305,7 @@ def workspace(
             'workspace_statuses': workspace_statuses,
             'workspace_users': workspace_users,
             'workspace_cdr_types': workspace_cdr_types(workspace_registry.list()),
+            'workspace_countries': workspace_countries(workspace_registry.list()),
             'workspace_access_rules': repository.workspace_access_rules(), 'access_roles': FEATURE_ROLES,
             'access_groups': repository.list_user_groups(),
             'active_workspace': active_workspace,
@@ -12322,6 +12326,23 @@ def workspace_cdr_types(workspaces: list[Workspace]) -> dict[str, str]:
     return types
 
 
+def workspace_countries(workspaces: list[Workspace]) -> dict[str, str]:
+    """The country of each workspace ('' for none), read without opening (or migrating) its database."""
+    from src.modules.workspace_countries import COUNTRY_STATE_KEY, countries
+
+    codes = {}
+    for workspace in workspaces:
+        value = ''
+        try:
+            with closing(sqlite3.connect(f'file:{workspace.database_path}?mode=ro', uri=True, timeout=2)) as connection:
+                row = connection.execute('SELECT value FROM workspace_state WHERE key = ?', (COUNTRY_STATE_KEY,)).fetchone()
+                value = str(row[0]).strip().upper() if row else ''
+        except sqlite3.Error:
+            pass
+        codes[workspace.id] = value if value in countries() else ''
+    return codes
+
+
 def workspace_access_rows(user: SessionUser, accounts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The workspaces an administrator manages, with the roles, groups and users that open each one."""
     rules = repository.workspace_access_rules()
@@ -12421,12 +12442,16 @@ def close_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(c
 @app.post('/workspace/create')
 def create_workspace(
     name: str = Form(...), usernames: list[str] = Form(default=[]), cdr_type: str = Form(DEFAULT_CDR_TYPE),
+    country: str = Form(''),
     access_roles: list[str] = Form(default=[]), access_groups: list[int] = Form(default=[]),
     user: SessionUser = Depends(current_user),
 ) -> Response:
+    from src.modules.workspace_countries import normalize_country, set_workspace_country
+
     require_workspace_admin(user)
     try:
         cdr_type = normalize_cdr_type(cdr_type)
+        country = normalize_country(country)
         workspace = workspace_registry.create(name)
         selected_usernames = {item.strip().casefold() for item in usernames if item.strip()}
         for account in repository.list_users():
@@ -12442,10 +12467,13 @@ def create_workspace(
                 workspace.id, [role for role in access_roles if role in FEATURE_ROLES], access_groups)
         activate_workspace(workspace.id)
         set_workspace_cdr_type(repository, cdr_type)
+        # The Operator Maps of its country; without a country the workspace has none.
+        _country, operators_added = set_workspace_country(repository, country)
     except ValueError as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
     repository.try_add_log(user.username, 'create_workspace', json.dumps({
         'workspace': workspace.id, 'name': workspace.name, 'cdr_type': CDR_TYPES[cdr_type]['label'],
+        'country': country, 'operators_added': operators_added,
     }))
     return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Created and opened {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -12475,10 +12503,14 @@ def save_workspace(
     access_roles: list[str] = Form(default=[]),
     access_groups: list[int] = Form(default=[]),
     cdr_type: str = Form(''),
+    country: str | None = Form(None),
     user: SessionUser = Depends(current_user),
 ) -> Response:
+    from src.modules.workspace_countries import set_workspace_country
+
     require_workspace_admin(user)
     require_workspace_access(user, workspace_id)
+    operators_added = 0
     try:
         current_workspace = workspace_registry.get(workspace_id)
         if not current_workspace:
@@ -12495,6 +12527,12 @@ def save_workspace(
                 workspace.database_path, global_db_path=repository.global_db_path,
                 workspace_registry_db_path=workspace_registry.registry_path,
             ), cdr_type)
+        if country is not None and country.strip().upper() != workspace_countries([workspace])[workspace.id]:
+            # A new country adds its operators that the Operator Maps do not have yet.
+            _country, operators_added = set_workspace_country(Repository(
+                workspace.database_path, global_db_path=repository.global_db_path,
+                workspace_registry_db_path=workspace_registry.registry_path,
+            ), country)
         if active_workspace and active_workspace.id == workspace.id:
             activate_workspace(workspace.id)
     except ValueError as exc:
@@ -12502,6 +12540,8 @@ def save_workspace(
             return JSONResponse({'detail': str(exc)}, status_code=400)
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
     notice = 'Workspace name and access updated.' if user.role == 'super-admin' else 'Workspace name updated.'
+    if operators_added:
+        notice += f' {operators_added} operators of its country added to the Operator Maps.'
     add_workspace_audit_log(workspace, user.username, 'save_workspace', {
         'workspace': workspace.id, 'name': workspace.name,
         'access_updated': user.role == 'super-admin',
@@ -21794,6 +21834,20 @@ def latest_auto_calculated_field_materialization(
         ]
     workspace_state = repository.get_workspace_state('calculated_dimensions_need_materialization')
     persisted_job = read_persisted_auto_field_progress(active_workspace.id)
+    if (
+        workspace_state in {'1', 'processing'}
+        and not any(job.get('status') in {'queued', 'processing'} for job in workspace_jobs)
+        and persisted_job.get('status') not in {'queued', 'processing'}
+    ):
+        # A pass nobody queued, such as the first Auto-calculated Fields of a new workspace
+        # without CDRs, starts now instead of showing an update that never runs.
+        queue_workspace_dimension_materialization(active_workspace)
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            workspace_jobs = [
+                dict(job) for job in AUTO_CALCULATED_FIELD_JOBS.values()
+                if job.get('workspace_id') == active_workspace.id
+            ]
+        workspace_state = repository.get_workspace_state('calculated_dimensions_need_materialization')
     if (
         persisted_job.get('status') in {'queued', 'processing'}
         and workspace_state in {'1', 'processing'}

@@ -1,0 +1,2302 @@
+{
+  "ARG": {
+    "name": "Argentina",
+    "operators": [
+      {
+        "canonical": "Personal",
+        "color": "#00A9E0",
+        "aliases": [
+          "Personal AR",
+          "Personal - ar",
+          "Telecom Personal",
+          "Telecom Personal AR",
+          "Telecom Personal - ar"
+        ]
+      },
+      {
+        "canonical": "Claro",
+        "color": "#DA291C",
+        "aliases": [
+          "Claro AR",
+          "Claro - ar"
+        ]
+      },
+      {
+        "canonical": "Movistar",
+        "color": "#019DF4",
+        "aliases": [
+          "Movistar AR",
+          "Movistar - ar"
+        ]
+      }
+    ]
+  },
+  "AUS": {
+    "name": "Australia",
+    "operators": [
+      {
+        "canonical": "Telstra",
+        "color": "#0099F8",
+        "aliases": [
+          "Telstra AU",
+          "Telstra - au"
+        ]
+      },
+      {
+        "canonical": "Optus",
+        "color": "#00A79D",
+        "aliases": [
+          "Optus AU",
+          "Optus - au"
+        ]
+      },
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone AU",
+          "Vodafone - au",
+          "TPG",
+          "TPG AU",
+          "TPG - au",
+          "TPG Telecom",
+          "TPG Telecom AU",
+          "TPG Telecom - au"
+        ]
+      }
+    ]
+  },
+  "AUT": {
+    "name": "Austria",
+    "operators": [
+      {
+        "canonical": "A1",
+        "color": "#DA291C",
+        "aliases": [
+          "A1 AT",
+          "A1 - at",
+          "A1 Telekom",
+          "A1 Telekom AT",
+          "A1 Telekom - at"
+        ]
+      },
+      {
+        "canonical": "Magenta",
+        "color": "#E20074",
+        "aliases": [
+          "Magenta AT",
+          "Magenta - at",
+          "T-Mobile",
+          "T-Mobile AT",
+          "T-Mobile - at",
+          "Magenta Telekom",
+          "Magenta Telekom AT",
+          "Magenta Telekom - at"
+        ]
+      },
+      {
+        "canonical": "Drei",
+        "color": "#1F2229",
+        "aliases": [
+          "Drei AT",
+          "Drei - at",
+          "3",
+          "3 AT",
+          "3 - at",
+          "Hutchison Drei",
+          "Hutchison Drei AT",
+          "Hutchison Drei - at"
+        ]
+      }
+    ]
+  },
+  "BGD": {
+    "name": "Bangladesh",
+    "operators": [
+      {
+        "canonical": "Grameenphone",
+        "color": "#19AAF8",
+        "aliases": [
+          "Grameenphone BD",
+          "Grameenphone - bd",
+          "GP",
+          "GP BD",
+          "GP - bd"
+        ]
+      },
+      {
+        "canonical": "Robi",
+        "color": "#E2001A",
+        "aliases": [
+          "Robi BD",
+          "Robi - bd"
+        ]
+      },
+      {
+        "canonical": "Banglalink",
+        "color": "#F26522",
+        "aliases": [
+          "Banglalink BD",
+          "Banglalink - bd"
+        ]
+      },
+      {
+        "canonical": "Teletalk",
+        "color": "#00A859",
+        "aliases": [
+          "Teletalk BD",
+          "Teletalk - bd"
+        ]
+      }
+    ]
+  },
+  "BEL": {
+    "name": "Belgium",
+    "operators": [
+      {
+        "canonical": "Proximus",
+        "color": "#5C2D91",
+        "aliases": [
+          "Proximus BE",
+          "Proximus - be"
+        ]
+      },
+      {
+        "canonical": "Orange",
+        "color": "#FF7900",
+        "aliases": [
+          "Orange BE",
+          "Orange - be"
+        ]
+      },
+      {
+        "canonical": "BASE",
+        "color": "#FFC600",
+        "aliases": [
+          "BASE BE",
+          "BASE - be",
+          "Telenet",
+          "Telenet BE",
+          "Telenet - be"
+        ]
+      },
+      {
+        "canonical": "Digi",
+        "color": "#1D4F91",
+        "aliases": [
+          "Digi BE",
+          "Digi - be"
+        ]
+      }
+    ]
+  },
+  "BRA": {
+    "name": "Brazil",
+    "operators": [
+      {
+        "canonical": "Vivo",
+        "color": "#660099",
+        "aliases": [
+          "Vivo BR",
+          "Vivo - br",
+          "Telefonica Vivo",
+          "Telefonica Vivo BR",
+          "Telefonica Vivo - br"
+        ]
+      },
+      {
+        "canonical": "Claro",
+        "color": "#DA291C",
+        "aliases": [
+          "Claro BR",
+          "Claro - br"
+        ]
+      },
+      {
+        "canonical": "TIM",
+        "color": "#004691",
+        "aliases": [
+          "TIM BR",
+          "TIM - br",
+          "TIM Brasil",
+          "TIM Brasil BR",
+          "TIM Brasil - br"
+        ]
+      }
+    ]
+  },
+  "CAN": {
+    "name": "Canada",
+    "operators": [
+      {
+        "canonical": "Rogers",
+        "color": "#DA291C",
+        "aliases": [
+          "Rogers CA",
+          "Rogers - ca"
+        ]
+      },
+      {
+        "canonical": "Bell",
+        "color": "#00549A",
+        "aliases": [
+          "Bell CA",
+          "Bell - ca",
+          "Bell Mobility",
+          "Bell Mobility CA",
+          "Bell Mobility - ca"
+        ]
+      },
+      {
+        "canonical": "Telus",
+        "color": "#4B286D",
+        "aliases": [
+          "Telus CA",
+          "Telus - ca"
+        ]
+      },
+      {
+        "canonical": "Freedom",
+        "color": "#F05023",
+        "aliases": [
+          "Freedom CA",
+          "Freedom - ca",
+          "Freedom Mobile",
+          "Freedom Mobile CA",
+          "Freedom Mobile - ca"
+        ]
+      },
+      {
+        "canonical": "Videotron",
+        "color": "#FFD100",
+        "aliases": [
+          "Videotron CA",
+          "Videotron - ca",
+          "Vidéotron",
+          "Vidéotron CA",
+          "Vidéotron - ca"
+        ]
+      }
+    ]
+  },
+  "CHL": {
+    "name": "Chile",
+    "operators": [
+      {
+        "canonical": "Entel",
+        "color": "#0067B1",
+        "aliases": [
+          "Entel CL",
+          "Entel - cl"
+        ]
+      },
+      {
+        "canonical": "Movistar",
+        "color": "#019DF4",
+        "aliases": [
+          "Movistar CL",
+          "Movistar - cl"
+        ]
+      },
+      {
+        "canonical": "Claro",
+        "color": "#DA291C",
+        "aliases": [
+          "Claro CL",
+          "Claro - cl"
+        ]
+      },
+      {
+        "canonical": "WOM",
+        "color": "#6A0DAD",
+        "aliases": [
+          "WOM CL",
+          "WOM - cl"
+        ]
+      }
+    ]
+  },
+  "CHN": {
+    "name": "China",
+    "operators": [
+      {
+        "canonical": "China Mobile",
+        "color": "#0085D0",
+        "aliases": [
+          "China Mobile CN",
+          "China Mobile - cn",
+          "CMCC",
+          "CMCC CN",
+          "CMCC - cn"
+        ]
+      },
+      {
+        "canonical": "China Unicom",
+        "color": "#E60012",
+        "aliases": [
+          "China Unicom CN",
+          "China Unicom - cn",
+          "CU",
+          "CU CN",
+          "CU - cn"
+        ]
+      },
+      {
+        "canonical": "China Telecom",
+        "color": "#1E50A2",
+        "aliases": [
+          "China Telecom CN",
+          "China Telecom - cn",
+          "CT",
+          "CT CN",
+          "CT - cn"
+        ]
+      },
+      {
+        "canonical": "China Broadnet",
+        "color": "#00A0E9",
+        "aliases": [
+          "China Broadnet CN",
+          "China Broadnet - cn",
+          "CBN",
+          "CBN CN",
+          "CBN - cn"
+        ]
+      }
+    ]
+  },
+  "COL": {
+    "name": "Colombia",
+    "operators": [
+      {
+        "canonical": "Claro",
+        "color": "#DA291C",
+        "aliases": [
+          "Claro CO",
+          "Claro - co"
+        ]
+      },
+      {
+        "canonical": "Movistar",
+        "color": "#019DF4",
+        "aliases": [
+          "Movistar CO",
+          "Movistar - co"
+        ]
+      },
+      {
+        "canonical": "Tigo",
+        "color": "#00377B",
+        "aliases": [
+          "Tigo CO",
+          "Tigo - co"
+        ]
+      },
+      {
+        "canonical": "WOM",
+        "color": "#6A0DAD",
+        "aliases": [
+          "WOM CO",
+          "WOM - co"
+        ]
+      }
+    ]
+  },
+  "CZE": {
+    "name": "Czechia",
+    "operators": [
+      {
+        "canonical": "O2",
+        "color": "#0019A5",
+        "aliases": [
+          "O2 CZ",
+          "O2 - cz"
+        ]
+      },
+      {
+        "canonical": "T-Mobile",
+        "color": "#E20074",
+        "aliases": [
+          "T-Mobile CZ",
+          "T-Mobile - cz",
+          "TMobile",
+          "TMobile CZ",
+          "TMobile - cz"
+        ]
+      },
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone CZ",
+          "Vodafone - cz",
+          "VF",
+          "VF CZ",
+          "VF - cz"
+        ]
+      }
+    ]
+  },
+  "DNK": {
+    "name": "Denmark",
+    "operators": [
+      {
+        "canonical": "TDC",
+        "color": "#003E7E",
+        "aliases": [
+          "TDC DK",
+          "TDC - dk",
+          "YouSee",
+          "YouSee DK",
+          "YouSee - dk",
+          "Nuuday",
+          "Nuuday DK",
+          "Nuuday - dk"
+        ]
+      },
+      {
+        "canonical": "Telenor",
+        "color": "#00ACE4",
+        "aliases": [
+          "Telenor DK",
+          "Telenor - dk"
+        ]
+      },
+      {
+        "canonical": "Telia",
+        "color": "#990AE3",
+        "aliases": [
+          "Telia DK",
+          "Telia - dk",
+          "Norlys",
+          "Norlys DK",
+          "Norlys - dk"
+        ]
+      },
+      {
+        "canonical": "3",
+        "color": "#1F2229",
+        "aliases": [
+          "3 DK",
+          "3 - dk",
+          "Three",
+          "Three DK",
+          "Three - dk"
+        ]
+      }
+    ]
+  },
+  "EGY": {
+    "name": "Egypt",
+    "operators": [
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone EG",
+          "Vodafone - eg",
+          "VF",
+          "VF EG",
+          "VF - eg"
+        ]
+      },
+      {
+        "canonical": "Orange",
+        "color": "#FF7900",
+        "aliases": [
+          "Orange EG",
+          "Orange - eg"
+        ]
+      },
+      {
+        "canonical": "e&",
+        "color": "#B5121B",
+        "aliases": [
+          "e& EG",
+          "e& - eg",
+          "Etisalat",
+          "Etisalat EG",
+          "Etisalat - eg"
+        ]
+      },
+      {
+        "canonical": "WE",
+        "color": "#5C2D91",
+        "aliases": [
+          "WE EG",
+          "WE - eg",
+          "Telecom Egypt",
+          "Telecom Egypt EG",
+          "Telecom Egypt - eg"
+        ]
+      }
+    ]
+  },
+  "FIN": {
+    "name": "Finland",
+    "operators": [
+      {
+        "canonical": "Elisa",
+        "color": "#0077C8",
+        "aliases": [
+          "Elisa FI",
+          "Elisa - fi"
+        ]
+      },
+      {
+        "canonical": "Telia",
+        "color": "#990AE3",
+        "aliases": [
+          "Telia FI",
+          "Telia - fi"
+        ]
+      },
+      {
+        "canonical": "DNA",
+        "color": "#FF0080",
+        "aliases": [
+          "DNA FI",
+          "DNA - fi"
+        ]
+      }
+    ]
+  },
+  "FRA": {
+    "name": "France",
+    "operators": [
+      {
+        "canonical": "Orange",
+        "color": "#FF7900",
+        "aliases": [
+          "Orange FR",
+          "Orange - fr"
+        ]
+      },
+      {
+        "canonical": "SFR",
+        "color": "#E2001A",
+        "aliases": [
+          "SFR FR",
+          "SFR - fr"
+        ]
+      },
+      {
+        "canonical": "Bouygues",
+        "color": "#00A3E0",
+        "aliases": [
+          "Bouygues FR",
+          "Bouygues - fr",
+          "Bouygues Telecom",
+          "Bouygues Telecom FR",
+          "Bouygues Telecom - fr",
+          "BYTEL",
+          "BYTEL FR",
+          "BYTEL - fr"
+        ]
+      },
+      {
+        "canonical": "Free",
+        "color": "#3C3C3C",
+        "aliases": [
+          "Free FR",
+          "Free - fr",
+          "Free Mobile",
+          "Free Mobile FR",
+          "Free Mobile - fr",
+          "Iliad",
+          "Iliad FR",
+          "Iliad - fr"
+        ]
+      }
+    ]
+  },
+  "DEU": {
+    "name": "Germany",
+    "operators": [
+      {
+        "canonical": "Telekom",
+        "color": "#E20074",
+        "aliases": [
+          "Telekom DE",
+          "Telekom - de",
+          "Deutsche Telekom",
+          "Deutsche Telekom DE",
+          "Deutsche Telekom - de",
+          "T-Mobile",
+          "T-Mobile DE",
+          "T-Mobile - de",
+          "DT",
+          "DT DE",
+          "DT - de"
+        ]
+      },
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone DE",
+          "Vodafone - de",
+          "VF",
+          "VF DE",
+          "VF - de",
+          "VDF",
+          "VDF DE",
+          "VDF - de"
+        ]
+      },
+      {
+        "canonical": "O2",
+        "color": "#0019A5",
+        "aliases": [
+          "O2 DE",
+          "O2 - de",
+          "Telefonica",
+          "Telefonica DE",
+          "Telefonica - de",
+          "Telefónica",
+          "Telefónica DE",
+          "Telefónica - de",
+          "O2 Telefonica",
+          "O2 Telefonica DE",
+          "O2 Telefonica - de"
+        ]
+      },
+      {
+        "canonical": "1&1",
+        "color": "#003D8F",
+        "aliases": [
+          "1&1 DE",
+          "1&1 - de",
+          "1und1",
+          "1und1 DE",
+          "1und1 - de",
+          "1and1",
+          "1and1 DE",
+          "1and1 - de",
+          "1&1 Mobilfunk",
+          "1&1 Mobilfunk DE",
+          "1&1 Mobilfunk - de"
+        ]
+      }
+    ]
+  },
+  "GRC": {
+    "name": "Greece",
+    "operators": [
+      {
+        "canonical": "Cosmote",
+        "color": "#00A651",
+        "aliases": [
+          "Cosmote GR",
+          "Cosmote - gr"
+        ]
+      },
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone GR",
+          "Vodafone - gr",
+          "VF",
+          "VF GR",
+          "VF - gr"
+        ]
+      },
+      {
+        "canonical": "Nova",
+        "color": "#6A1B9A",
+        "aliases": [
+          "Nova GR",
+          "Nova - gr",
+          "Wind Hellas",
+          "Wind Hellas GR",
+          "Wind Hellas - gr",
+          "Wind",
+          "Wind GR",
+          "Wind - gr"
+        ]
+      }
+    ]
+  },
+  "IND": {
+    "name": "India",
+    "operators": [
+      {
+        "canonical": "Jio",
+        "color": "#0F3CC9",
+        "aliases": [
+          "Jio IN",
+          "Jio - in",
+          "Reliance Jio",
+          "Reliance Jio IN",
+          "Reliance Jio - in"
+        ]
+      },
+      {
+        "canonical": "Airtel",
+        "color": "#E40000",
+        "aliases": [
+          "Airtel IN",
+          "Airtel - in",
+          "Bharti Airtel",
+          "Bharti Airtel IN",
+          "Bharti Airtel - in"
+        ]
+      },
+      {
+        "canonical": "Vi",
+        "color": "#FFD100",
+        "aliases": [
+          "Vi IN",
+          "Vi - in",
+          "Vodafone Idea",
+          "Vodafone Idea IN",
+          "Vodafone Idea - in",
+          "VIL",
+          "VIL IN",
+          "VIL - in",
+          "Vodafone",
+          "Vodafone IN",
+          "Vodafone - in",
+          "Idea",
+          "Idea IN",
+          "Idea - in"
+        ]
+      },
+      {
+        "canonical": "BSNL",
+        "color": "#0062A8",
+        "aliases": [
+          "BSNL IN",
+          "BSNL - in",
+          "Bharat Sanchar Nigam",
+          "Bharat Sanchar Nigam IN",
+          "Bharat Sanchar Nigam - in"
+        ]
+      }
+    ]
+  },
+  "IDN": {
+    "name": "Indonesia",
+    "operators": [
+      {
+        "canonical": "Telkomsel",
+        "color": "#EC2028",
+        "aliases": [
+          "Telkomsel ID",
+          "Telkomsel - id"
+        ]
+      },
+      {
+        "canonical": "Indosat",
+        "color": "#FFD400",
+        "aliases": [
+          "Indosat ID",
+          "Indosat - id",
+          "Indosat Ooredoo Hutchison",
+          "Indosat Ooredoo Hutchison ID",
+          "Indosat Ooredoo Hutchison - id",
+          "IOH",
+          "IOH ID",
+          "IOH - id",
+          "IM3",
+          "IM3 ID",
+          "IM3 - id",
+          "Tri",
+          "Tri ID",
+          "Tri - id"
+        ]
+      },
+      {
+        "canonical": "XLSmart",
+        "color": "#0058A3",
+        "aliases": [
+          "XLSmart ID",
+          "XLSmart - id",
+          "XL",
+          "XL ID",
+          "XL - id",
+          "XL Axiata",
+          "XL Axiata ID",
+          "XL Axiata - id",
+          "Smartfren",
+          "Smartfren ID",
+          "Smartfren - id"
+        ]
+      }
+    ]
+  },
+  "IRL": {
+    "name": "Ireland",
+    "operators": [
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone IE",
+          "Vodafone - ie",
+          "VF",
+          "VF IE",
+          "VF - ie"
+        ]
+      },
+      {
+        "canonical": "Three",
+        "color": "#1F2229",
+        "aliases": [
+          "Three IE",
+          "Three - ie",
+          "3",
+          "3 IE",
+          "3 - ie"
+        ]
+      },
+      {
+        "canonical": "eir",
+        "color": "#D6006D",
+        "aliases": [
+          "eir IE",
+          "eir - ie",
+          "eir Mobile",
+          "eir Mobile IE",
+          "eir Mobile - ie"
+        ]
+      }
+    ]
+  },
+  "ISR": {
+    "name": "Israel",
+    "operators": [
+      {
+        "canonical": "Partner",
+        "color": "#00A0DF",
+        "aliases": [
+          "Partner IL",
+          "Partner - il"
+        ]
+      },
+      {
+        "canonical": "Cellcom",
+        "color": "#6E2C91",
+        "aliases": [
+          "Cellcom IL",
+          "Cellcom - il"
+        ]
+      },
+      {
+        "canonical": "Pelephone",
+        "color": "#F29200",
+        "aliases": [
+          "Pelephone IL",
+          "Pelephone - il"
+        ]
+      },
+      {
+        "canonical": "HOT Mobile",
+        "color": "#E41E26",
+        "aliases": [
+          "HOT Mobile IL",
+          "HOT Mobile - il",
+          "HOT",
+          "HOT IL",
+          "HOT - il"
+        ]
+      }
+    ]
+  },
+  "ITA": {
+    "name": "Italy",
+    "operators": [
+      {
+        "canonical": "TIM",
+        "color": "#004691",
+        "aliases": [
+          "TIM IT",
+          "TIM - it",
+          "Telecom Italia",
+          "Telecom Italia IT",
+          "Telecom Italia - it"
+        ]
+      },
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone IT",
+          "Vodafone - it",
+          "VF",
+          "VF IT",
+          "VF - it",
+          "Fastweb Vodafone",
+          "Fastweb Vodafone IT",
+          "Fastweb Vodafone - it"
+        ]
+      },
+      {
+        "canonical": "WindTre",
+        "color": "#FF6A00",
+        "aliases": [
+          "WindTre IT",
+          "WindTre - it",
+          "Wind Tre",
+          "Wind Tre IT",
+          "Wind Tre - it",
+          "Wind",
+          "Wind IT",
+          "Wind - it",
+          "Tre",
+          "Tre IT",
+          "Tre - it",
+          "3 Italia",
+          "3 Italia IT",
+          "3 Italia - it"
+        ]
+      },
+      {
+        "canonical": "Iliad",
+        "color": "#C8102E",
+        "aliases": [
+          "Iliad IT",
+          "Iliad - it"
+        ]
+      }
+    ]
+  },
+  "JPN": {
+    "name": "Japan",
+    "operators": [
+      {
+        "canonical": "docomo",
+        "color": "#CC0033",
+        "aliases": [
+          "docomo JP",
+          "docomo - jp",
+          "NTT Docomo",
+          "NTT Docomo JP",
+          "NTT Docomo - jp"
+        ]
+      },
+      {
+        "canonical": "au",
+        "color": "#EB5505",
+        "aliases": [
+          "au JP",
+          "au - jp",
+          "KDDI",
+          "KDDI JP",
+          "KDDI - jp",
+          "au KDDI",
+          "au KDDI JP",
+          "au KDDI - jp"
+        ]
+      },
+      {
+        "canonical": "SoftBank",
+        "color": "#A5A5A5",
+        "aliases": [
+          "SoftBank JP",
+          "SoftBank - jp",
+          "Softbank Mobile",
+          "Softbank Mobile JP",
+          "Softbank Mobile - jp"
+        ]
+      },
+      {
+        "canonical": "Rakuten Mobile",
+        "color": "#BF0000",
+        "aliases": [
+          "Rakuten Mobile JP",
+          "Rakuten Mobile - jp",
+          "Rakuten",
+          "Rakuten JP",
+          "Rakuten - jp"
+        ]
+      }
+    ]
+  },
+  "MYS": {
+    "name": "Malaysia",
+    "operators": [
+      {
+        "canonical": "Maxis",
+        "color": "#6CB33F",
+        "aliases": [
+          "Maxis MY",
+          "Maxis - my",
+          "Hotlink",
+          "Hotlink MY",
+          "Hotlink - my"
+        ]
+      },
+      {
+        "canonical": "CelcomDigi",
+        "color": "#0072BC",
+        "aliases": [
+          "CelcomDigi MY",
+          "CelcomDigi - my",
+          "Celcom",
+          "Celcom MY",
+          "Celcom - my",
+          "Digi",
+          "Digi MY",
+          "Digi - my"
+        ]
+      },
+      {
+        "canonical": "U Mobile",
+        "color": "#FF6600",
+        "aliases": [
+          "U Mobile MY",
+          "U Mobile - my",
+          "UMobile",
+          "UMobile MY",
+          "UMobile - my"
+        ]
+      },
+      {
+        "canonical": "Unifi Mobile",
+        "color": "#2E3192",
+        "aliases": [
+          "Unifi Mobile MY",
+          "Unifi Mobile - my",
+          "Unifi",
+          "Unifi MY",
+          "Unifi - my",
+          "Yes",
+          "Yes MY",
+          "Yes - my"
+        ]
+      }
+    ]
+  },
+  "MEX": {
+    "name": "Mexico",
+    "operators": [
+      {
+        "canonical": "Telcel",
+        "color": "#00539B",
+        "aliases": [
+          "Telcel MX",
+          "Telcel - mx",
+          "America Movil",
+          "America Movil MX",
+          "America Movil - mx",
+          "América Móvil",
+          "América Móvil MX",
+          "América Móvil - mx"
+        ]
+      },
+      {
+        "canonical": "AT&T",
+        "color": "#00A8E0",
+        "aliases": [
+          "AT&T MX",
+          "AT&T - mx",
+          "ATT",
+          "ATT MX",
+          "ATT - mx"
+        ]
+      },
+      {
+        "canonical": "Movistar",
+        "color": "#019DF4",
+        "aliases": [
+          "Movistar MX",
+          "Movistar - mx",
+          "Telefonica",
+          "Telefonica MX",
+          "Telefonica - mx"
+        ]
+      },
+      {
+        "canonical": "Bait",
+        "color": "#FFC220",
+        "aliases": [
+          "Bait MX",
+          "Bait - mx",
+          "Walmart Bait",
+          "Walmart Bait MX",
+          "Walmart Bait - mx"
+        ]
+      }
+    ]
+  },
+  "NLD": {
+    "name": "Netherlands",
+    "operators": [
+      {
+        "canonical": "KPN",
+        "color": "#00C300",
+        "aliases": [
+          "KPN NL",
+          "KPN - nl"
+        ]
+      },
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone NL",
+          "Vodafone - nl",
+          "VodafoneZiggo",
+          "VodafoneZiggo NL",
+          "VodafoneZiggo - nl",
+          "VF",
+          "VF NL",
+          "VF - nl"
+        ]
+      },
+      {
+        "canonical": "Odido",
+        "color": "#5A2D82",
+        "aliases": [
+          "Odido NL",
+          "Odido - nl",
+          "T-Mobile",
+          "T-Mobile NL",
+          "T-Mobile - nl",
+          "Tele2",
+          "Tele2 NL",
+          "Tele2 - nl"
+        ]
+      }
+    ]
+  },
+  "NZL": {
+    "name": "New Zealand",
+    "operators": [
+      {
+        "canonical": "One NZ",
+        "color": "#00A3AD",
+        "aliases": [
+          "One NZ NZ",
+          "One NZ - nz",
+          "One",
+          "One - nz",
+          "Vodafone NZ",
+          "Vodafone NZ NZ",
+          "Vodafone NZ - nz"
+        ]
+      },
+      {
+        "canonical": "Spark",
+        "color": "#5F259F",
+        "aliases": [
+          "Spark NZ",
+          "Spark - nz"
+        ]
+      },
+      {
+        "canonical": "2degrees",
+        "color": "#F58220",
+        "aliases": [
+          "2degrees NZ",
+          "2degrees - nz",
+          "2 Degrees",
+          "2 Degrees NZ",
+          "2 Degrees - nz"
+        ]
+      }
+    ]
+  },
+  "NGA": {
+    "name": "Nigeria",
+    "operators": [
+      {
+        "canonical": "MTN",
+        "color": "#FFCB05",
+        "aliases": [
+          "MTN NG",
+          "MTN - ng"
+        ]
+      },
+      {
+        "canonical": "Airtel",
+        "color": "#E40000",
+        "aliases": [
+          "Airtel NG",
+          "Airtel - ng"
+        ]
+      },
+      {
+        "canonical": "Glo",
+        "color": "#00A651",
+        "aliases": [
+          "Glo NG",
+          "Glo - ng",
+          "Globacom",
+          "Globacom NG",
+          "Globacom - ng"
+        ]
+      },
+      {
+        "canonical": "9mobile",
+        "color": "#006837",
+        "aliases": [
+          "9mobile NG",
+          "9mobile - ng",
+          "T2 Mobile",
+          "T2 Mobile NG",
+          "T2 Mobile - ng"
+        ]
+      }
+    ]
+  },
+  "NOR": {
+    "name": "Norway",
+    "operators": [
+      {
+        "canonical": "Telenor",
+        "color": "#00ACE4",
+        "aliases": [
+          "Telenor NO",
+          "Telenor - no"
+        ]
+      },
+      {
+        "canonical": "Telia",
+        "color": "#990AE3",
+        "aliases": [
+          "Telia NO",
+          "Telia - no"
+        ]
+      },
+      {
+        "canonical": "Ice",
+        "color": "#FF6600",
+        "aliases": [
+          "Ice NO",
+          "Ice - no",
+          "Lyse",
+          "Lyse NO",
+          "Lyse - no"
+        ]
+      }
+    ]
+  },
+  "PAK": {
+    "name": "Pakistan",
+    "operators": [
+      {
+        "canonical": "Jazz",
+        "color": "#ED1C24",
+        "aliases": [
+          "Jazz PK",
+          "Jazz - pk",
+          "Mobilink",
+          "Mobilink PK",
+          "Mobilink - pk"
+        ]
+      },
+      {
+        "canonical": "Zong",
+        "color": "#8DC63F",
+        "aliases": [
+          "Zong PK",
+          "Zong - pk",
+          "CMPak",
+          "CMPak PK",
+          "CMPak - pk"
+        ]
+      },
+      {
+        "canonical": "Ufone",
+        "color": "#FF6600",
+        "aliases": [
+          "Ufone PK",
+          "Ufone - pk",
+          "PTCL",
+          "PTCL PK",
+          "PTCL - pk"
+        ]
+      },
+      {
+        "canonical": "Telenor",
+        "color": "#00ACE4",
+        "aliases": [
+          "Telenor PK",
+          "Telenor - pk"
+        ]
+      }
+    ]
+  },
+  "PER": {
+    "name": "Peru",
+    "operators": [
+      {
+        "canonical": "Claro",
+        "color": "#DA291C",
+        "aliases": [
+          "Claro PE",
+          "Claro - pe"
+        ]
+      },
+      {
+        "canonical": "Movistar",
+        "color": "#019DF4",
+        "aliases": [
+          "Movistar PE",
+          "Movistar - pe"
+        ]
+      },
+      {
+        "canonical": "Entel",
+        "color": "#0067B1",
+        "aliases": [
+          "Entel PE",
+          "Entel - pe"
+        ]
+      },
+      {
+        "canonical": "Bitel",
+        "color": "#FFD100",
+        "aliases": [
+          "Bitel PE",
+          "Bitel - pe"
+        ]
+      }
+    ]
+  },
+  "PHL": {
+    "name": "Philippines",
+    "operators": [
+      {
+        "canonical": "Smart",
+        "color": "#009A44",
+        "aliases": [
+          "Smart PH",
+          "Smart - ph",
+          "Smart Communications",
+          "Smart Communications PH",
+          "Smart Communications - ph",
+          "PLDT",
+          "PLDT PH",
+          "PLDT - ph"
+        ]
+      },
+      {
+        "canonical": "Globe",
+        "color": "#0033A0",
+        "aliases": [
+          "Globe PH",
+          "Globe - ph",
+          "Globe Telecom",
+          "Globe Telecom PH",
+          "Globe Telecom - ph"
+        ]
+      },
+      {
+        "canonical": "DITO",
+        "color": "#CE1126",
+        "aliases": [
+          "DITO PH",
+          "DITO - ph"
+        ]
+      }
+    ]
+  },
+  "POL": {
+    "name": "Poland",
+    "operators": [
+      {
+        "canonical": "Orange",
+        "color": "#FF7900",
+        "aliases": [
+          "Orange PL",
+          "Orange - pl"
+        ]
+      },
+      {
+        "canonical": "Play",
+        "color": "#5C2D91",
+        "aliases": [
+          "Play PL",
+          "Play - pl",
+          "P4",
+          "P4 PL",
+          "P4 - pl"
+        ]
+      },
+      {
+        "canonical": "Plus",
+        "color": "#00A651",
+        "aliases": [
+          "Plus PL",
+          "Plus - pl",
+          "Polkomtel",
+          "Polkomtel PL",
+          "Polkomtel - pl"
+        ]
+      },
+      {
+        "canonical": "T-Mobile",
+        "color": "#E20074",
+        "aliases": [
+          "T-Mobile PL",
+          "T-Mobile - pl",
+          "TMobile",
+          "TMobile PL",
+          "TMobile - pl"
+        ]
+      }
+    ]
+  },
+  "PRT": {
+    "name": "Portugal",
+    "operators": [
+      {
+        "canonical": "MEO",
+        "color": "#0BA0DE",
+        "aliases": [
+          "MEO PT",
+          "MEO - pt",
+          "Altice",
+          "Altice PT",
+          "Altice - pt"
+        ]
+      },
+      {
+        "canonical": "NOS",
+        "color": "#2B2B2B",
+        "aliases": [
+          "NOS PT",
+          "NOS - pt"
+        ]
+      },
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone PT",
+          "Vodafone - pt",
+          "VF",
+          "VF PT",
+          "VF - pt"
+        ]
+      },
+      {
+        "canonical": "Digi",
+        "color": "#1D4F91",
+        "aliases": [
+          "Digi PT",
+          "Digi - pt"
+        ]
+      }
+    ]
+  },
+  "ROU": {
+    "name": "Romania",
+    "operators": [
+      {
+        "canonical": "Orange",
+        "color": "#FF7900",
+        "aliases": [
+          "Orange RO",
+          "Orange - ro"
+        ]
+      },
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone RO",
+          "Vodafone - ro",
+          "VF",
+          "VF RO",
+          "VF - ro"
+        ]
+      },
+      {
+        "canonical": "Digi",
+        "color": "#1D4F91",
+        "aliases": [
+          "Digi RO",
+          "Digi - ro",
+          "Digi Mobil",
+          "Digi Mobil RO",
+          "Digi Mobil - ro",
+          "RCS-RDS",
+          "RCS-RDS RO",
+          "RCS-RDS - ro"
+        ]
+      },
+      {
+        "canonical": "Telekom",
+        "color": "#E20074",
+        "aliases": [
+          "Telekom RO",
+          "Telekom - ro",
+          "Telekom Romania",
+          "Telekom Romania RO",
+          "Telekom Romania - ro"
+        ]
+      }
+    ]
+  },
+  "RUS": {
+    "name": "Russia",
+    "operators": [
+      {
+        "canonical": "MTS",
+        "color": "#E30611",
+        "aliases": [
+          "MTS RU",
+          "MTS - ru",
+          "МТС",
+          "МТС RU",
+          "МТС - ru"
+        ]
+      },
+      {
+        "canonical": "MegaFon",
+        "color": "#00B956",
+        "aliases": [
+          "MegaFon RU",
+          "MegaFon - ru",
+          "МегаФон",
+          "МегаФон RU",
+          "МегаФон - ru"
+        ]
+      },
+      {
+        "canonical": "Beeline",
+        "color": "#FFC300",
+        "aliases": [
+          "Beeline RU",
+          "Beeline - ru",
+          "Билайн",
+          "Билайн RU",
+          "Билайн - ru",
+          "VimpelCom",
+          "VimpelCom RU",
+          "VimpelCom - ru"
+        ]
+      },
+      {
+        "canonical": "T2",
+        "color": "#1F2229",
+        "aliases": [
+          "T2 RU",
+          "T2 - ru",
+          "Tele2",
+          "Tele2 RU",
+          "Tele2 - ru",
+          "Т2",
+          "Т2 RU",
+          "Т2 - ru"
+        ]
+      }
+    ]
+  },
+  "SAU": {
+    "name": "Saudi Arabia",
+    "operators": [
+      {
+        "canonical": "stc",
+        "color": "#4F008C",
+        "aliases": [
+          "stc SA",
+          "stc - sa",
+          "Saudi Telecom",
+          "Saudi Telecom SA",
+          "Saudi Telecom - sa"
+        ]
+      },
+      {
+        "canonical": "Mobily",
+        "color": "#0054A4",
+        "aliases": [
+          "Mobily SA",
+          "Mobily - sa",
+          "Etihad Etisalat",
+          "Etihad Etisalat SA",
+          "Etihad Etisalat - sa"
+        ]
+      },
+      {
+        "canonical": "Zain",
+        "color": "#1BAFA5",
+        "aliases": [
+          "Zain SA",
+          "Zain - sa",
+          "Zain KSA",
+          "Zain KSA SA",
+          "Zain KSA - sa"
+        ]
+      }
+    ]
+  },
+  "SGP": {
+    "name": "Singapore",
+    "operators": [
+      {
+        "canonical": "Singtel",
+        "color": "#E3001B",
+        "aliases": [
+          "Singtel SG",
+          "Singtel - sg"
+        ]
+      },
+      {
+        "canonical": "StarHub",
+        "color": "#00A94F",
+        "aliases": [
+          "StarHub SG",
+          "StarHub - sg"
+        ]
+      },
+      {
+        "canonical": "M1",
+        "color": "#FF6600",
+        "aliases": [
+          "M1 SG",
+          "M1 - sg"
+        ]
+      },
+      {
+        "canonical": "SIMBA",
+        "color": "#0084C9",
+        "aliases": [
+          "SIMBA SG",
+          "SIMBA - sg"
+        ]
+      }
+    ]
+  },
+  "ZAF": {
+    "name": "South Africa",
+    "operators": [
+      {
+        "canonical": "Vodacom",
+        "color": "#E60000",
+        "aliases": [
+          "Vodacom ZA",
+          "Vodacom - za"
+        ]
+      },
+      {
+        "canonical": "MTN",
+        "color": "#FFCB05",
+        "aliases": [
+          "MTN ZA",
+          "MTN - za"
+        ]
+      },
+      {
+        "canonical": "Cell C",
+        "color": "#1F2229",
+        "aliases": [
+          "Cell C ZA",
+          "Cell C - za",
+          "CellC",
+          "CellC ZA",
+          "CellC - za"
+        ]
+      },
+      {
+        "canonical": "Telkom",
+        "color": "#0099D8",
+        "aliases": [
+          "Telkom ZA",
+          "Telkom - za",
+          "Telkom Mobile",
+          "Telkom Mobile ZA",
+          "Telkom Mobile - za"
+        ]
+      },
+      {
+        "canonical": "rain",
+        "color": "#00B4A0",
+        "aliases": [
+          "rain ZA",
+          "rain - za"
+        ]
+      }
+    ]
+  },
+  "KOR": {
+    "name": "South Korea",
+    "operators": [
+      {
+        "canonical": "SKT",
+        "color": "#EA002C",
+        "aliases": [
+          "SKT KR",
+          "SKT - kr",
+          "SK Telecom",
+          "SK Telecom KR",
+          "SK Telecom - kr"
+        ]
+      },
+      {
+        "canonical": "KT",
+        "color": "#231F20",
+        "aliases": [
+          "KT KR",
+          "KT - kr",
+          "Korea Telecom",
+          "Korea Telecom KR",
+          "Korea Telecom - kr"
+        ]
+      },
+      {
+        "canonical": "LG U+",
+        "color": "#E6007E",
+        "aliases": [
+          "LG U+ KR",
+          "LG U+ - kr",
+          "LGU+",
+          "LGU+ KR",
+          "LGU+ - kr",
+          "LG Uplus",
+          "LG Uplus KR",
+          "LG Uplus - kr"
+        ]
+      }
+    ]
+  },
+  "ESP": {
+    "name": "Spain",
+    "operators": [
+      {
+        "canonical": "Movistar",
+        "color": "#019DF4",
+        "aliases": [
+          "Movistar ES",
+          "Movistar - es",
+          "Telefonica",
+          "Telefonica ES",
+          "Telefonica - es",
+          "Telefónica",
+          "Telefónica ES",
+          "Telefónica - es"
+        ]
+      },
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone ES",
+          "Vodafone - es",
+          "VF",
+          "VF ES",
+          "VF - es",
+          "Zegona",
+          "Zegona ES",
+          "Zegona - es"
+        ]
+      },
+      {
+        "canonical": "Orange",
+        "color": "#FF7900",
+        "aliases": [
+          "Orange ES",
+          "Orange - es",
+          "MasOrange",
+          "MasOrange ES",
+          "MasOrange - es"
+        ]
+      },
+      {
+        "canonical": "Yoigo",
+        "color": "#DB0A5B",
+        "aliases": [
+          "Yoigo ES",
+          "Yoigo - es"
+        ]
+      },
+      {
+        "canonical": "MásMóvil",
+        "color": "#FFD100",
+        "aliases": [
+          "MásMóvil ES",
+          "MásMóvil - es",
+          "MasMovil",
+          "MasMovil ES",
+          "MasMovil - es",
+          "Mas Movil",
+          "Mas Movil ES",
+          "Mas Movil - es"
+        ]
+      },
+      {
+        "canonical": "Digi",
+        "color": "#1D4F91",
+        "aliases": [
+          "Digi ES",
+          "Digi - es",
+          "Digi Mobil",
+          "Digi Mobil ES",
+          "Digi Mobil - es"
+        ]
+      }
+    ]
+  },
+  "SWE": {
+    "name": "Sweden",
+    "operators": [
+      {
+        "canonical": "Telia",
+        "color": "#990AE3",
+        "aliases": [
+          "Telia SE",
+          "Telia - se"
+        ]
+      },
+      {
+        "canonical": "Tele2",
+        "color": "#1F2229",
+        "aliases": [
+          "Tele2 SE",
+          "Tele2 - se"
+        ]
+      },
+      {
+        "canonical": "Telenor",
+        "color": "#00ACE4",
+        "aliases": [
+          "Telenor SE",
+          "Telenor - se"
+        ]
+      },
+      {
+        "canonical": "Tre",
+        "color": "#E5007D",
+        "aliases": [
+          "Tre SE",
+          "Tre - se",
+          "3",
+          "3 SE",
+          "3 - se",
+          "Three",
+          "Three SE",
+          "Three - se"
+        ]
+      }
+    ]
+  },
+  "CHE": {
+    "name": "Switzerland",
+    "operators": [
+      {
+        "canonical": "Swisscom",
+        "color": "#001155",
+        "aliases": [
+          "Swisscom CH",
+          "Swisscom - ch"
+        ]
+      },
+      {
+        "canonical": "Sunrise",
+        "color": "#E3001B",
+        "aliases": [
+          "Sunrise CH",
+          "Sunrise - ch",
+          "Sunrise UPC",
+          "Sunrise UPC CH",
+          "Sunrise UPC - ch"
+        ]
+      },
+      {
+        "canonical": "Salt",
+        "color": "#3C3C3B",
+        "aliases": [
+          "Salt CH",
+          "Salt - ch",
+          "Salt Mobile",
+          "Salt Mobile CH",
+          "Salt Mobile - ch"
+        ]
+      }
+    ]
+  },
+  "TWN": {
+    "name": "Taiwan",
+    "operators": [
+      {
+        "canonical": "Chunghwa",
+        "color": "#0070C0",
+        "aliases": [
+          "Chunghwa TW",
+          "Chunghwa - tw",
+          "Chunghwa Telecom",
+          "Chunghwa Telecom TW",
+          "Chunghwa Telecom - tw",
+          "CHT",
+          "CHT TW",
+          "CHT - tw"
+        ]
+      },
+      {
+        "canonical": "Taiwan Mobile",
+        "color": "#FF6600",
+        "aliases": [
+          "Taiwan Mobile TW",
+          "Taiwan Mobile - tw",
+          "TWM",
+          "TWM TW",
+          "TWM - tw"
+        ]
+      },
+      {
+        "canonical": "FarEasTone",
+        "color": "#E50012",
+        "aliases": [
+          "FarEasTone TW",
+          "FarEasTone - tw",
+          "Far EasTone",
+          "Far EasTone TW",
+          "Far EasTone - tw",
+          "FET",
+          "FET TW",
+          "FET - tw"
+        ]
+      }
+    ]
+  },
+  "THA": {
+    "name": "Thailand",
+    "operators": [
+      {
+        "canonical": "AIS",
+        "color": "#93C01F",
+        "aliases": [
+          "AIS TH",
+          "AIS - th",
+          "Advanced Info Service",
+          "Advanced Info Service TH",
+          "Advanced Info Service - th"
+        ]
+      },
+      {
+        "canonical": "True",
+        "color": "#E31937",
+        "aliases": [
+          "True TH",
+          "True - th",
+          "TrueMove",
+          "TrueMove TH",
+          "TrueMove - th",
+          "TrueMove H",
+          "TrueMove H TH",
+          "TrueMove H - th",
+          "dtac",
+          "dtac TH",
+          "dtac - th"
+        ]
+      },
+      {
+        "canonical": "NT",
+        "color": "#F7941D",
+        "aliases": [
+          "NT TH",
+          "NT - th",
+          "National Telecom",
+          "National Telecom TH",
+          "National Telecom - th",
+          "CAT",
+          "CAT TH",
+          "CAT - th",
+          "TOT",
+          "TOT TH",
+          "TOT - th"
+        ]
+      }
+    ]
+  },
+  "TUR": {
+    "name": "Turkey",
+    "operators": [
+      {
+        "canonical": "Turkcell",
+        "color": "#FFC72C",
+        "aliases": [
+          "Turkcell TR",
+          "Turkcell - tr"
+        ]
+      },
+      {
+        "canonical": "Vodafone",
+        "color": "#E60000",
+        "aliases": [
+          "Vodafone TR",
+          "Vodafone - tr",
+          "VF",
+          "VF TR",
+          "VF - tr"
+        ]
+      },
+      {
+        "canonical": "Türk Telekom",
+        "color": "#0066B3",
+        "aliases": [
+          "Türk Telekom TR",
+          "Türk Telekom - tr",
+          "Turk Telekom",
+          "Turk Telekom TR",
+          "Turk Telekom - tr",
+          "TT",
+          "TT TR",
+          "TT - tr",
+          "Avea",
+          "Avea TR",
+          "Avea - tr"
+        ]
+      }
+    ]
+  },
+  "ARE": {
+    "name": "United Arab Emirates",
+    "operators": [
+      {
+        "canonical": "e&",
+        "color": "#E00800",
+        "aliases": [
+          "e& AE",
+          "e& - ae",
+          "e& UAE",
+          "e& - uae",
+          "Etisalat",
+          "Etisalat AE",
+          "Etisalat - ae",
+          "Etisalat UAE",
+          "Etisalat - uae",
+          "Etisalat by e&",
+          "Etisalat by e& AE",
+          "Etisalat by e& - ae",
+          "Etisalat by e& UAE",
+          "Etisalat by e& - uae"
+        ]
+      },
+      {
+        "canonical": "du",
+        "color": "#00A9CE",
+        "aliases": [
+          "du AE",
+          "du - ae",
+          "du UAE",
+          "du - uae",
+          "EITC",
+          "EITC AE",
+          "EITC - ae",
+          "EITC UAE",
+          "EITC - uae"
+        ]
+      }
+    ]
+  },
+  "GBR": {
+    "name": "United Kingdom",
+    "operators": [
+      {
+        "canonical": "EE",
+        "color": "#76B7B2",
+        "aliases": [
+          "EE UK",
+          "EE_UK",
+          "EEUK",
+          "Everything Everywhere",
+          "Everything_Everywhere"
+        ]
+      },
+      {
+        "canonical": "3",
+        "color": "#000000",
+        "aliases": [
+          "3 UK",
+          "3_UK",
+          "3UK",
+          "Three",
+          "Three UK",
+          "Three_UK"
+        ]
+      },
+      {
+        "canonical": "VF",
+        "color": "#F34851",
+        "aliases": [
+          "Vodafone UK",
+          "VF UK",
+          "VFUK",
+          "Vodafone"
+        ]
+      },
+      {
+        "canonical": "VF SA",
+        "color": "#801A21",
+        "aliases": [
+          "Vodafone SA",
+          "VF SA UK",
+          "VF UK SA",
+          "VFSA",
+          "VFSA UK",
+          "VFUK SA",
+          "Vodafone SA UK",
+          "Vodafone UK SA"
+        ]
+      },
+      {
+        "canonical": "VF VoNR",
+        "color": "#801A21",
+        "aliases": [
+          "Vodafone VoNR",
+          "VF_VoNR"
+        ]
+      },
+      {
+        "canonical": "O2",
+        "color": "#69B4EC",
+        "aliases": [
+          "O2 (UK)",
+          "O2 UK",
+          "O2_UK",
+          "O2(UK)",
+          "Telefonica",
+          "Telefónica",
+          "Telefonica O2"
+        ]
+      },
+      {
+        "canonical": "Lebara",
+        "color": "#6F42C1",
+        "aliases": [
+          "LEB",
+          "Lebara_UK",
+          "LUK"
+        ]
+      }
+    ]
+  },
+  "USA": {
+    "name": "United States",
+    "operators": [
+      {
+        "canonical": "Verizon",
+        "color": "#CD040B",
+        "aliases": [
+          "Verizon US",
+          "Verizon - us",
+          "Verizon USA",
+          "Verizon - usa",
+          "Verizon Wireless",
+          "Verizon Wireless US",
+          "Verizon Wireless - us",
+          "Verizon Wireless USA",
+          "Verizon Wireless - usa",
+          "VZW",
+          "VZW US",
+          "VZW - us",
+          "VZW USA",
+          "VZW - usa"
+        ]
+      },
+      {
+        "canonical": "AT&T",
+        "color": "#00A8E0",
+        "aliases": [
+          "AT&T US",
+          "AT&T - us",
+          "AT&T USA",
+          "AT&T - usa",
+          "ATT",
+          "ATT US",
+          "ATT - us",
+          "ATT USA",
+          "ATT - usa",
+          "AT&T Mobility",
+          "AT&T Mobility US",
+          "AT&T Mobility - us",
+          "AT&T Mobility USA",
+          "AT&T Mobility - usa"
+        ]
+      },
+      {
+        "canonical": "T-Mobile",
+        "color": "#E20074",
+        "aliases": [
+          "T-Mobile US",
+          "T-Mobile - us",
+          "T-Mobile USA",
+          "T-Mobile - usa",
+          "TMobile",
+          "TMobile US",
+          "TMobile - us",
+          "TMobile USA",
+          "TMobile - usa",
+          "T Mobile",
+          "T Mobile US",
+          "T Mobile - us",
+          "T Mobile USA",
+          "T Mobile - usa",
+          "TMO",
+          "TMO US",
+          "TMO - us",
+          "TMO USA",
+          "TMO - usa",
+          "TMUS",
+          "TMUS US",
+          "TMUS - us",
+          "TMUS USA",
+          "TMUS - usa"
+        ]
+      },
+      {
+        "canonical": "Boost Mobile",
+        "color": "#F7941D",
+        "aliases": [
+          "Boost Mobile US",
+          "Boost Mobile - us",
+          "Boost Mobile USA",
+          "Boost Mobile - usa",
+          "Boost",
+          "Boost US",
+          "Boost - us",
+          "Boost USA",
+          "Boost - usa",
+          "Dish",
+          "Dish US",
+          "Dish - us",
+          "Dish USA",
+          "Dish - usa",
+          "EchoStar",
+          "EchoStar US",
+          "EchoStar - us",
+          "EchoStar USA",
+          "EchoStar - usa"
+        ]
+      }
+    ]
+  },
+  "VNM": {
+    "name": "Vietnam",
+    "operators": [
+      {
+        "canonical": "Viettel",
+        "color": "#EE0033",
+        "aliases": [
+          "Viettel VN",
+          "Viettel - vn"
+        ]
+      },
+      {
+        "canonical": "VinaPhone",
+        "color": "#0077C8",
+        "aliases": [
+          "VinaPhone VN",
+          "VinaPhone - vn",
+          "VNPT",
+          "VNPT VN",
+          "VNPT - vn"
+        ]
+      },
+      {
+        "canonical": "MobiFone",
+        "color": "#005BAC",
+        "aliases": [
+          "MobiFone VN",
+          "MobiFone - vn"
+        ]
+      }
+    ]
+  }
+}

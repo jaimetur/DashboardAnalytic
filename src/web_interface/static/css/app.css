@@ -3956,6 +3956,7 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .workspace-config-overview-panel .workspace-cdr-type-form .form-note,
 .workspace-config-overview-panel > .form-note { color: #cfe0ea; }
 .workspace-library-table .workspace-cdr-type-column select { min-width: 10rem; }
+.workspace-library-table .workspace-country-column select { min-width: 9rem; }
 .workspace-inherited-access { opacity: .82; cursor: default !important; }
 .workspace-inherited-access small { color: #4d6a7c; font-weight: 600; }
 /* CDR Analysis metric cards: long metric names wrap and the samples pill keeps one line. */

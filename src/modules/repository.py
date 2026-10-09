@@ -716,17 +716,9 @@ class Repository:
     def _ensure_chart_mapping_groups(conn: sqlite3.Connection) -> None:
         """Migrate the former hardcoded chart order and colours into workspace data."""
         defaults = {
-            'operator': (
-                ('EE', '#76B7B2', ('EE UK', 'EE_UK', 'EEUK', 'Everything Everywhere', 'Everything_Everywhere')),
-                ('3', '#000000', ('3 UK', '3_UK', '3UK', 'Three', 'Three UK', 'Three_UK')),
-                ('VF', '#F34851', ('Vodafone UK', 'VF UK', 'VFUK', 'Vodafone')),
-                ('VF SA', '#801A21', (
-                    'Vodafone SA', 'VF SA UK', 'VF UK SA', 'VFSA', 'VFSA UK', 'VFUK SA', 'Vodafone SA UK', 'Vodafone UK SA',
-                )),
-                ('VF VoNR', '#801A21', ('Vodafone VoNR', 'VF_VoNR')),
-                ('O2', '#69B4EC', ('O2 (UK)', 'O2 UK', 'O2_UK', 'O2(UK)', 'Telefonica', 'Telefónica', 'Telefonica O2')),
-                ('Lebara', '#6F42C1', ('LEB', 'Lebara_UK', 'LUK')),
-            ),
+            # A new workspace has no Operator Maps: those of the country chosen for it are added when
+            # it is created (assets/labels-operators, see workspace_countries).
+            'operator': (),
             # The Vendor Maps a new workspace starts with: assets/labels-vendors/default-vendor-maps.json.
             'vendor': _default_vendor_maps(),
         }
