@@ -347,9 +347,10 @@
           {% for dimension in filter_dimensions %}
           {% set options = filter_options.get(dimension, []) %}
           <label>{{ format_aggregation_label(dimension) }}
-            <select name="{{ dimension }}" multiple size="{{ [options|length, 6]|min if options|length > 0 else 1 }}"{% if dimension in ['operator_vendor', 'vendor_operator'] %} data-operator-vendor-pair="{{ dimension }}"{% endif %} {% if not options %}disabled{% endif %}>
+            <select name="{{ dimension }}" multiple size="{{ [options|length, 6]|min if options|length > 0 else 1 }}"{% if dimension in ['operator_vendor', 'vendor_operator', 'vendor'] %} data-operator-vendor-pair="{{ dimension }}"{% endif %} {% if not options %}disabled{% endif %}>
               {% for value in options %}
-              <option value="{{ value }}" {% if analysis %}{% if (dimension in ['market', 'period'] and value in (analysis.filters[dimension] or [])) or (dimension not in ['market', 'period'] and value in (analysis.filters.extra_filters.get(dimension) or [])) %}selected{% endif %}{% else %}selected{% endif %}>{{ value }}</option>
+              {% set chosen_values = (analysis.filters.selected_values or {}).get(dimension) if analysis else none %}
+              <option value="{{ value }}" {% if chosen_values is none or value in chosen_values %}selected{% endif %}>{{ value }}</option>
               {% endfor %}
             </select>
             {% if options %}

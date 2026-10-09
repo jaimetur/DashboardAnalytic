@@ -4859,8 +4859,6 @@ window.addEventListener('keydown', (event) => {
 });
 const logTypeFilter = document.querySelector('[data-log-type-filter]');
 const persistencePathnames = new Set(['/datasets-analysis', '/admin']);
-const datasetsAnalysisStateKey = 'drivetest-analyzer:/datasets-analysis:last-query';
-const datasetsAnalysisStateKeyPrefix = 'drivetest-analyzer:/datasets-analysis:last-query:dataset:';
 const activeDatasetStateKey = 'drivetest-analyzer:active-dataset';
 const adminScrollRestoreKey = 'drivetest-analyzer:/admin:scroll-restore';
 let hasPendingLocationRestore = false;
@@ -4891,56 +4889,6 @@ function restoreAdminScrollPosition() {
 
 restoreAdminScrollPosition();
 
-function hasMeaningfulDatasetsAnalysisState(params) {
-  if (!params) return false;
-  for (const [key, value] of params.entries()) {
-    if (key === 'dataset_id' || key === 'input_kind' || key === 'load') continue;
-    if ((key === 'aggregation' || key === 'cdf_grouping') && String(value || '').trim().toLowerCase() === 'all') continue;
-    if (String(value || '').trim()) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function sanitizeDatasetsAnalysisState(params) {
-  const source = params instanceof URLSearchParams ? params : new URLSearchParams(params || '');
-  const sanitized = new URLSearchParams(source.toString());
-  sanitized.delete('aggregation_overrides');
-  sanitized.delete('cdf_overrides');
-  return sanitized;
-}
-
-function buildDatasetsAnalysisStateKey(datasetId) {
-  const normalizedDatasetId = String(datasetId || '').trim();
-  return normalizedDatasetId ? `${datasetsAnalysisStateKeyPrefix}${normalizedDatasetId}` : datasetsAnalysisStateKey;
-}
-
-function getDatasetsAnalysisStateKeyForParams(params) {
-  return buildDatasetsAnalysisStateKey(params?.get?.('dataset_id'));
-}
-
-function getPersistedDatasetsAnalysisQuery(params) {
-  const stateKey = getDatasetsAnalysisStateKeyForParams(params || new URLSearchParams());
-  let persistedQuery = window.localStorage.getItem(stateKey);
-  if (!persistedQuery && stateKey !== datasetsAnalysisStateKey) {
-    persistedQuery = window.localStorage.getItem(datasetsAnalysisStateKey);
-  }
-  return persistedQuery;
-}
-
-function persistDatasetsAnalysisState(params) {
-  if (!hasMeaningfulDatasetsAnalysisState(params)) return;
-  try {
-    const sanitized = sanitizeDatasetsAnalysisState(params);
-    const serialized = sanitized.toString();
-    window.localStorage.setItem(getDatasetsAnalysisStateKeyForParams(params), serialized);
-    window.localStorage.setItem(datasetsAnalysisStateKey, serialized);
-  } catch (_error) {
-    // Ignore storage failures.
-  }
-}
-
 function persistActiveDatasetState(params) {
   const datasetId = String(params.get('dataset_id') || '').trim();
   if (!datasetId) return;
@@ -4955,28 +4903,9 @@ function persistActiveDatasetState(params) {
   }
 }
 
-function buildRestoredDatasetsAnalysisUrl(currentParams, persistedDatasetsAnalysisQuery) {
-  const persistedParams = sanitizeDatasetsAnalysisState(new URLSearchParams(persistedDatasetsAnalysisQuery || ''));
-  const merged = new URLSearchParams(persistedParams.toString());
-  const currentDatasetId = String(currentParams.get('dataset_id') || '').trim();
-  const currentInputKind = String(currentParams.get('input_kind') || '').trim();
-  if (currentDatasetId) {
-    merged.set('dataset_id', currentDatasetId);
-  }
-  if (currentInputKind) {
-    merged.set('input_kind', currentInputKind);
-  } else {
-    merged.delete('input_kind');
-  }
-  const query = merged.toString();
-  return query ? `/datasets-analysis?${query}` : '/datasets-analysis';
-}
-
+// The Adaptive Filters of each dataset are saved on the server, shared by every user of the workspace:
+// opening a dataset without a selection restores its own, never the copy kept by one browser.
 function buildDatasetAnalysisUrl(params) {
-  const persistedDatasetsAnalysisQuery = getPersistedDatasetsAnalysisQuery(params);
-  if (persistedDatasetsAnalysisQuery) {
-    return buildRestoredDatasetsAnalysisUrl(params, persistedDatasetsAnalysisQuery);
-  }
   const query = params.toString();
   return query ? `/datasets-analysis?${query}` : '/datasets-analysis';
 }
@@ -5029,6 +4958,10 @@ function buildDatasetsAnalysisParamsFromForm(form) {
     const selectedCount = enabledOptions.filter((option) => option.selected).length;
     if (enabledOptions.length > 0 && selectedCount === 0) {
       params.append('__empty_filter', select.name);
+    } else if (enabledOptions.length > 0 && selectedCount === enabledOptions.length) {
+      // "All values" is saved as such, not as today's values, so values that appear later are selected too.
+      params.delete(select.name);
+      params.append('__all_filter', select.name);
     }
   });
   document.querySelectorAll(`[form="${form.id}"][name]`).forEach((control) => {
@@ -5040,6 +4973,10 @@ function buildDatasetsAnalysisParamsFromForm(form) {
       params.delete(control.name);
       const enabledOptions = Array.from(control.options).filter((option) => !option.disabled);
       const selectedOptions = enabledOptions.filter((option) => option.selected);
+      if (enabledOptions.length > 0 && selectedOptions.length === enabledOptions.length) {
+        params.append('__all_filter', control.name);
+        return;
+      }
       selectedOptions.forEach((option) => params.append(control.name, String(option.value)));
       if (enabledOptions.length > 0 && selectedOptions.length === 0) {
         params.append('__empty_filter', control.name);
@@ -5097,7 +5034,9 @@ function formatAggregationOverrides(overrides) {
 // Panels that show saved settings or records (users, user groups, workspace
 // access, features activation) always show what the server saved: a value kept
 // in the browser would hide it and be saved back over it.
-const SAVED_SETTINGS_SCOPES = '.users-table, .principal-table, .principal-picker, .interface-settings-form';
+// Controls whose values are saved elsewhere. The CDR Analysis filters are saved on the server for each
+// dataset: restoring them by name would carry one dataset's values into another.
+const SAVED_SETTINGS_SCOPES = '.users-table, .principal-table, .principal-picker, .interface-settings-form, #datasets-analysis-filters-form';
 
 function canPersistControl(control) {
   if (!control || !persistencePathnames.has(window.location.pathname)) return false;
@@ -6732,14 +6671,8 @@ async function submitDownloadForm(form) {
 
 if (window.location.pathname === '/datasets-analysis') {
   const params = new URLSearchParams(window.location.search);
-  const persistedDatasetsAnalysisQuery = getPersistedDatasetsAnalysisQuery(params);
   if (params.get('dataset_id')) {
     persistActiveDatasetState(params);
-  }
-  if (hasMeaningfulDatasetsAnalysisState(params)) {
-    persistDatasetsAnalysisState(params);
-  } else if (persistedDatasetsAnalysisQuery) {
-    replaceLocation(buildRestoredDatasetsAnalysisUrl(params, persistedDatasetsAnalysisQuery));
   }
 }
 
@@ -7939,7 +7872,6 @@ document.querySelectorAll('form[data-loading-label]').forEach((form) => {
       const params = buildDatasetsAnalysisParamsFromForm(form);
       params.set('load', '1');
       params.delete('cdf_overrides');
-      persistDatasetsAnalysisState(params);
       persistActiveDatasetState(params);
       showLoadingOverlay(form.dataset.loadingLabel);
       window.location.search = params.toString();
@@ -9745,7 +9677,6 @@ function bindChartAggregationSelect(select) {
       params.delete('aggregation_overrides');
     }
     params.set('load', '1');
-    persistDatasetsAnalysisState(params);
     persistActiveDatasetState(params);
     showLoadingOverlay(`Updating ${metric} comparison`);
     window.location.search = params.toString();
@@ -9770,7 +9701,6 @@ document.querySelectorAll('[data-global-aggregation-select]').forEach((select) =
     params.set('aggregation', String(select.value || 'all'));
     params.set('load', '1');
     params.delete('aggregation_overrides');
-    persistDatasetsAnalysisState(params);
     showLoadingOverlay('Updating all chart aggregations');
     window.location.search = params.toString();
   });
@@ -9785,7 +9715,6 @@ document.querySelectorAll('[data-global-cdf-grouping-select]').forEach((select) 
     params.set('cdf_grouping', String(select.value || 'all'));
     params.set('load', '1');
     params.delete('cdf_overrides');
-    persistDatasetsAnalysisState(params);
     showLoadingOverlay('Updating all CDF comparisons');
     window.location.search = params.toString();
   });
@@ -9811,7 +9740,6 @@ function bindChartCdfGroupingSelect(select) {
       params.delete('cdf_overrides');
     }
     params.set('load', '1');
-    persistDatasetsAnalysisState(params);
     persistActiveDatasetState(params);
     showLoadingOverlay(`Updating ${metric} CDF comparison`);
     window.location.search = params.toString();

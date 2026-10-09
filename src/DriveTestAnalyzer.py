@@ -10519,7 +10519,13 @@ def build_datasets_analysis_payload(
 
     dataset_path = Path(selected_dataset['stored_path'])
     aggregation = request.query_params.get('aggregation') or selected_dataset.get('default_aggregation') or 'all'
-    requested_metrics = [value for value in request.query_params.getlist('metric') if value]
+    # A filter saved as "All values" (``__all_filter``) stays open: values that appear later are included too.
+    all_filters = set(value for value in request.query_params.getlist('__all_filter') if value)
+
+    def requested_values(name: str) -> list[str]:
+        return [] if name in all_filters else request.query_params.getlist(name)
+
+    requested_metrics = [value for value in requested_values('metric') if value]
     available_metrics = selected_dataset.get('available_metrics') or []
     selectable_metrics = selected_dataset.get('selectable_metrics') or available_metrics
     if not requested_metrics:
@@ -10533,23 +10539,29 @@ def build_datasets_analysis_payload(
     cdf_overrides = parse_cdf_overrides(request.query_params.get('cdf_overrides') or '')
     cdf_grouping = request.query_params.get('cdf_grouping') or default_cdf_grouping(selected_dataset)
     filters = {
-        'market': choose_filter_values(request.query_params.getlist('market'), filter_options, 'market'),
-        'period': choose_filter_values(request.query_params.getlist('period'), filter_options, 'period'),
+        'market': choose_filter_values(requested_values('market'), filter_options, 'market'),
+        'period': choose_filter_values(requested_values('period'), filter_options, 'period'),
         'date_from': None if ignore_event_time_filtering() else request.query_params.get('date_from') or None,
         'date_to': None if ignore_event_time_filtering() else request.query_params.get('date_to') or None,
         'aggregation': aggregation,
         'cdf_grouping': cdf_grouping,
         'extra_filters': {},
         'explicit_empty_filters': set(),
+        # The values chosen in each filter as the page lists them; a filter without an entry shows every value.
+        'selected_values': {},
     }
     explicit_empty_filters = set(value for value in request.query_params.getlist('__empty_filter') if value)
     filters['explicit_empty_filters'] = explicit_empty_filters
     for dimension in FILTER_DIMENSIONS:
+        if dimension in explicit_empty_filters:
+            filters['selected_values'][dimension] = []
+        elif requested_values(dimension):
+            filters['selected_values'][dimension] = choose_filter_values(requested_values(dimension), filter_options, dimension)
         if dimension in {'market', 'period'}:
             if dimension in explicit_empty_filters:
                 filters[dimension] = ['__none__']
             continue
-        selected_values = choose_filter_values(request.query_params.getlist(dimension), filter_options, dimension)
+        selected_values = choose_filter_values(requested_values(dimension), filter_options, dimension)
         if selected_values and dimension == 'vendor_operator':
             # The table holds Operator_Vendor: a Vendor_Operator selection stands for those values.
             selected_values = value_mapper.expand('operator_vendor', value_mapper.operator_vendors(selected_values),

@@ -61,6 +61,40 @@ def test_native_operator_vendor_filters_mirror_each_other():
     assert result['operatorVendor'] == ['EE - All']
 
 
+# The same DOM with a Vendor select, as in CDR Analysis.
+VENDOR_PROGRAM = PROGRAM.split(HELPER)[0].replace(
+    "  new HTMLSelectElement('vendor_operator', ['Ericsson_VF_UK', 'Nokia_VF_UK', 'Ericsson (Mixed)_3', 'EE - All'], container),\n",
+    "  new HTMLSelectElement('vendor_operator', ['Ericsson_VF_UK', 'Nokia_VF_UK', 'Ericsson (Mixed)_3', 'EE - All'], container),\n"
+    "  new HTMLSelectElement('vendor', ['Ericsson', 'Nokia', 'Ericsson (Mixed)', 'EE - All'], container),\n",
+) + HELPER + '''
+const [operatorVendor, vendorOperator, vendor] = selects;
+const chosen = select => select.selectedOptions.map(option => option.value);
+const result = {};
+// Choosing Vendors chooses their Operator_Vendor and Vendor_Operator values.
+vendor.options.forEach(option => { option.selected = ['Ericsson', 'EE - All'].includes(option.value); });
+vendor.dispatchEvent(new Event('change'));
+result.fromVendor = {operatorVendor: chosen(operatorVendor), vendorOperator: chosen(vendorOperator)};
+// Choosing Operator_Vendor values chooses their Vendors (Ericsson (Mixed) is not Ericsson) and Vendor_Operator values.
+operatorVendor.options.forEach(option => { option.selected = ['VF_UK_Nokia', '3_Ericsson (Mixed)'].includes(option.value); });
+operatorVendor.dispatchEvent(new Event('change'));
+result.fromOperatorVendor = {vendor: chosen(vendor), vendorOperator: chosen(vendorOperator)};
+// And from Vendor_Operator.
+vendorOperator.options.forEach(option => { option.selected = option.value === 'Ericsson_VF_UK'; });
+vendorOperator.dispatchEvent(new Event('change'));
+result.fromVendorOperator = {vendor: chosen(vendor), operatorVendor: chosen(operatorVendor)};
+console.log(JSON.stringify(result));
+'''
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+def test_vendor_filter_stays_in_sync_with_operator_vendor_and_vendor_operator():
+    completed = subprocess.run(['node', '-e', VENDOR_PROGRAM], capture_output=True, text=True, check=True)
+    result = json.loads(completed.stdout)
+    assert result['fromVendor'] == {'operatorVendor': ['VF_UK_Ericsson', 'EE - All'], 'vendorOperator': ['Ericsson_VF_UK', 'EE - All']}
+    assert result['fromOperatorVendor'] == {'vendor': ['Nokia', 'Ericsson (Mixed)'], 'vendorOperator': ['Nokia_VF_UK', 'Ericsson (Mixed)_3']}
+    assert result['fromVendorOperator'] == {'vendor': ['Ericsson'], 'operatorVendor': ['VF_UK_Ericsson']}
+
+
 def test_every_operator_vendor_filter_is_paired():
     assert "js/operator_vendor_pairs.js" in (WEB / 'templates/base.html').read_text(encoding='utf-8')
     analysis = (WEB / 'templates/datasets_analysis.html').read_text(encoding='utf-8')

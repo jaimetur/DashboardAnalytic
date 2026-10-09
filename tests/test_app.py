@@ -10641,6 +10641,35 @@ def test_datasets_analysis_filters_are_shared_and_cdf_compares_operators(client)
     assert opened.headers['location'] == '/datasets-analysis?dataset_id=1&load=1'
 
 
+def test_datasets_analysis_filters_keep_all_values_open_and_show_vendor_operator(client) -> None:
+    login(client)
+    csv_content = (
+        b"market,period,score,City,Region,Operator,Vendor\n"
+        b"ES,2026-Q1,91,Madrid,Central,Vodafone UK,Vodafone UK_Ericsson\n"
+        b"ES,2026-Q1,87,Barcelona,East,3,3_Ericsson\n"
+    )
+    client.post("/datasets-analysis/upload", data={"dataset_kinds": "data"},
+                files={"dataset_files": ("sample_data.csv", BytesIO(csv_content), "text/csv")}, follow_redirects=False)
+
+    def options(page: str, name: str) -> dict[str, bool]:
+        block = page[page.index(f'select name="{name}" multiple'):]
+        block = block[:block.index('</select>')]
+        return {value: ' selected' in attributes
+                for attributes, value in re.findall(r'<option value="[^"]*"([^>]*)>([^<]*)</option>', block)}
+
+    # "All values" is saved as such: every value is selected, also values that did not exist when it was saved.
+    page = client.get("/datasets-analysis?dataset_id=1&metric=score&load=1&__all_filter=city").text
+    assert options(page, 'city') == {'Barcelona': True, 'Madrid': True}
+    page = client.get("/datasets-analysis?dataset_id=1&metric=score&load=1&city=Madrid").text
+    assert options(page, 'city') == {'Barcelona': False, 'Madrid': True}
+    # A Vendor_Operator choice is shown as chosen (it filters through Operator_Vendor).
+    choices = options(page, 'vendor_operator')
+    assert choices and all(choices.values())
+    chosen = sorted(choices)[0]
+    page = client.get("/datasets-analysis", params={'dataset_id': 1, 'metric': 'score', 'load': 1, 'vendor_operator': chosen}).text
+    assert options(page, 'vendor_operator') == {value: value == chosen for value in choices}
+
+
 def test_cdr_analysis_export_keeps_each_cdf_visible_range(client) -> None:
     import src.DriveTestAnalyzer as app_module
 
