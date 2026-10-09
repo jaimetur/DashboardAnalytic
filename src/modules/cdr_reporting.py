@@ -52,8 +52,8 @@ from src.config import settings
 
 
 TEMPLATE_NAMES = {
-    "nsa": "Template_CDR_analysis.pptx",
-    "sa": "Template_CDR_analysis.pptx",
+    "nsa": "Template_01.pptx",
+    "sa": "Template_01.pptx",
 }
 CDR_REPORT_VERSION = "2026-09-22-v14"
 REPORTING_KINDS = {"data", "voice", "speech"}

@@ -107,7 +107,7 @@ def test_scoring_calculation_views_and_export_use_only_the_persisted_configurati
     assert combined['total']['max_points'] == pytest.approx(configuration['scope']['total_max_points'])
     assert combined['total']['values']['EE']['complete'] is False
 
-    template = Path(__file__).resolve().parents[1] / 'assets' / 'ppt-templates' / 'Template_CDR_analysis.pptx'
+    template = Path(__file__).resolve().parents[1] / 'assets' / 'powerpoint-templates' / 'Template_01.pptx'
     export_result = {**result, 'scoring': [], 'totals': [], 'charts': []}
     output = export_scoring_powerpoint(
         {'configuration': configuration, 'levels': ['Operator'], 'nr_mode': 'NSA'},

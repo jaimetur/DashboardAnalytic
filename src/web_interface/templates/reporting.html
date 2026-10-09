@@ -27,7 +27,7 @@
       <div class="summary-inline-actions"><span class="pill live-pill">Available</span><span class="collapse-chip">Collapse</span></div>
     </summary>
     <div class="collapsible-panel-body">
-      <form action="/reporting-old/netcheck-cdr" method="post" class="form-grid" data-report-job-form>
+      <form action="/ppt-reporting-old/netcheck-cdr" method="post" class="form-grid" data-report-job-form>
       <label>CDR Data <span class="form-label-hint">Select one or more</span>
         <select name="data_dataset_id" multiple size="4" aria-describedby="cdr-selection-help">
           {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.index <= 2 %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
@@ -61,7 +61,7 @@
       <input type="hidden" name="vendor_comparison" value="operator_vendor">
       <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button><button type="button" class="report-charts-button" data-report-charts-button>Generate Report Charts</button></div>
       </form>
-      <p id="cdr-selection-help" class="form-note">Select at least one CDR from any supported type. Types without a selection remain in the report as charts labelled Unavailable source type. Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose Report Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
+      <p id="cdr-selection-help" class="form-note">Select at least one CDR from any supported type. Types without a selection remain in the report as charts labelled Unavailable source type. Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose Report Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_01.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
     </div>
   </details>
 
@@ -99,7 +99,7 @@
       </div>
       <p class="lede" data-report-charts-copy>Each chart uses the selected CDRs, technology, scope and Report Template. Click any chart to enlarge it.</p>
       <div class="report-charts-grid" data-report-charts-body></div>
-      {% if user.role in ['admin', 'super-admin'] %}<div class="report-charts-footer-actions"><button type="button" class="report-charts-edit-template" data-report-charts-edit-template hidden>Edit Report Template</button></div>{% endif %}
+      {% if user.role in ['admin', 'super-admin'] %}<div class="report-charts-footer-actions"><button type="button" class="report-charts-edit-template" data-report-charts-edit-template hidden>Edit PPT Template</button></div>{% endif %}
     </div>
   </details>
 
@@ -234,7 +234,7 @@
         <span>Interactive panel</span>
         </button>
         {% if user.role in ['admin', 'super-admin'] %}<button type="button" class="report-chart-viewer-edit-template-button" data-report-chart-viewer-edit-template hidden>
-        <span aria-hidden="true">✎</span><span>Edit Template</span>
+        <span aria-hidden="true">✎</span><span>Edit PPT Template</span>
         </button>{% endif %}
       </div>
     </div>
@@ -255,8 +255,8 @@
 {% if user.role in ['admin', 'super-admin'] %}
 <div class="confirm-overlay report-template-editor-overlay" data-report-template-editor hidden>
   <section class="confirm-panel report-template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="report-template-editor-title">
-    <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="report-template-editor-title" data-report-template-editor-title>Edit Report Template</h3></div><button type="button" class="report-chart-viewer-close" data-report-template-editor-close aria-label="Close template editor">×</button></header>
-    <iframe class="report-template-editor-frame" data-report-template-editor-frame title="Report Templates Editor"></iframe>
+    <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="report-template-editor-title" data-report-template-editor-title>Edit PPT Template</h3></div><button type="button" class="report-chart-viewer-close" data-report-template-editor-close aria-label="Close template editor">×</button></header>
+    <iframe class="report-template-editor-frame" data-report-template-editor-frame title="PPT Templates Editor"></iframe>
   </section>
 </div>
 {% endif %}
@@ -1005,7 +1005,7 @@
     const pendingAutoOpenReportJobs = new Set();
     const refreshReportJobs = async () => {
       if (!jobsBody) return [];
-      const response = await fetch('/api/reporting-old/jobs', {credentials: 'same-origin'});
+      const response = await fetch('/api/ppt-reporting-old/jobs', {credentials: 'same-origin'});
       if (!response.ok) throw new Error('Unable to refresh report jobs.');
       const payload = await response.json();
       const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
@@ -1070,7 +1070,7 @@
       if (pollingReportChartJobs || !chartJobsBody) return;
       pollingReportChartJobs = true;
       try {
-        const response = await fetch('/api/reporting-old/chart-jobs', {credentials: 'same-origin'});
+        const response = await fetch('/api/ppt-reporting-old/chart-jobs', {credentials: 'same-origin'});
         if (!response.ok) throw new Error('Unable to refresh Report Charts jobs.');
         const payload = await response.json(); const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
         renderReportChartJobs(jobs);
@@ -1131,7 +1131,7 @@
       let selectedChartSet = payload.generation ? `standalone:${payload.generation}` : '';
       if (payload.report_job_id) {
         const reportId = Number(payload.report_job_id);
-        const reportSet = {id: reportId, report_name: payload.report_name || '', template: payload.template || '', type: payload.technology || '', charts_url: `/api/reporting-old/jobs/${reportId}/charts`, charts_date: payload.generated_at || ''};
+        const reportSet = {id: reportId, report_name: payload.report_name || '', template: payload.template || '', type: payload.technology || '', charts_url: `/api/ppt-reporting-old/jobs/${reportId}/charts`, charts_date: payload.generated_at || ''};
         const index = reportChartReportSets.findIndex((item) => Number(item.id) === reportId);
         if (index >= 0) reportChartReportSets[index] = {...reportChartReportSets[index], ...reportSet};
         else reportChartReportSets = [reportSet, ...reportChartReportSets];
@@ -1198,7 +1198,7 @@
       );
       if (Number.isInteger(templateRowIndex) && templateRowIndex >= 0) editorUrl.searchParams.set('focus_row', String(templateRowIndex));
       reportTemplateEditorFrame.src = `${editorUrl.pathname}${editorUrl.search}`;
-      if (reportTemplateEditorTitle) reportTemplateEditorTitle.textContent = `Edit Report Template: "${activeChartSetTemplate}"`;
+      if (reportTemplateEditorTitle) reportTemplateEditorTitle.textContent = `Edit PPT Template: "${activeChartSetTemplate}"`;
       reportTemplateEditor.hidden = false;
       reportTemplateEditorClose?.focus();
     };
@@ -1221,7 +1221,7 @@
           : null;
         const url = source === 'report'
           ? reportSet?.charts_url
-          : `/api/reporting-old/chart-sets/${encodeURIComponent(identifier)}`;
+          : `/api/ppt-reporting-old/chart-sets/${encodeURIComponent(identifier)}`;
         if (!url) throw new Error('The selected report charts are no longer available.');
         const response = await fetch(url, {credentials: 'same-origin'});
         const payload = await response.json();
@@ -1272,8 +1272,8 @@
       showLoadingOverlay('Deleting chart set', 'Please wait while the selected chart set is removed.');
       try {
         const endpoint = isReportCharts
-          ? `/reporting-old/jobs/${encodeURIComponent(identifier)}/charts/delete`
-          : `/reporting-old/chart-sets/${encodeURIComponent(identifier)}/delete`;
+          ? `/ppt-reporting-old/jobs/${encodeURIComponent(identifier)}/charts/delete`
+          : `/ppt-reporting-old/chart-sets/${encodeURIComponent(identifier)}/delete`;
         const response = await fetch(endpoint, {method: 'POST', credentials: 'same-origin'});
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || 'Unable to delete the selected chart set.');
@@ -1292,7 +1292,7 @@
       const title = kind === 'reports' ? 'Delete All Reports' : 'Delete All Charts Sets';
       const checkStatus = async () => {
         try {
-          const response = await fetch(`/api/reporting-old/bulk-deletions/${encodeURIComponent(jobId)}`, {credentials: 'same-origin'});
+          const response = await fetch(`/api/ppt-reporting-old/bulk-deletions/${encodeURIComponent(jobId)}`, {credentials: 'same-origin'});
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(payload.detail || 'Unable to read the bulk deletion status.');
           if (['queued', 'processing'].includes(payload.status)) {
@@ -1320,7 +1320,7 @@
       const accepted = await showConfirmDialog('Delete all generated Chart Sets and every row in Charts Jobs? All associated chart files will also be removed.', {title: 'Delete All Charts Sets', confirmLabel: 'Delete all'});
       if (!accepted) return;
       try {
-        const response = await fetch('/reporting-old/chart-sets/delete-all', {method: 'POST', credentials: 'same-origin'});
+        const response = await fetch('/ppt-reporting-old/chart-sets/delete-all', {method: 'POST', credentials: 'same-origin'});
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || 'Unable to delete all chart sets.');
         monitorBulkDeletion(payload.job_id, 'chart_sets');
@@ -1399,7 +1399,7 @@
       reportChartHoverTargets = [];
       hideReportChartHoverTooltip();
       try {
-        const response = await fetch('/api/reporting-old/chart-preview/hover', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, signal: reportChartHoverController.signal, body: JSON.stringify({source, identifier, chart_index: chartIndex, definition})});
+        const response = await fetch('/api/ppt-reporting-old/chart-preview/hover', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, signal: reportChartHoverController.signal, body: JSON.stringify({source, identifier, chart_index: chartIndex, definition})});
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || 'Unable to load chart values.');
         if (requestId === reportChartHoverRequest && session === reportChartViewerSession && chartIndex === reportChartIndex) reportChartHoverTargets = Array.isArray(payload.targets) ? payload.targets : [];
@@ -1618,7 +1618,7 @@
           if (!source || !identifier) return;
           const definition = viewerPreviewDefinition();
           try {
-            const response = await fetch('/api/reporting-old/chart-preview', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({source, identifier, chart_index: reportChartIndex, definition})});
+            const response = await fetch('/api/ppt-reporting-old/chart-preview', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({source, identifier, chart_index: reportChartIndex, definition})});
             if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.detail || 'Unable to regenerate chart preview.'); }
             const image = await response.blob();
             if (reportChartPreviewUrl) URL.revokeObjectURL(reportChartPreviewUrl);
@@ -1631,7 +1631,7 @@
       reportChartViewerFields.querySelectorAll('[name]').forEach((control) => control.addEventListener('input', regenerate));
       reportChartViewerFields.querySelectorAll('select[name]').forEach((control) => control.addEventListener('change', regenerate));
     };
-    // Shared with the Report Template Editor.  The previous local renderer is
+    // Shared with the PPT Templates Editor.  The previous local renderer is
     // retained only as compatibility context while this page is open; all new
     // viewer instances are created by the common control component below.
     const renderSharedChartViewerSandbox = (definition, chart) => {
@@ -1646,7 +1646,7 @@
           reportChartPreviewController = new AbortController();
           try {
             const definition = viewerPreviewDefinition();
-            const response = await fetch('/api/reporting-old/chart-preview', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, signal: reportChartPreviewController.signal, body: JSON.stringify({source, identifier, chart_index: reportChartIndex, definition})});
+            const response = await fetch('/api/ppt-reporting-old/chart-preview', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, signal: reportChartPreviewController.signal, body: JSON.stringify({source, identifier, chart_index: reportChartIndex, definition})});
             if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.detail || 'Unable to regenerate chart preview.'); }
             const image = await response.blob();
             if (requestId !== reportChartPreviewRequest) return;
@@ -1693,7 +1693,7 @@
       const cached = reportChartViewerContextCache.get(key);
       if (cached) return cached;
       const params = new URLSearchParams({source, identifier, chart_index: String(chartIndex)});
-      const request = fetch(`/api/reporting-old/chart-preview/context?${params}`, {credentials: 'same-origin'})
+      const request = fetch(`/api/ppt-reporting-old/chart-preview/context?${params}`, {credentials: 'same-origin'})
         .then(async (response) => {
           const definition = await response.json();
           if (!response.ok) throw new Error(definition.detail || 'Unable to load chart definition.');
@@ -1737,7 +1737,7 @@
     const requestReportChartViewerDataset = async ({page = 0, column_filters = {}, filter_column = null} = {}) => {
       const [source, identifier] = String(reportChartSetSelect?.value || '').split(':', 2);
       if (!source || !identifier || !reportChartViewerFields || !reportChartViewerDataPanel) throw new Error('The chart dataset is not available.');
-      const response = await fetch('/api/reporting-old/chart-preview/data', {
+      const response = await fetch('/api/ppt-reporting-old/chart-preview/data', {
         method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           source, identifier, chart_index: reportChartIndex, definition: viewerPreviewDefinition(),
@@ -1750,7 +1750,7 @@
     };
     const exportReportChartViewerDataset = async ({column_filters = {}} = {}) => {
       const [source, identifier] = String(reportChartSetSelect?.value || '').split(':', 2);
-      const response = await fetch('/api/reporting-old/chart-preview/data', {
+      const response = await fetch('/api/ppt-reporting-old/chart-preview/data', {
         method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           source, identifier, chart_index: reportChartIndex, definition: viewerPreviewDefinition(),
@@ -2054,7 +2054,7 @@
       formData.set('generate_tooltips', String(confirmation.optionChecked));
       showLoadingOverlay('Queueing Report Charts', 'The Chart Set will be rendered on the server. You can leave this page while it runs.');
       try {
-        const response = await fetch('/reporting-old/netcheck-cdr/charts', {method: 'POST', body: formData, credentials: 'same-origin'});
+        const response = await fetch('/ppt-reporting-old/netcheck-cdr/charts', {method: 'POST', body: formData, credentials: 'same-origin'});
         const responseBody = await response.text();
         let payload = {};
         try {
@@ -2153,7 +2153,7 @@
       const accepted = await showConfirmDialog('Delete all generated reports? Every report job and its generated PowerPoint file will be removed.', {title: 'Delete All Reports', confirmLabel: 'Delete all'});
       if (!accepted) return;
       try {
-        const response = await fetch('/reporting-old/jobs/delete-all', {method: 'POST', credentials: 'same-origin'});
+        const response = await fetch('/ppt-reporting-old/jobs/delete-all', {method: 'POST', credentials: 'same-origin'});
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Unable to delete all reports. Check App Logs or the server logs for details.');
         monitorBulkDeletion(payload.job_id, 'reports');

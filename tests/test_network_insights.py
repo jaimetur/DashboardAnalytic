@@ -169,7 +169,7 @@ def test_bundled_rf_quality_template_is_valid() -> None:
     ]
     from pptx import Presentation
     from src.modules.cdr_reporting import _named_slide_layout
-    presentation = Presentation(str(Path(__file__).resolve().parents[1] / 'assets' / 'ppt-templates' / 'Template_CDR_analysis.pptx'))
+    presentation = Presentation(str(Path(__file__).resolve().parents[1] / 'assets' / 'powerpoint-templates' / 'Template_01.pptx'))
     for layout_name in {entry.layout for entry in catalogue}:
         assert _named_slide_layout(presentation, layout_name) is not None, layout_name
     chart_types = {entry.chart_type for entry in catalogue}
@@ -420,7 +420,7 @@ def test_dynamic_histogram_grids_keep_radio_positions_and_all_operators(layout, 
     else:
         assert all(entry.chart_title.startswith('LTE ') for entry in expanded[::2])
         assert all(entry.chart_title.startswith('NR ') for entry in expanded[1::2])
-    deck = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    deck = Presentation('assets/powerpoint-templates/Template_01.pptx')
     positions = _layout_chart_frames(_named_slide_layout(deck, expanded[0].layout))
     assert len(positions) == 12
     for count in (1, 2, 3, 4, 5, 6, 7):
@@ -469,7 +469,7 @@ def test_dynamic_grids_without_comments_expand_to_matching_frames(dynamic_layout
 
     assert len(expanded) == 6
     assert {entry.layout for entry in expanded} == {expected_layout}
-    deck = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    deck = Presentation('assets/powerpoint-templates/Template_01.pptx')
     layout = _named_slide_layout(deck, expected_layout)
     assert layout is not None
     assert 'comments' not in layout.name.casefold()
@@ -519,7 +519,7 @@ def test_two_axis_dynamic_expansion_filters_vendor_only_and_paginates_grid_frame
     for entry in paged:
         pages.setdefault(entry.slide, []).append(entry)
     assert len(pages) == 4
-    deck = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    deck = Presentation('assets/powerpoint-templates/Template_01.pptx')
     page_dimensions = []
     for entries in pages.values():
         row_count = len({entry.dynamic_row_value for entry in entries})

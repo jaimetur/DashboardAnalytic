@@ -13,6 +13,9 @@ from src.modules.report_tasks import (
 )
 from src.modules.scoring_reports import default_report_configuration
 
+# The Reporting Job every workspace starts with (assets/reporting-jobs).
+STARTER_JOB = 'Weekly NetCheck Report'
+
 TZ = timezone(timedelta(hours=2))
 # Every Scoring artifact is configured with the report editor.
 SCORING_ENTRY = {'nr_mode': 'NSA', 'report': default_report_configuration()}
@@ -86,11 +89,11 @@ def test_definitions_keep_every_module_option_and_need_an_artifact():
 def test_features_activation_controls_modules_by_role_group_and_user(client):
     analyst_id = workspace_user('analyst', 'user-viewer')
     login(client)
-    # Defaults: every module for everyone except Reporting (old), off for every role and user.
+    # Defaults: every module for everyone except PPT Reporting (old), off for every role and user.
     page = client.get('/workspace').text
     assert 'href="/reporting"' in page and 'href="/non-qualified-calls"' in page
-    assert 'href="/reporting-old"' not in page
-    order = [page.index(f'href="{path}"') for path in ('/datasets-analysis', '/e2e-dashboards', '/scoring', '/network-insights', '/non-qualified-calls', '/reporting')]
+    assert 'href="/ppt-reporting-old"' not in page
+    order = [page.index(f'href="{path}"') for path in ('/datasets-analysis', '/ppt-dashboards', '/scoring', '/network-insights', '/non-qualified-calls', '/reporting')]
     assert order == sorted(order)
     session(client, 'analyst', 'user-viewer')
     assert 'href="/reporting"' in client.get('/workspace').text
@@ -132,23 +135,23 @@ def test_features_activation_controls_modules_by_role_group_and_user(client):
     assert client.post('/admin/features', data=form).status_code == 403
 
 
-def test_help_readme_and_changelog_are_public_except_reporting_old(client):
+def test_help_readme_and_changelog_are_public_except_ppt_reporting_old(client):
     client.cookies.clear()
     assert client.get('/documents/view/help').status_code == 200
     assert 'Sign in' in client.get('/documents/view/readme').text
     assert client.get('/api/documents/changelog').status_code == 200
     index = [item['relative_path'] for item in client.get('/api/documents/help-index').json()['documents']]
-    assert 'reporting.md' in index and 'reporting-old.md' not in index
-    assert client.get('/api/documents/help/reporting-old.md').status_code == 403
-    assert 'reporting-old.md' not in client.get('/api/documents/help').json()['content']
+    assert 'reporting.md' in index and 'ppt-reporting-old.md' not in index
+    assert client.get('/api/documents/help/ppt-reporting-old.md').status_code == 403
+    assert 'ppt-reporting-old.md' not in client.get('/api/documents/help').json()['content']
     assert 'Email Delivery' in client.get('/api/documents/help/app-config.md').json()['content']
     login(client)
     index = [item['relative_path'] for item in client.get('/api/documents/help-index').json()['documents']]
-    assert 'reporting-old.md' not in index
-    core.save_feature_activation_settings({**core.feature_activation_settings(), 'reporting-old': {'default': 'all'}})
+    assert 'ppt-reporting-old.md' not in index
+    core.save_feature_activation_settings({**core.feature_activation_settings(), 'ppt-reporting-old': {'default': 'all'}})
     index = [item['relative_path'] for item in client.get('/api/documents/help-index').json()['documents']]
-    assert index.index('e2e-dashboards.md') < index.index('reporting-old.md') < index.index('scoring-gap-analysis.md') < index.index('reporting.md')
-    assert client.get('/api/documents/help/reporting-old.md').status_code == 200
+    assert index.index('ppt-dashboards.md') < index.index('ppt-reporting-old.md') < index.index('scoring-gap-analysis.md') < index.index('reporting.md')
+    assert client.get('/api/documents/help/ppt-reporting-old.md').status_code == 200
 
 
 def test_email_delivery_settings_keep_the_saved_password(client):
@@ -261,9 +264,10 @@ def test_reporting_job_runs_emails_and_travels_with_exports(client, monkeypatch,
         wait_for_run(client, due[0])
         # Reporting Jobs travel with workspace packages.
         document = json.loads(report_tasks.export_tasks_document(core.repository))
-        assert {item['name'] for item in document['reporting_jobs']} == {'Weekly check', 'Weekly check (copy)'}
-        assert core._restore_workspace_reporting_jobs(core.active_workspace, json.dumps(document).encode(), 'super') == 2
-        assert len(client.get('/api/reporting/state').json()['tasks']) == 2
+        # The starter Reporting Job of every workspace travels too.
+        assert {item['name'] for item in document['reporting_jobs']} == {'Weekly check', 'Weekly check (copy)', STARTER_JOB}
+        assert core._restore_workspace_reporting_jobs(core.active_workspace, json.dumps(document).encode(), 'super') == 3
+        assert len(client.get('/api/reporting/state').json()['tasks']) == 3
         assert client.delete(f"/api/reporting/tasks/{copy['id']}").status_code == 200
     finally:
         report_tasks.ARTIFACT_PROVIDERS.pop('fake', None)
@@ -347,7 +351,7 @@ def test_imported_reporting_jobs_keep_an_owner_that_exists_here(client):
     assert core._restore_workspace_reporting_jobs(core.active_workspace, json.dumps(document).encode(), 'super') == 3
 
     owners = {task['name']: task['created_by'] for task in report_tasks.list_tasks(core.repository)}
-    assert owners == {'Owned by editor': 'editor', 'Owner from elsewhere': 'super', 'Older export': 'super'}
+    assert owners == {'Owned by editor': 'editor', 'Owner from elsewhere': 'super', 'Older export': 'super', STARTER_JOB: 'system'}
     exported = json.loads(report_tasks.export_tasks_document(core.repository))
     assert {item['name']: item['created_by'] for item in exported['reporting_jobs']} == owners
 
@@ -374,12 +378,12 @@ def test_feature_rules_saved_before_forbidden_lists_keep_their_meaning():
     assert rule == {'default': 'none', 'allow': {'roles': ['admin'], 'groups': [], 'users': [7]},
                     'deny': {'roles': [], 'groups': [], 'users': []}}
     assert core.normalized_feature_rule({'mode': 'all'})['default'] == 'all'
-    # Reporting (old) is off for every role and user of a new deployment; the other modules are on.
-    defaults = core.normalized_feature_rule(None, core.FEATURE_DEFAULTS['reporting-old'])
+    # PPT Reporting (old) is off for every role and user of a new deployment; the other modules are on.
+    defaults = core.normalized_feature_rule(None, core.FEATURE_DEFAULTS['ppt-reporting-old'])
     assert defaults == {'default': 'none', 'allow': {'roles': [], 'groups': [], 'users': []},
                         'deny': {'roles': [], 'groups': [], 'users': []}}
     assert all(core.normalized_feature_rule(None, core.FEATURE_DEFAULTS.get(key))['default'] == 'all'
-               for key in core.FEATURE_KEYS if key != 'reporting-old')
+               for key in core.FEATURE_KEYS if key != 'ppt-reporting-old')
 
 
 def test_network_insights_entries_keep_their_own_selection_and_read_single_selections():
@@ -544,7 +548,7 @@ def test_job_artifacts_are_grouped_by_module_with_their_entries():
         'dashboards': [{'dashboard_id': 'd1', 'label': 'Main Cities'}],
         'scoring': [], 'modules': {},
     })
-    assert [group['module'] for group in groups] == ['CDR Analysis', 'Network Insights', 'E2E Dashboards']
+    assert [group['module'] for group in groups] == ['CDR Analysis', 'Network Insights', 'PPT Dashboards']
     assert groups[0]['items'] == ['(PPT/Word)']
     assert len(groups[1]['items']) == 2 and groups[1]['items'][1].endswith('(Word)')
     assert groups[2]['items'] == ['Main Cities (PPT)']

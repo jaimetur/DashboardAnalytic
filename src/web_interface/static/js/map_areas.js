@@ -46,7 +46,7 @@
     const {layers} = await api('/api/workspace-config/map-areas');
     const target = $('[data-map-area-layers]');
     if (!layers.length) {
-      target.replaceChildren(node('p', 'No Map Areas saved yet: the tests outside the United Kingdom are shown as bubbles on the map.', 'form-note'));
+      target.replaceChildren(node('p', 'No Map Areas saved yet: each country uses the areas included with the application, or else the whole country as one area.', 'form-note'));
       return layers;
     }
     target.replaceChildren(table(['Country', 'Areas', 'Source', 'Licence', 'Updated', 'Actions'], layers.map((layer) => {
@@ -133,8 +133,11 @@
     target.replaceChildren(table(['Country', 'Tests', 'Map Areas', 'Actions'], countries.map((country) => [
       `${country.name} (${country.code})`,
       `${(country.share * 100).toFixed(country.share < .01 ? 2 : 1)}%`,
-      country.bundled ? 'ITL3 areas (bundled)' : country.layer ? layerText(country.layer) : node('strong', 'None: shown as bubbles', 'map-area-missing'),
-      country.bundled ? '' : levelChooser(country),
+      country.layer ? layerText(country.layer)
+        : country.bundled ? `${country.bundled.level_label} · ${number(country.bundled.unit_count)} areas · included with the application`
+          : node('strong', 'None: the whole country is one area', 'map-area-missing'),
+      // Any country can replace the areas included with the application with its own.
+      levelChooser(country),
     ])));
   }
 

@@ -119,13 +119,13 @@ APP_DATA_DIR/
 └── .map-tiles-cache/
 
 APP_ASSETS_DIR/
-└── ppt-templates/
-    └── Template_CDR_analysis.pptx
+└── powerpoint-templates/
+    └── Template_01.pptx
 ```
 
 Report Templates are records in each workspace database. CSV files appear in export, transfer and backup ZIPs as their portable representation; no persistent template CSV directory is required.
 
-The starter Auto-calculated Field definitions remain a code asset at `assets/default-calculated-dimensions.json`; changing `APP_ASSETS_DIR` currently relocates the PowerPoint master lookup only.
+The starter content of every workspace stays a code asset in the application folder: `assets/autocalculated-fields/default-autocalculated-fields.json` (Auto-calculated Fields), `assets/labels-vendors/`, `assets/labels-campaigns/`, `assets/scoring-methodologies/`, `assets/scoring-report-configurations/`, `assets/ppt-templates/`, `assets/ppt-dashboards/`, `assets/query-builder-queries/` and `assets/reporting-jobs/` (see [Workspace Management](workspace-management.md#workspace-lifecycle)), as are the Map Areas included with the application (`assets/map-areas/`); changing `APP_ASSETS_DIR` currently relocates the PowerPoint master lookup only.
 
 For the complete workspace, output and cache tree, see [Project Structure → Persistent data layout](project-structure.md#persistent-data-layout).
 

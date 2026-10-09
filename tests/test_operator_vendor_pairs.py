@@ -10,7 +10,7 @@ ROOT = Path(__file__).parents[1]
 WEB = ROOT / 'src/web_interface'
 HELPER = (WEB / 'static/js/operator_vendor_pairs.js').read_text(encoding='utf-8')
 
-# Minimal DOM: two native multi-selects in one container, as in Network Insights, NQ, Scoring and E2E Dashboards.
+# Minimal DOM: two native multi-selects in one container, as in Network Insights, NQ, Scoring and PPT Dashboards.
 PROGRAM = '''
 const listeners = [];
 globalThis.document = {addEventListener: (type, listener) => { if (type === 'change') listeners.push(listener); }};
@@ -105,7 +105,7 @@ def test_every_operator_vendor_filter_is_paired():
         assert 'data-operator-vendor-pair="vendor_operator"' in markup
     scoring = (WEB / 'templates/scoring.html').read_text(encoding='utf-8')
     assert 'data-operator-vendor-pair="{{ field | lower }}"' in scoring
-    dashboards = (WEB / 'static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    dashboards = (WEB / 'static/js/ppt_dashboards.js').read_text(encoding='utf-8')
     assert "values.dataset.operatorVendorPair = 'vendor_operator'" in dashboards
     for script in ('report_jobs.js', 'scoring_report_editor.js'):
         assert 'operatorVendorPairs.mirrorValues(' in (WEB / 'static/js' / script).read_text(encoding='utf-8')

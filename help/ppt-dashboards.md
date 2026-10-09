@@ -1,4 +1,4 @@
-# E2E Dashboards
+# PPT Dashboards
 
 Build an interactive Dashboard from processed Data, Voice and Speech CDRs, using a saved Report Template. Apply one dataset selection to its slides, explore the charts, then export the result to PowerPoint.
 
@@ -9,7 +9,7 @@ Build an interactive Dashboard from processed Data, Voice and Speech CDRs, using
 
 | I want to… | Go to |
 | --- | --- |
-| Create or change a Dashboard | [Manage Dashboards](#manage-dashboards) |
+| Create or change a Dashboard | [PPT Manage Dashboards](#ppt-manage-dashboards) |
 | Select CDRs, dates and comparison scope | [Dashboard Datasets & Filters](#dashboard-datasets-filters) |
 | Understand Apply versus Save | [Apply, Save, Clear and Reload](#apply-save-clear-and-reload) |
 | Explore slides and chart data | [View Dashboard](#view-dashboard) |
@@ -22,16 +22,16 @@ Build an interactive Dashboard from processed Data, Voice and Speech CDRs, using
 1. Open the correct workspace and process the required CDR types.
 2. Create or import a compatible **NSA/SA Report Template** in Workspace Config.
 3. For Multivendor Comparison, persist Vendor mappings first.
-4. Open **E2E Dashboards**.
+4. Open **PPT Dashboards**.
 
-Any user with workspace access can manage Dashboard definitions. **user-editor**, **admin** and **super-admin** can also open **Edit Template** and **Auto-Calculated Fields** from the viewer.
+Any user with workspace access can manage Dashboard definitions. **user-editor**, **admin** and **super-admin** can also open **Edit PPT Template** and **Auto-Calculated Fields** from the viewer.
 
 > [!TIP]
 > For a first comparison: create a Dashboard, choose its Scope and CDRs, apply the universe, apply any filters, then open **View Dashboard**. Inspect the charts before generating a PPT.
 
 Dashboards use the same template schema and renderer as Reporting. Detailed template authoring is covered in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
-## Manage Dashboards
+## PPT Manage Dashboards
 
 ### Create a definition
 
@@ -304,7 +304,7 @@ The **Chart Definition** tab uses the same editor in live and expanded view:
 | --- | --- |
 | **Apply** | Change the current preview |
 | **Update Template** | Save the definition to the Report Template row |
-| **Edit Template** | Focus the exact generating row in the template editor |
+| **Edit PPT Template** | Focus the exact generating row in the template editor |
 
 Saving the template refreshes the Dashboard. Closing it unchanged preserves the current preparation. Template/calculated-field editing actions require **user-editor**, **admin** or **super-admin**.
 
@@ -442,12 +442,12 @@ Permitted editors can open the generating template and Auto-Calculated Fields wi
 | Slide comments | Generated presentation assets |
 | Saved Dataset Universe when present | The source rows referenced by its dataset IDs |
 
-Saved universes retain dataset identifiers. Legacy imports without a saved universe start from the destination's newest ready CDRs; check the inputs after import.
+A saved universe chooses its CDRs in its own workspace. Exported Dashboards carry the name and type of their CDRs, and importing them into a workspace chooses the CDRs of that workspace with the same name and type; the CDRs it does not have are left out. A Dashboard also leaves out a chosen CDR that is deleted from its workspace. When none of its CDRs is left, it uses the newest ready CDRs of its NR Mode, like a Dashboard without a saved universe; check the inputs after import.
 
 Dashboards have their own Admin export/import/transfer/backup/restore component. Full Workspace and Full Environment include definitions from selected workspaces, with Dashboards listed after Application Config.
 
 > [!TIP]
-> Verify the template and CDR references after moving a Dashboard to another workspace. Definition portability does not mean its source datasets travelled with it.
+> Verify the template and CDR selection after moving a Dashboard to another workspace. Its CDRs do not travel with it: it uses the CDRs of the destination with the same name, or else the newest ones.
 
 ## Troubleshooting
 

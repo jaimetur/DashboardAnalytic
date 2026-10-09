@@ -444,7 +444,7 @@ def cdf_payload(
 def campaign_line_widths(campaigns: dict[str, str], families: dict[str, str]) -> dict[str, int]:
     """Line width per label: the latest campaign of each Operator/Vendor is the thickest.
 
-    Like the E2E Dashboard CDFs, two campaigns use widths 1 and 4 and longer
+    Like the PPT Dashboard CDFs, two campaigns use widths 1 and 4 and longer
     histories thin out by one per older campaign.
     """
     from src.modules.cdr_reporting import _campaign_sort_key

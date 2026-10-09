@@ -1,0 +1,5 @@
+{
+  "name": "Data tests per Operator and Type of Test",
+  "description": "Data tests of each Operator by Type of Test and result, with the mean data rate.",
+  "query_sql": "SELECT Operator, Type_of_Test, Test_Result,\n  COUNT(*) AS Tests,\n  ROUND(AVG(Mean_Data_Rate), 2) AS Avg_Mean_Data_Rate\nFROM selected_data\nGROUP BY Operator, Type_of_Test, Test_Result\nORDER BY Operator, Type_of_Test, Test_Result"
+}

@@ -61,7 +61,7 @@ MODULE_LABELS = {
 # The feature a user needs to include each kind of artifact in a Reporting Job.
 MODULE_FEATURES = {
     'dataset_analysis': 'datasets-analysis', 'network_insights': 'network-insights',
-    'dashboards': 'e2e-dashboards', 'scoring': 'scoring',
+    'dashboards': 'ppt-dashboards', 'scoring': 'scoring',
 }
 # Artifacts of other modules (for example Non-Qualified Calls) register here:
 # key -> {'label', 'feature', 'formats', 'generate', 'filters', 'settings', 'values'}.
@@ -441,7 +441,7 @@ def artifact_groups(definition: dict[str, Any], dashboard_names: dict[str, str] 
     dashboards = [f"{entry.get('label') or (dashboard_names or {}).get(entry.get('dashboard_id', ''), entry.get('dashboard_id', ''))} (PPT)"
                   for entry in definition.get('dashboards') or []]
     if dashboards:
-        groups.append({'module': 'E2E Dashboards', 'items': dashboards})
+        groups.append({'module': 'PPT Dashboards', 'items': dashboards})
     scoring = [f"{scoring_entry_name(entry)} {formats(entry.get('formats'))}" for entry in definition.get('scoring') or []]
     if scoring:
         groups.append({'module': 'Scoring & GAP Analysis', 'items': scoring})
@@ -1010,7 +1010,7 @@ def install_report_task_routes(core: Any) -> None:
             row = wait_for_dashboard_job(task_repository, job_id, run_id)
             source = Path(str(row['output_path']))
             # Dashboard PPT names start with their own generation time, which is dropped.
-            destination = artifact_path(folder, stamp, 'E2E Dashboards', entry.get('label') or source.stem, source.suffix)
+            destination = artifact_path(folder, stamp, 'PPT Dashboards', entry.get('label') or source.stem, source.suffix)
             shutil.copy2(source, destination)
             return ready_artifact('dashboards', title, destination, dashboard_details(tools.serialize_job(row)))
         except Exception as exc:
@@ -1295,7 +1295,7 @@ def install_report_task_routes(core: Any) -> None:
         return True
 
     def reporting_options(task_repository, user) -> dict[str, Any]:
-        from src.modules.e2e_dashboards import ADAPTATIVE_FILTER_FIELDS
+        from src.modules.ppt_dashboards import ADAPTATIVE_FILTER_FIELDS
 
         datasets = [
             {'id': int(row['id']), 'file_name': str(row['file_name']), 'kind': str(row['dataset_kind']),

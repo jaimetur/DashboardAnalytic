@@ -1,82 +1,82 @@
-.e2e-dashboards{--ds-color:#7751b9;--ds-soft:#f3effa;--ds-border:#d6c8ea}
-.module-hero-e2e-dashboards .lede,.module-hero-e2e-dashboards .eyebrow{color:#f5efff}
-.module-hero-e2e-dashboards{min-height:0;background:linear-gradient(125deg,#403078,#9678c7)!important;color:white}
-.module-hero-e2e-dashboards .eyebrow{margin:0 0 .35rem}
-.module-hero-e2e-dashboards h2{margin:1.25rem 0}
-.module-hero-e2e-dashboards .lede{margin:1rem 0}
-.e2e-dashboards button,.e2e-dashboards .button{background:var(--ds-color);color:white;border-color:var(--ds-color)}
-.e2e-dashboards button:disabled{opacity:.45;cursor:not-allowed}
-.e2e-dashboards .danger-button{background:#a33850;border-color:#a33850}
-.e2e-dashboards .ds-total-badge{background:linear-gradient(135deg,#56349a,#8d65cf);border:1px solid #4b2c87;color:#fff;box-shadow:0 5px 14px #60408d44;font-weight:800}
-.e2e-dashboards .ds-active-dashboard-name{color:#12664f;font-family:inherit;font-size:1.12em;font-weight:900}
-.e2e-dashboards :is(.ds-unapplied-filters-badge,.ds-unapplied-universe-badge){background:#fff1bd;border:1px solid #d3a62a;color:#77570a;font-weight:800;box-shadow:0 3px 10px rgba(150,105,0,.16)}
-.e2e-dashboards :is(.ds-unsaved-filters-badge,.ds-unsaved-universe-badge){background:#fbdfe3;border:1px solid #d77b85;color:#8a303b;font-weight:800;box-shadow:0 3px 10px rgba(145,47,60,.14)}
+.ppt-dashboards{--ds-color:#7751b9;--ds-soft:#f3effa;--ds-border:#d6c8ea}
+.module-hero-ppt-dashboards .lede,.module-hero-ppt-dashboards .eyebrow{color:#f5efff}
+.module-hero-ppt-dashboards{min-height:0;background:linear-gradient(125deg,#403078,#9678c7)!important;color:white}
+.module-hero-ppt-dashboards .eyebrow{margin:0 0 .35rem}
+.module-hero-ppt-dashboards h2{margin:1.25rem 0}
+.module-hero-ppt-dashboards .lede{margin:1rem 0}
+.ppt-dashboards button,.ppt-dashboards .button{background:var(--ds-color);color:white;border-color:var(--ds-color)}
+.ppt-dashboards button:disabled{opacity:.45;cursor:not-allowed}
+.ppt-dashboards .danger-button{background:#a33850;border-color:#a33850}
+.ppt-dashboards .ds-total-badge{background:linear-gradient(135deg,#56349a,#8d65cf);border:1px solid #4b2c87;color:#fff;box-shadow:0 5px 14px #60408d44;font-weight:800}
+.ppt-dashboards .ds-active-dashboard-name{color:#12664f;font-family:inherit;font-size:1.12em;font-weight:900}
+.ppt-dashboards :is(.ds-unapplied-filters-badge,.ds-unapplied-universe-badge){background:#fff1bd;border:1px solid #d3a62a;color:#77570a;font-weight:800;box-shadow:0 3px 10px rgba(150,105,0,.16)}
+.ppt-dashboards :is(.ds-unsaved-filters-badge,.ds-unsaved-universe-badge){background:#fbdfe3;border:1px solid #d77b85;color:#8a303b;font-weight:800;box-shadow:0 3px 10px rgba(145,47,60,.14)}
 .ds-management{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
 .ds-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px}
-.ds-actions select{width:auto;max-width:320px}.ds-scope-control{display:grid;gap:.4rem;margin:4px 0 0;font-size:.9rem;font-weight:800;color:#55436d;white-space:nowrap}.ds-scope-control select{box-sizing:border-box;width:100%;max-width:none;height:2.55rem;min-height:2.55rem;padding:.35rem 1.9rem .35rem .68rem;font:inherit;font-size:.84rem;font-weight:750}.ds-scope-control.ds-filter-unsaved select{border-color:#cb8a18!important;background:#fff5d7!important;color:#765007!important;box-shadow:0 0 0 2px #e7bd6538}.e2e-dashboards .ds-view-dashboard-action,.e2e-dashboards .ds-generate-ppt-action,.e2e-dashboards .ds-view-filters-action{display:inline-flex;align-items:center;gap:.5rem;font-weight:800}.e2e-dashboards .ds-view-dashboard-action{background:linear-gradient(135deg,#137a61,#22ad83);border-color:#0d6a53;box-shadow:0 7px 16px rgba(18,130,98,.28)}.e2e-dashboards .ds-view-dashboard-action:hover:not(:disabled){background:linear-gradient(135deg,#0e694f,#168967);border-color:#095740}.e2e-dashboards .ds-generate-ppt-action{margin-left:auto;background:linear-gradient(135deg,#6d46a8,#9870d0);border-color:#5f3b91;box-shadow:0 7px 16px rgba(95,69,142,.22)}.e2e-dashboards .ds-generate-ppt-action:hover:not(:disabled){background:linear-gradient(135deg,#4f2d82,#7549b0);border-color:#45246f}.e2e-dashboards .ds-view-filters-action{background:#d7a921;border-color:#b58a2f;color:#fff;box-shadow:none}.e2e-dashboards .ds-view-filters-action:hover:not(:disabled){background:#bd8e13;border-color:#947022}.e2e-dashboards .ds-view-dashboard-action::before,.e2e-dashboards .ds-generate-ppt-action::before,.e2e-dashboards .ds-view-filters-action::before{content:'';width:1rem;height:1rem;flex:0 0 1rem;background:center/contain no-repeat}.e2e-dashboards .ds-view-dashboard-action::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z'/%3E%3Ccircle cx='12' cy='12' r='2.5'/%3E%3C/svg%3E")}.e2e-dashboards .ds-generate-ppt-action::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 25'%3E%3Crect x='2' y='2' width='26' height='18' rx='2.5' fill='none' stroke='white' stroke-width='2.2'/%3E%3Ctext x='15' y='14.5' fill='white' font-family='Arial,sans-serif' font-size='8.5' font-weight='900' text-anchor='middle'%3EPPT%3C/text%3E%3Cpath d='M15 20v3M10.5 23h9' fill='none' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")}.e2e-dashboards .ds-view-filters-action::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h18l-7 8v5l-4 2v-7L3 5Z'/%3E%3C/svg%3E")}.ds-viewer-right-actions{display:flex;align-items:center;gap:10px;margin-left:auto}.e2e-dashboards .ds-viewer-icon-action{display:grid;place-items:center;width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:0!important}.e2e-dashboards .ds-viewer-icon-action::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat}.e2e-dashboards .ds-viewer-refresh-action::after{content:'';width:1.05rem;height:1.05rem;background:center/contain no-repeat;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.64 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z'/%3E%3C/svg%3E")}.e2e-dashboards .ds-presentation-action::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M8 5v14l11-7z'/%3E%3C/svg%3E")}.e2e-dashboards .ds-presentation-action.is-running::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Crect x='7' y='7' width='10' height='10' rx='1'/%3E%3C/svg%3E")}
-.e2e-dashboards .ds-filter-close-action{background:#73737c;border-color:#73737c}.e2e-dashboards .ds-filter-close-action:hover{background:#5d5d65;border-color:#5d5d65}.e2e-dashboards #ds-filter-close-action[hidden]{display:none!important}
-.e2e-dashboards :is(#ds-generate-ppt,#ds-view)[hidden]{display:none!important}
-.e2e-dashboards :is(#ds-apply-filters,#ds-save,#ds-clear-filters,#ds-last-saved-filters,#ds-filter-close-action,#ds-add-filter,#ds-ppt-jobs-delete-all){display:inline-flex;align-items:center;justify-content:center;gap:.48rem}
-.e2e-dashboards :is(#ds-apply-filters,#ds-save,#ds-clear-filters,#ds-last-saved-filters,#ds-filter-close-action,#ds-add-filter,#ds-ppt-jobs-delete-all)::before{content:'';width:1.05rem;height:1.05rem;flex:0 0 1.05rem;background:center/contain no-repeat}
-.e2e-dashboards :is(.ds-view-dashboard-action,.ds-generate-ppt-action)::before{width:1.35rem;height:1.35rem;flex-basis:1.35rem}
-.e2e-dashboards #ds-apply-filters::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h12l-5 6v5l-3 2v-7L3 5Z'/%3E%3Cpath d='m14 16 2 2 5-6'/%3E%3C/svg%3E")}
-.e2e-dashboards #ds-save::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 3h12l3 3v15H4V4a1 1 0 0 1 1-1Z'/%3E%3Cpath d='M8 3v6h8V3M8 21v-7h8v7'/%3E%3C/svg%3E")}
-.e2e-dashboards #ds-clear-filters::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 16 9-11 7 6-8 10H7l-3-3a1.4 1.4 0 0 1 0-2Z'/%3E%3Cpath d='m10 9 7 6M4 21h16'/%3E%3C/svg%3E")}
-.e2e-dashboards #ds-last-saved-filters::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6v5h-5'/%3E%3Cpath d='M19 11a7.5 7.5 0 1 0 .3 4.5'/%3E%3Cpath d='M4.7 8.5A7.5 7.5 0 0 1 20 11'/%3E%3C/svg%3E")}
-.e2e-dashboards #ds-filter-close-action::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='m9 9 6 6m0-6-6 6'/%3E%3C/svg%3E")}
-.e2e-dashboards #ds-add-filter::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h12l-5 6v6l-3 2v-8L3 5Z'/%3E%3Cpath d='M18 12v8m-4-4h8'/%3E%3C/svg%3E")}
-.e2e-dashboards #ds-ppt-jobs-delete-all::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6m4-6v6'/%3E%3C/svg%3E")}
-.ds-dashboards-table-wrap{margin-top:20px}.ds-dashboards-table{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden;border:1px solid var(--ds-border);border-radius:12px}.ds-dashboards-table th{background:#e8def5;color:#4c3277}.ds-dashboards-table th,.ds-dashboards-table td{padding:10px 12px;vertical-align:middle}.ds-dashboards-table th:first-child,.ds-dashboards-table td:first-child{width:34%;min-width:320px}.ds-dashboards-table tbody tr:nth-child(odd){background:#fbf9fe}.ds-dashboards-table tbody tr:hover,.ds-dashboards-table tbody tr.ds-dashboard-active{background:#eee7f8}.ds-dashboard-actions{display:flex;align-items:center;gap:6px;white-space:nowrap}.e2e-dashboards .ds-dashboard-action{width:1.8rem;min-width:1.8rem;height:1.8rem;min-height:1.8rem;padding:0!important;border-radius:999px!important;font-size:.95rem!important;line-height:1}.e2e-dashboards .ds-dashboard-open,.e2e-dashboards .ds-dashboard-close{font-size:0!important}.e2e-dashboards .ds-dashboard-open::after,.e2e-dashboards .ds-dashboard-close::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat}.e2e-dashboards .ds-dashboard-open::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z'/%3E%3Cpath d='M3 10h18'/%3E%3C/svg%3E")}.e2e-dashboards .ds-dashboard-close{background:linear-gradient(145deg,#73529e,#9878bd);border-color:#604182}.e2e-dashboards .ds-dashboard-close::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-linejoin='round'%3E%3Cpath d='M4 21V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v17'/%3E%3Cpath d='M16 21H4'/%3E%3Cpath d='M10 12h10'/%3E%3Cpath d='m17 8 4 4-4 4'/%3E%3Ccircle cx='13' cy='12' r='.6' fill='white' stroke='none'/%3E%3C/svg%3E")}.ds-dashboard-name-editor{position:relative;min-width:190px}.ds-dashboard-name-editor input{min-width:0;width:100%;padding:6px 2.15rem 6px 8px}.e2e-dashboards .ds-dashboard-name-save{position:absolute;top:50%;right:6px;display:grid;place-items:center;width:1.5rem;min-width:1.5rem;height:1.5rem;min-height:1.5rem;padding:0!important;transform:translateY(-50%);border-radius:999px!important;background:#2f9b64;border-color:#278454;font-size:.9rem!important;font-weight:900;line-height:1}.e2e-dashboards .ds-dashboard-name-save[hidden]{display:none!important}.e2e-dashboards .ds-dashboard-name-save:hover{background:#237e50;border-color:#1b6941}.e2e-dashboards .ds-dashboard-view{font-size:0!important;background:linear-gradient(145deg,#356caa,#5594d2);border-color:#2a5c96}.e2e-dashboards .ds-dashboard-view::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z'/%3E%3Ccircle cx='12' cy='12' r='2.5'/%3E%3C/svg%3E")}.e2e-dashboards .ds-dashboard-action.danger-button{background:linear-gradient(145deg,#8d1d2c,#d24e5b);border-color:rgba(141,29,44,.7)}
+.ds-actions select{width:auto;max-width:320px}.ds-scope-control{display:grid;gap:.4rem;margin:4px 0 0;font-size:.9rem;font-weight:800;color:#55436d;white-space:nowrap}.ds-scope-control select{box-sizing:border-box;width:100%;max-width:none;height:2.55rem;min-height:2.55rem;padding:.35rem 1.9rem .35rem .68rem;font:inherit;font-size:.84rem;font-weight:750}.ds-scope-control.ds-filter-unsaved select{border-color:#cb8a18!important;background:#fff5d7!important;color:#765007!important;box-shadow:0 0 0 2px #e7bd6538}.ppt-dashboards .ds-view-dashboard-action,.ppt-dashboards .ds-generate-ppt-action,.ppt-dashboards .ds-view-filters-action{display:inline-flex;align-items:center;gap:.5rem;font-weight:800}.ppt-dashboards .ds-view-dashboard-action{background:linear-gradient(135deg,#137a61,#22ad83);border-color:#0d6a53;box-shadow:0 7px 16px rgba(18,130,98,.28)}.ppt-dashboards .ds-view-dashboard-action:hover:not(:disabled){background:linear-gradient(135deg,#0e694f,#168967);border-color:#095740}.ppt-dashboards .ds-generate-ppt-action{margin-left:auto;background:linear-gradient(135deg,#6d46a8,#9870d0);border-color:#5f3b91;box-shadow:0 7px 16px rgba(95,69,142,.22)}.ppt-dashboards .ds-generate-ppt-action:hover:not(:disabled){background:linear-gradient(135deg,#4f2d82,#7549b0);border-color:#45246f}.ppt-dashboards .ds-view-filters-action{background:#d7a921;border-color:#b58a2f;color:#fff;box-shadow:none}.ppt-dashboards .ds-view-filters-action:hover:not(:disabled){background:#bd8e13;border-color:#947022}.ppt-dashboards .ds-view-dashboard-action::before,.ppt-dashboards .ds-generate-ppt-action::before,.ppt-dashboards .ds-view-filters-action::before{content:'';width:1rem;height:1rem;flex:0 0 1rem;background:center/contain no-repeat}.ppt-dashboards .ds-view-dashboard-action::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z'/%3E%3Ccircle cx='12' cy='12' r='2.5'/%3E%3C/svg%3E")}.ppt-dashboards .ds-generate-ppt-action::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 25'%3E%3Crect x='2' y='2' width='26' height='18' rx='2.5' fill='none' stroke='white' stroke-width='2.2'/%3E%3Ctext x='15' y='14.5' fill='white' font-family='Arial,sans-serif' font-size='8.5' font-weight='900' text-anchor='middle'%3EPPT%3C/text%3E%3Cpath d='M15 20v3M10.5 23h9' fill='none' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")}.ppt-dashboards .ds-view-filters-action::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h18l-7 8v5l-4 2v-7L3 5Z'/%3E%3C/svg%3E")}.ds-viewer-right-actions{display:flex;align-items:center;gap:10px;margin-left:auto}.ppt-dashboards .ds-viewer-icon-action{display:grid;place-items:center;width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:0!important}.ppt-dashboards .ds-viewer-icon-action::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat}.ppt-dashboards .ds-viewer-refresh-action::after{content:'';width:1.05rem;height:1.05rem;background:center/contain no-repeat;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.64 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z'/%3E%3C/svg%3E")}.ppt-dashboards .ds-presentation-action::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M8 5v14l11-7z'/%3E%3C/svg%3E")}.ppt-dashboards .ds-presentation-action.is-running::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Crect x='7' y='7' width='10' height='10' rx='1'/%3E%3C/svg%3E")}
+.ppt-dashboards .ds-filter-close-action{background:#73737c;border-color:#73737c}.ppt-dashboards .ds-filter-close-action:hover{background:#5d5d65;border-color:#5d5d65}.ppt-dashboards #ds-filter-close-action[hidden]{display:none!important}
+.ppt-dashboards :is(#ds-generate-ppt,#ds-view)[hidden]{display:none!important}
+.ppt-dashboards :is(#ds-apply-filters,#ds-save,#ds-clear-filters,#ds-last-saved-filters,#ds-filter-close-action,#ds-add-filter,#ds-ppt-jobs-delete-all){display:inline-flex;align-items:center;justify-content:center;gap:.48rem}
+.ppt-dashboards :is(#ds-apply-filters,#ds-save,#ds-clear-filters,#ds-last-saved-filters,#ds-filter-close-action,#ds-add-filter,#ds-ppt-jobs-delete-all)::before{content:'';width:1.05rem;height:1.05rem;flex:0 0 1.05rem;background:center/contain no-repeat}
+.ppt-dashboards :is(.ds-view-dashboard-action,.ds-generate-ppt-action)::before{width:1.35rem;height:1.35rem;flex-basis:1.35rem}
+.ppt-dashboards #ds-apply-filters::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h12l-5 6v5l-3 2v-7L3 5Z'/%3E%3Cpath d='m14 16 2 2 5-6'/%3E%3C/svg%3E")}
+.ppt-dashboards #ds-save::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 3h12l3 3v15H4V4a1 1 0 0 1 1-1Z'/%3E%3Cpath d='M8 3v6h8V3M8 21v-7h8v7'/%3E%3C/svg%3E")}
+.ppt-dashboards #ds-clear-filters::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 16 9-11 7 6-8 10H7l-3-3a1.4 1.4 0 0 1 0-2Z'/%3E%3Cpath d='m10 9 7 6M4 21h16'/%3E%3C/svg%3E")}
+.ppt-dashboards #ds-last-saved-filters::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6v5h-5'/%3E%3Cpath d='M19 11a7.5 7.5 0 1 0 .3 4.5'/%3E%3Cpath d='M4.7 8.5A7.5 7.5 0 0 1 20 11'/%3E%3C/svg%3E")}
+.ppt-dashboards #ds-filter-close-action::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='m9 9 6 6m0-6-6 6'/%3E%3C/svg%3E")}
+.ppt-dashboards #ds-add-filter::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h12l-5 6v6l-3 2v-8L3 5Z'/%3E%3Cpath d='M18 12v8m-4-4h8'/%3E%3C/svg%3E")}
+.ppt-dashboards #ds-ppt-jobs-delete-all::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6m4-6v6'/%3E%3C/svg%3E")}
+.ds-dashboards-table-wrap{margin-top:20px}.ds-dashboards-table{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden;border:1px solid var(--ds-border);border-radius:12px}.ds-dashboards-table th{background:#e8def5;color:#4c3277}.ds-dashboards-table th,.ds-dashboards-table td{padding:10px 12px;vertical-align:middle}.ds-dashboards-table th:first-child,.ds-dashboards-table td:first-child{width:34%;min-width:320px}.ds-dashboards-table tbody tr:nth-child(odd){background:#fbf9fe}.ds-dashboards-table tbody tr:hover,.ds-dashboards-table tbody tr.ds-dashboard-active{background:#eee7f8}.ds-dashboard-actions{display:flex;align-items:center;gap:6px;white-space:nowrap}.ppt-dashboards .ds-dashboard-action{width:1.8rem;min-width:1.8rem;height:1.8rem;min-height:1.8rem;padding:0!important;border-radius:999px!important;font-size:.95rem!important;line-height:1}.ppt-dashboards .ds-dashboard-open,.ppt-dashboards .ds-dashboard-close{font-size:0!important}.ppt-dashboards .ds-dashboard-open::after,.ppt-dashboards .ds-dashboard-close::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat}.ppt-dashboards .ds-dashboard-open::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z'/%3E%3Cpath d='M3 10h18'/%3E%3C/svg%3E")}.ppt-dashboards .ds-dashboard-close{background:linear-gradient(145deg,#73529e,#9878bd);border-color:#604182}.ppt-dashboards .ds-dashboard-close::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-linejoin='round'%3E%3Cpath d='M4 21V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v17'/%3E%3Cpath d='M16 21H4'/%3E%3Cpath d='M10 12h10'/%3E%3Cpath d='m17 8 4 4-4 4'/%3E%3Ccircle cx='13' cy='12' r='.6' fill='white' stroke='none'/%3E%3C/svg%3E")}.ds-dashboard-name-editor{position:relative;min-width:190px}.ds-dashboard-name-editor input{min-width:0;width:100%;padding:6px 2.15rem 6px 8px}.ppt-dashboards .ds-dashboard-name-save{position:absolute;top:50%;right:6px;display:grid;place-items:center;width:1.5rem;min-width:1.5rem;height:1.5rem;min-height:1.5rem;padding:0!important;transform:translateY(-50%);border-radius:999px!important;background:#2f9b64;border-color:#278454;font-size:.9rem!important;font-weight:900;line-height:1}.ppt-dashboards .ds-dashboard-name-save[hidden]{display:none!important}.ppt-dashboards .ds-dashboard-name-save:hover{background:#237e50;border-color:#1b6941}.ppt-dashboards .ds-dashboard-view{font-size:0!important;background:linear-gradient(145deg,#356caa,#5594d2);border-color:#2a5c96}.ppt-dashboards .ds-dashboard-view::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z'/%3E%3Ccircle cx='12' cy='12' r='2.5'/%3E%3C/svg%3E")}.ppt-dashboards .ds-dashboard-action.danger-button{background:linear-gradient(145deg,#8d1d2c,#d24e5b);border-color:rgba(141,29,44,.7)}
 .ds-dashboard-definition-select{box-sizing:border-box;width:100%;min-width:7rem;padding:.42rem 1.8rem .42rem .55rem;border:1px solid #bba9d0;border-radius:8px;background:#fff;color:#3f3152;font-size:.78rem;font-weight:700}.ds-dashboard-template-select{min-width:11rem}
 .ds-dashboard-status{display:inline-flex;align-items:center;justify-content:center;min-width:5.6rem;padding:.28rem .58rem;border:1px solid transparent;border-radius:999px;font-size:.7rem;font-weight:800;line-height:1;white-space:nowrap}.ds-dashboard-status-ready{border-color:#79b997;background:#dff4e8;color:#17633d}.ds-dashboard-status-rendering{border-color:#8b72bc;background:#eee7fb;color:#55358d}.ds-dashboard-status-loading-data{border-color:#6ea8ce;background:#e3f3fc;color:#235f87}.ds-dashboard-status-data-queued,.ds-dashboard-status-charts-queued{border-color:#d3aa45;background:#fff1c9;color:#77570a}.ds-dashboard-status-data-needed,.ds-dashboard-status-charts-needed{border-color:#dc9555;background:#ffead8;color:#8a4511}.ds-dashboard-status-not-cached,.ds-dashboard-status-checking{border-color:#aaa3b2;background:#f0edf2;color:#655e6c}.ds-dashboard-status-error{border-color:#d2777f;background:#fbe2e5;color:#8c2731}
-.e2e-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#485f70,#71899a);border-color:rgba(255,255,255,.34)}.e2e-dashboards .ds-dashboard-close:hover:not(:disabled){background:linear-gradient(135deg,#354c5d,#5d7587)}.e2e-dashboards .ds-dashboard-close::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2v10'/%3E%3Cpath d='M18.4 6.6a8 8 0 1 1-12.8 0'/%3E%3C/svg%3E")}
-.e2e-dashboards .ds-dashboard-open{background:linear-gradient(145deg,#e87912,#ffad2f);border-color:#c65f08;box-shadow:0 5px 12px rgba(211,99,5,.34)}.e2e-dashboards .ds-dashboard-open:hover:not(:disabled){background:linear-gradient(145deg,#cf6508,#ed9418);border-color:#a94f04;box-shadow:0 6px 15px rgba(180,76,0,.4)}
-.e2e-dashboards .ds-dashboard-view{background:linear-gradient(145deg,#167957,#29ae7d);border-color:#0e6749}.e2e-dashboards .ds-dashboard-view:hover:not(:disabled){background:linear-gradient(145deg,#0f6347,#1f9167);border-color:#095139}
-.e2e-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#a9273a,#dc5361);border-color:#861d2e;color:#fff;box-shadow:0 5px 12px rgba(143,28,45,.3)}.e2e-dashboards .ds-dashboard-close:hover:not(:disabled),.e2e-dashboards .ds-dashboard-close:focus-visible{background:linear-gradient(135deg,#861d2e,#bd394a);border-color:#6f1423;color:#fff;box-shadow:0 6px 15px rgba(112,20,35,.38)}
-.e2e-dashboards .ds-dashboard-export,.e2e-dashboards .ds-dashboard-ppt{font-size:0!important}.e2e-dashboards .ds-dashboard-export::after,.e2e-dashboards .ds-dashboard-ppt::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat}.e2e-dashboards .ds-dashboard-export{background:linear-gradient(145deg,#6d46a8,#9870d0);border-color:#5f3b91}.e2e-dashboards .ds-dashboard-export:hover{background:linear-gradient(145deg,#4f2d82,#7549b0);border-color:#45246f}.e2e-dashboards .ds-dashboard-export::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v11'/%3E%3Cpath d='m8 10 4 4 4-4'/%3E%3Cpath d='M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4'/%3E%3C/svg%3E")}.e2e-dashboards .ds-dashboard-ppt{background:linear-gradient(135deg,#b44720,#e47736);border-color:#963817;color:#fff;font-weight:900;box-shadow:0 5px 13px rgba(164,65,27,.26)}.e2e-dashboards .ds-dashboard-ppt::after{width:1.3rem;height:1.08rem;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 25'%3E%3Crect x='2' y='2' width='26' height='18' rx='2.5' fill='none' stroke='white' stroke-width='2.2'/%3E%3Ctext x='15' y='14.5' fill='white' font-family='Arial,sans-serif' font-size='8.5' font-weight='900' text-anchor='middle'%3EPPT%3C/text%3E%3Cpath d='M15 20v3M10.5 23h9' fill='none' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")}.e2e-dashboards .ds-dashboard-ppt:hover:not(:disabled){background:linear-gradient(135deg,#913515,#c65d25);border-color:#7b2b10}.e2e-dashboards .ds-dashboard-ppt:disabled{background:#d9d5df;border-color:#c5bfcc;color:#807887;opacity:.72;box-shadow:none}
+.ppt-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#485f70,#71899a);border-color:rgba(255,255,255,.34)}.ppt-dashboards .ds-dashboard-close:hover:not(:disabled){background:linear-gradient(135deg,#354c5d,#5d7587)}.ppt-dashboards .ds-dashboard-close::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2v10'/%3E%3Cpath d='M18.4 6.6a8 8 0 1 1-12.8 0'/%3E%3C/svg%3E")}
+.ppt-dashboards .ds-dashboard-open{background:linear-gradient(145deg,#e87912,#ffad2f);border-color:#c65f08;box-shadow:0 5px 12px rgba(211,99,5,.34)}.ppt-dashboards .ds-dashboard-open:hover:not(:disabled){background:linear-gradient(145deg,#cf6508,#ed9418);border-color:#a94f04;box-shadow:0 6px 15px rgba(180,76,0,.4)}
+.ppt-dashboards .ds-dashboard-view{background:linear-gradient(145deg,#167957,#29ae7d);border-color:#0e6749}.ppt-dashboards .ds-dashboard-view:hover:not(:disabled){background:linear-gradient(145deg,#0f6347,#1f9167);border-color:#095139}
+.ppt-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#a9273a,#dc5361);border-color:#861d2e;color:#fff;box-shadow:0 5px 12px rgba(143,28,45,.3)}.ppt-dashboards .ds-dashboard-close:hover:not(:disabled),.ppt-dashboards .ds-dashboard-close:focus-visible{background:linear-gradient(135deg,#861d2e,#bd394a);border-color:#6f1423;color:#fff;box-shadow:0 6px 15px rgba(112,20,35,.38)}
+.ppt-dashboards .ds-dashboard-export,.ppt-dashboards .ds-dashboard-ppt{font-size:0!important}.ppt-dashboards .ds-dashboard-export::after,.ppt-dashboards .ds-dashboard-ppt::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat}.ppt-dashboards .ds-dashboard-export{background:linear-gradient(145deg,#6d46a8,#9870d0);border-color:#5f3b91}.ppt-dashboards .ds-dashboard-export:hover{background:linear-gradient(145deg,#4f2d82,#7549b0);border-color:#45246f}.ppt-dashboards .ds-dashboard-export::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v11'/%3E%3Cpath d='m8 10 4 4 4-4'/%3E%3Cpath d='M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4'/%3E%3C/svg%3E")}.ppt-dashboards .ds-dashboard-ppt{background:linear-gradient(135deg,#b44720,#e47736);border-color:#963817;color:#fff;font-weight:900;box-shadow:0 5px 13px rgba(164,65,27,.26)}.ppt-dashboards .ds-dashboard-ppt::after{width:1.3rem;height:1.08rem;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 25'%3E%3Crect x='2' y='2' width='26' height='18' rx='2.5' fill='none' stroke='white' stroke-width='2.2'/%3E%3Ctext x='15' y='14.5' fill='white' font-family='Arial,sans-serif' font-size='8.5' font-weight='900' text-anchor='middle'%3EPPT%3C/text%3E%3Cpath d='M15 20v3M10.5 23h9' fill='none' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")}.ppt-dashboards .ds-dashboard-ppt:hover:not(:disabled){background:linear-gradient(135deg,#913515,#c65d25);border-color:#7b2b10}.ppt-dashboards .ds-dashboard-ppt:disabled{background:#d9d5df;border-color:#c5bfcc;color:#807887;opacity:.72;box-shadow:none}
 .ds-ppt-jobs-panel{margin-top:2.2rem}.ds-ppt-jobs-table-wrap{overflow:auto;scrollbar-gutter:stable}.report-jobs-table.ds-ppt-jobs-table{min-width:1170px}.report-jobs-table.ds-ppt-jobs-table th,.report-jobs-table.ds-ppt-jobs-table td{vertical-align:middle;min-width:0;width:auto;max-width:none}.report-jobs-table.ds-ppt-jobs-table th:nth-child(1),.report-jobs-table.ds-ppt-jobs-table td:nth-child(1){width:3.5rem;min-width:3.5rem}.report-jobs-table.ds-ppt-jobs-table th:nth-child(2),.report-jobs-table.ds-ppt-jobs-table td:nth-child(2){min-width:135px}.report-jobs-table.ds-ppt-jobs-table th:nth-child(3),.report-jobs-table.ds-ppt-jobs-table td:nth-child(3){width:9.5rem;min-width:9.5rem;white-space:pre-line}.report-jobs-table.ds-ppt-jobs-table th:nth-child(4),.report-jobs-table.ds-ppt-jobs-table td:nth-child(4){width:5.2rem;min-width:5.2rem;text-align:center}.report-jobs-table.ds-ppt-jobs-table th:nth-child(5),.report-jobs-table.ds-ppt-jobs-table td:nth-child(5){min-width:230px;width:24%;white-space:normal}.report-jobs-table.ds-ppt-jobs-table th:nth-child(6),.report-jobs-table.ds-ppt-jobs-table td:nth-child(6){min-width:150px;white-space:normal}.report-jobs-table.ds-ppt-jobs-table th:nth-child(7),.report-jobs-table.ds-ppt-jobs-table td:nth-child(7){width:5.7rem;min-width:5.7rem;text-align:center}.report-jobs-table.ds-ppt-jobs-table th:nth-child(8),.report-jobs-table.ds-ppt-jobs-table td:nth-child(8),.report-jobs-table.ds-ppt-jobs-table th:nth-child(9),.report-jobs-table.ds-ppt-jobs-table td:nth-child(9){width:5.5rem;min-width:5.5rem;text-align:center}.report-jobs-table.ds-ppt-jobs-table th:nth-child(11),.report-jobs-table.ds-ppt-jobs-table td:nth-child(11){min-width:135px}.report-jobs-table.ds-ppt-jobs-table th:last-child,.report-jobs-table.ds-ppt-jobs-table td:last-child{min-width:190px;width:190px}.ds-ppt-jobs-table .report-job-charts-button{border-color:#5f3b91;background:linear-gradient(145deg,#6d46a8,#9870d0);color:#fff;box-shadow:0 8px 18px rgba(95,69,142,.18)}.ds-ppt-jobs-table .report-job-charts-button:hover:not(:disabled){border-color:#45246f;background:linear-gradient(145deg,#4f2d82,#7549b0);color:#fff}.ds-ppt-job-filters{position:relative;display:inline-grid;place-items:center;width:2rem;height:2rem;border:1px solid #b58a2f;border-radius:999px;background:linear-gradient(145deg,#fff2b6,#ecd166);cursor:help;box-shadow:0 5px 12px rgba(145,105,17,.16)}.ds-ppt-job-filters::before{content:'';width:1rem;height:1rem;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236f5110' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h18l-7 8v5l-4 2v-7L3 5Z'/%3E%3C/svg%3E")}.ds-ppt-job-filters::after{content:attr(data-tooltip);position:absolute;z-index:20;left:50%;bottom:calc(100% + .55rem);width:max-content;max-width:min(34rem,70vw);max-height:16rem;overflow:auto;padding:.6rem .75rem;border-radius:.55rem;background:#34264a;color:#fff;font-size:.75rem;font-weight:600;line-height:1.4;text-align:left;white-space:pre-line;box-shadow:0 10px 26px rgba(27,17,44,.28);opacity:0;pointer-events:none;transform:translate(-50%,.25rem);transition:opacity .12s ease,transform .12s ease}.ds-ppt-job-filters:hover::after,.ds-ppt-job-filters:focus-visible::after{opacity:1;transform:translate(-50%,0)}.ds-ppt-job-filters:focus-visible{outline:3px solid #7751b9;outline-offset:2px}.ds-ppt-jobs-table progress{width:62px;accent-color:#6d46a8}
 @media(max-width:760px){.report-jobs-table.ds-ppt-jobs-table{min-width:0}.ds-ppt-jobs-table td:nth-child(1)::before{content:'ID'}.ds-ppt-jobs-table td:nth-child(2)::before{content:'Generated by'}.ds-ppt-jobs-table td:nth-child(3)::before{content:'Date'}.ds-ppt-jobs-table td:nth-child(4)::before{content:'NR Mode'}.ds-ppt-jobs-table td:nth-child(5)::before{content:'Dashboard'}.ds-ppt-jobs-table td:nth-child(6)::before{content:'Scope'}.ds-ppt-jobs-table td:nth-child(7)::before{content:'Filters'}.ds-ppt-jobs-table td:nth-child(8)::before{content:'Slides'}.ds-ppt-jobs-table td:nth-child(9)::before{content:'Charts'}.ds-ppt-jobs-table td:nth-child(10)::before{content:'Status'}.ds-ppt-jobs-table td:nth-child(11)::before{content:'Progress'}.ds-ppt-jobs-table td:nth-child(12)::before{content:'Actions'}}
 .ds-dashboard-status-loading-data{border-color:#d3aa45;background:#fff1c9;color:#77570a}.ds-dashboard-status-data-queued,.ds-dashboard-status-charts-queued{border-color:#aaa3b2;background:#f0edf2;color:#655e6c}
 .ds-ppt-jobs-table .report-job-dashboard-button{position:relative;display:inline-grid;place-items:center;width:2rem;height:2rem;min-height:0;padding:0!important;border:1px solid #0d6a53;border-radius:999px;background:linear-gradient(145deg,#137a61,#22ad83);color:#fff;font-size:0!important;line-height:1;box-shadow:0 8px 18px rgba(18,130,98,.2)}.ds-ppt-jobs-table .report-job-dashboard-button::before{content:'';display:block;width:1.08rem;height:1.08rem;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9h18'/%3E%3Cpath d='M8 2v4M16 2v4'/%3E%3Cpath d='m8 14 2.2 2.2L16.5 11'/%3E%3C/svg%3E")}.ds-ppt-jobs-table .report-job-dashboard-button:hover:not(:disabled){border-color:#095740;background:linear-gradient(145deg,#0e694f,#168967);box-shadow:0 10px 22px rgba(9,87,64,.3);transform:translateY(-1px)}
-.e2e-dashboards .ds-dashboard-action.ds-dashboard-open,
-.e2e-dashboards .ds-dashboard-action.ds-dashboard-close,
-.e2e-dashboards .ds-dashboard-action.ds-dashboard-view,
-.e2e-dashboards .ds-dashboard-action.ds-dashboard-ppt{
+.ppt-dashboards .ds-dashboard-action.ds-dashboard-open,
+.ppt-dashboards .ds-dashboard-action.ds-dashboard-close,
+.ppt-dashboards .ds-dashboard-action.ds-dashboard-view,
+.ppt-dashboards .ds-dashboard-action.ds-dashboard-ppt{
   display:inline-flex;align-items:center;justify-content:center;gap:.4rem;
   width:fit-content!important;min-width:max-content!important;height:1.8rem;min-height:1.8rem;
   padding:.2rem .62rem!important;border-radius:999px!important;font-size:.82rem!important;
   font-weight:800;line-height:1;white-space:nowrap;
 }
-.e2e-dashboards .ds-dashboard-action.ds-dashboard-open::after,
-.e2e-dashboards .ds-dashboard-action.ds-dashboard-close::after,
-.e2e-dashboards .ds-dashboard-action.ds-dashboard-view::after,
-.e2e-dashboards .ds-dashboard-action.ds-dashboard-ppt::after{
+.ppt-dashboards .ds-dashboard-action.ds-dashboard-open::after,
+.ppt-dashboards .ds-dashboard-action.ds-dashboard-close::after,
+.ppt-dashboards .ds-dashboard-action.ds-dashboard-view::after,
+.ppt-dashboards .ds-dashboard-action.ds-dashboard-ppt::after{
   order:-1;flex:0 0 1rem;width:1rem;height:1rem;
 }
 .ds-dashboard-action-label{display:inline}.ds-dashboard-action-label>span+span::before{content:' '}
 @media(max-width:760px){
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-open,
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-close,
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-view,
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-ppt{
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-open,
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-close,
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-view,
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-ppt{
     width:fit-content!important;min-width:max-content!important;justify-self:start;
   }
 }
 .ds-filter-columns{display:grid;grid-template-columns:minmax(390px,2fr) minmax(0,3fr);gap:26px}
 .ds-source-filters{display:grid;gap:14px;border-right:1px solid var(--ds-border);padding-right:24px;align-content:start}.ds-filter-column-title{margin:0;color:#4c3277;font-size:1.08rem;font-weight:850}.ds-universe-dataset-panel{padding:16px}.ds-source-list{display:grid;gap:14px}.ds-source-filter,.ds-date-picker-label{font-size:.9rem;font-weight:800;color:#55436d}.ds-source-list>*+*{margin-top:4px}
-.ds-date-picker{position:relative;display:grid;gap:6px}.ds-date-picker-control{position:relative;min-width:0}.ds-date-picker-control>input{box-sizing:border-box;width:100%;padding-right:5.5rem;cursor:pointer}.e2e-dashboards .ds-date-auto-action{position:absolute;right:.32rem;top:50%;width:auto;min-width:0;min-height:0;padding:.22rem .42rem;transform:translateY(-50%);border:1px solid #cfc4df;border-radius:.38rem;background:#f3eff8;color:#665775;font-size:.64rem;font-weight:750;line-height:1.05;box-shadow:none}.e2e-dashboards .ds-date-auto-action:hover,.e2e-dashboards .ds-date-auto-action[aria-pressed="true"]{border-color:#a992c9;background:#e9e0f5;color:#4f376f}.ds-date-picker.ds-date-picker-unsaved .ds-date-picker-control>input,.ds-facet.ds-filter-unsaved .multiselect-trigger,.ds-source-filter.ds-filter-unsaved select,.ds-source-filter.ds-filter-unsaved .multiselect-trigger{border-color:#cb8a18!important;background:#fff5d7!important;color:#765007!important;box-shadow:0 0 0 2px #e7bd6538}.ds-date-picker-menu{position:absolute;z-index:110;top:calc(100% + 5px);left:0;width:250px;padding:10px;border:1px solid #b89dde;border-radius:12px;background:#fff;box-shadow:0 20px 46px #43256d33}.ds-date-picker-menu[hidden]{display:none!important}.ds-date-picker-header{display:grid;grid-template-columns:2rem 1fr 2rem;align-items:center;gap:5px;text-align:center;color:#493363}.e2e-dashboards .ds-date-picker-nav,.e2e-dashboards .ds-date-picker-day{display:grid;place-items:center;min-width:0;min-height:0;padding:0;border-radius:7px;background:#f3effa;color:#493363}.e2e-dashboards .ds-date-picker-nav{width:2rem;height:2rem;font-size:1.35rem}.ds-date-picker-weekdays,.ds-date-picker-days{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:8px;text-align:center}.ds-date-picker-weekdays{color:#796a8f;font-size:.66rem;font-weight:800}.e2e-dashboards .ds-date-picker-day{height:1.95rem;font-size:.78rem}.e2e-dashboards .ds-date-picker-day:hover:not(:disabled),.e2e-dashboards .ds-date-picker-day.is-selected{background:#7751b9;color:#fff}.ds-date-picker-blank{height:1.95rem}
-.ds-date-picker.is-event-time-filtering-disabled .ds-date-picker-control>input{background:#edf0f1;color:#667177}.e2e-dashboards .ds-date-picker.is-event-time-filtering-disabled .ds-date-auto-action{background:#e2e6e8;color:#788187;border-color:#cbd2d5}
+.ds-date-picker{position:relative;display:grid;gap:6px}.ds-date-picker-control{position:relative;min-width:0}.ds-date-picker-control>input{box-sizing:border-box;width:100%;padding-right:5.5rem;cursor:pointer}.ppt-dashboards .ds-date-auto-action{position:absolute;right:.32rem;top:50%;width:auto;min-width:0;min-height:0;padding:.22rem .42rem;transform:translateY(-50%);border:1px solid #cfc4df;border-radius:.38rem;background:#f3eff8;color:#665775;font-size:.64rem;font-weight:750;line-height:1.05;box-shadow:none}.ppt-dashboards .ds-date-auto-action:hover,.ppt-dashboards .ds-date-auto-action[aria-pressed="true"]{border-color:#a992c9;background:#e9e0f5;color:#4f376f}.ds-date-picker.ds-date-picker-unsaved .ds-date-picker-control>input,.ds-facet.ds-filter-unsaved .multiselect-trigger,.ds-source-filter.ds-filter-unsaved select,.ds-source-filter.ds-filter-unsaved .multiselect-trigger{border-color:#cb8a18!important;background:#fff5d7!important;color:#765007!important;box-shadow:0 0 0 2px #e7bd6538}.ds-date-picker-menu{position:absolute;z-index:110;top:calc(100% + 5px);left:0;width:250px;padding:10px;border:1px solid #b89dde;border-radius:12px;background:#fff;box-shadow:0 20px 46px #43256d33}.ds-date-picker-menu[hidden]{display:none!important}.ds-date-picker-header{display:grid;grid-template-columns:2rem 1fr 2rem;align-items:center;gap:5px;text-align:center;color:#493363}.ppt-dashboards .ds-date-picker-nav,.ppt-dashboards .ds-date-picker-day{display:grid;place-items:center;min-width:0;min-height:0;padding:0;border-radius:7px;background:#f3effa;color:#493363}.ppt-dashboards .ds-date-picker-nav{width:2rem;height:2rem;font-size:1.35rem}.ds-date-picker-weekdays,.ds-date-picker-days{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:8px;text-align:center}.ds-date-picker-weekdays{color:#796a8f;font-size:.66rem;font-weight:800}.ppt-dashboards .ds-date-picker-day{height:1.95rem;font-size:.78rem}.ppt-dashboards .ds-date-picker-day:hover:not(:disabled),.ppt-dashboards .ds-date-picker-day.is-selected{background:#7751b9;color:#fff}.ds-date-picker-blank{height:1.95rem}
+.ds-date-picker.is-event-time-filtering-disabled .ds-date-picker-control>input{background:#edf0f1;color:#667177}.ppt-dashboards .ds-date-picker.is-event-time-filtering-disabled .ds-date-auto-action{background:#e2e6e8;color:#788187;border-color:#cbd2d5}
 .ds-filter-groups{display:grid;grid-template-rows:max-content max-content minmax(0,1fr);gap:14px}.ds-filter-group{display:grid;gap:14px;padding:16px;border:1px solid var(--ds-border);border-radius:14px;background:#faf8fd}.ds-filter-group-head{display:grid;gap:2px}.ds-filter-group-head p,.ds-filter-group-head h3{margin:0}.ds-filter-group-head h3{color:#4c3277}.ds-default-filter-panel{border-color:#afd1e8;background:#f1f8fd}.ds-default-filter-panel .ds-filter-group-head .eyebrow{color:#34749d}.ds-default-filter-panel .ds-filter-group-head h3,.ds-default-filter-panel .ds-facet{color:#275f86}.ds-default-filter-panel .multiselect-trigger{border-color:#b8d5e9;background:#fbfdff;color:#275f86}.ds-default-filter-panel .multiselect-trigger-label{color:#275f86}.ds-default-filter-panel .multiselect-action{background:#dcedf8;color:#275f86}.ds-default-filter-panel .multiselect-option:hover{background:#e8f4fb}.ds-default-filter-panel .multiselect-option input{accent-color:#397fa9}.ds-default-filter-panel .ds-facet-remove{border-color:#6099bd;background:#518bb1}.ds-default-filter-panel .ds-facet-remove:hover{background:#34749d;border-color:#285d81}.ds-additional-filter-panel{border-color:#e7b8cd;background:#fff5f9}.ds-additional-filter-panel .ds-filter-group-head .eyebrow{color:#aa4c78}.ds-additional-filter-panel .ds-filter-group-head h3,.ds-additional-filter-panel .ds-facet{color:#843b61}.ds-no-additional-filters{grid-column:1/-1;margin:0;color:#9a6b81}
-.ds-column-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.ds-universe-actions,.ds-filter-actions{justify-content:flex-start}.e2e-dashboards .ds-universe-action{display:inline-flex;align-items:center;gap:.45rem;background:linear-gradient(135deg,#456d9c,#6594c5);border-color:#365d89;color:#fff;box-shadow:0 6px 14px rgba(50,91,135,.2);white-space:nowrap}.e2e-dashboards .ds-universe-action:hover:not(:disabled){background:linear-gradient(135deg,#355b86,#4c7dac);border-color:#294d75}.e2e-dashboards .ds-universe-action svg{width:1.05rem;height:1.05rem;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.ds-dashboard-primary-actions{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:16px}.e2e-dashboards .ds-dashboard-primary-actions .ds-generate-ppt-action{margin-left:0}.ds-dashboard-row-status{display:block;margin-top:8px}
+.ds-column-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.ds-universe-actions,.ds-filter-actions{justify-content:flex-start}.ppt-dashboards .ds-universe-action{display:inline-flex;align-items:center;gap:.45rem;background:linear-gradient(135deg,#456d9c,#6594c5);border-color:#365d89;color:#fff;box-shadow:0 6px 14px rgba(50,91,135,.2);white-space:nowrap}.ppt-dashboards .ds-universe-action:hover:not(:disabled){background:linear-gradient(135deg,#355b86,#4c7dac);border-color:#294d75}.ppt-dashboards .ds-universe-action svg{width:1.05rem;height:1.05rem;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.ds-dashboard-primary-actions{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:16px}.ppt-dashboards .ds-dashboard-primary-actions .ds-generate-ppt-action{margin-left:0}.ds-dashboard-row-status{display:block;margin-top:8px}
 .ds-facets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
-.ds-facet{display:grid;gap:6px;min-width:0;color:#5b427e;font-weight:650}.ds-facet-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.e2e-dashboards .ds-facet-remove{display:grid;place-items:center;flex:0 0 auto;width:1.25rem;min-width:1.25rem;height:1.25rem;min-height:1.25rem;padding:0!important;border:1px solid #8d6ab5;border-radius:999px!important;background:#7351a1;color:#fff;font-size:1rem!important;font-weight:700;line-height:1}.e2e-dashboards .ds-facet-remove:hover{background:#9a3149;border-color:#7d2439}
-.e2e-dashboards .multiselect-trigger{border-color:var(--ds-border);background:#fbf9fe;color:#402b66;box-shadow:none}.e2e-dashboards .multiselect-trigger-label{color:#402b66}.e2e-dashboards .multiselect-menu{z-index:90;border-color:#b89dde;background:#fff;box-shadow:0 20px 46px #43256d33}.e2e-dashboards .multiselect-action{background:#ede5f8;color:#58358a}.e2e-dashboards .multiselect-option input{accent-color:var(--ds-color)}
-.e2e-dashboards .ds-default-filter-panel .multiselect-trigger{border-color:#9fc8e3;background:linear-gradient(135deg,#fff,#e7f4fc);color:#275f86;box-shadow:0 5px 14px #3d83ad16}.e2e-dashboards .ds-default-filter-panel .multiselect-trigger:hover:not(:disabled),.e2e-dashboards .ds-default-filter-panel .multiselect-trigger:focus-visible{border-color:#639fc4;background:linear-gradient(135deg,#fafdff,#d5ebf8);color:#1e5278;box-shadow:0 0 0 3px #5595bd24}.e2e-dashboards .ds-default-filter-panel .multiselect-trigger-label{color:inherit}.e2e-dashboards .ds-default-filter-panel .multiselect-trigger-chip{border-color:#397fa9}.e2e-dashboards .ds-default-filter-panel .multiselect-menu{border-color:#a5cde6;background:#fafdff;box-shadow:0 18px 38px #357ba72b}.e2e-dashboards .ds-default-filter-panel .multiselect-search{border-color:#b8d8ea;background:#fff;color:#275f86}.e2e-dashboards .ds-default-filter-panel .multiselect-action{background:#dceef9;color:#275f86}.e2e-dashboards .ds-default-filter-panel .multiselect-action:hover:not(:disabled){background:#c9e4f5;color:#1e5278}.e2e-dashboards .ds-default-filter-panel .multiselect-option{color:#275f86}.e2e-dashboards .ds-default-filter-panel .multiselect-option span{color:#275f86}.e2e-dashboards .ds-default-filter-panel .multiselect-option:hover{background:#e4f2fb;color:#1e5278}.e2e-dashboards .ds-default-filter-panel .multiselect-option input{accent-color:#397fa9}
-.e2e-dashboards .ds-additional-filter-panel .multiselect-trigger{border-color:#dda7c0;background:#fffafd;color:#7c3158}.e2e-dashboards .ds-additional-filter-panel .multiselect-trigger-label{color:#7c3158}.e2e-dashboards .ds-additional-filter-panel .multiselect-trigger-chip{border-color:#b75283}.e2e-dashboards .ds-additional-filter-panel .multiselect-menu{border-color:#dfa9c2;background:#fff8fb;box-shadow:0 20px 46px #923d6530}.e2e-dashboards .ds-additional-filter-panel .multiselect-action{background:#f8dce8;color:#903e67}.e2e-dashboards .ds-additional-filter-panel .multiselect-option:hover{background:#fbe7f0}.e2e-dashboards .ds-additional-filter-panel .multiselect-option input{accent-color:#b94f81}.e2e-dashboards .ds-additional-filter-panel .ds-facet-remove{border-color:#bd638d;background:#c76d98}.e2e-dashboards .ds-additional-filter-panel .ds-facet-remove:hover{background:#9a3149;border-color:#7d2439}
+.ds-facet{display:grid;gap:6px;min-width:0;color:#5b427e;font-weight:650}.ds-facet-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.ppt-dashboards .ds-facet-remove{display:grid;place-items:center;flex:0 0 auto;width:1.25rem;min-width:1.25rem;height:1.25rem;min-height:1.25rem;padding:0!important;border:1px solid #8d6ab5;border-radius:999px!important;background:#7351a1;color:#fff;font-size:1rem!important;font-weight:700;line-height:1}.ppt-dashboards .ds-facet-remove:hover{background:#9a3149;border-color:#7d2439}
+.ppt-dashboards .multiselect-trigger{border-color:var(--ds-border);background:#fbf9fe;color:#402b66;box-shadow:none}.ppt-dashboards .multiselect-trigger-label{color:#402b66}.ppt-dashboards .multiselect-menu{z-index:90;border-color:#b89dde;background:#fff;box-shadow:0 20px 46px #43256d33}.ppt-dashboards .multiselect-action{background:#ede5f8;color:#58358a}.ppt-dashboards .multiselect-option input{accent-color:var(--ds-color)}
+.ppt-dashboards .ds-default-filter-panel .multiselect-trigger{border-color:#9fc8e3;background:linear-gradient(135deg,#fff,#e7f4fc);color:#275f86;box-shadow:0 5px 14px #3d83ad16}.ppt-dashboards .ds-default-filter-panel .multiselect-trigger:hover:not(:disabled),.ppt-dashboards .ds-default-filter-panel .multiselect-trigger:focus-visible{border-color:#639fc4;background:linear-gradient(135deg,#fafdff,#d5ebf8);color:#1e5278;box-shadow:0 0 0 3px #5595bd24}.ppt-dashboards .ds-default-filter-panel .multiselect-trigger-label{color:inherit}.ppt-dashboards .ds-default-filter-panel .multiselect-trigger-chip{border-color:#397fa9}.ppt-dashboards .ds-default-filter-panel .multiselect-menu{border-color:#a5cde6;background:#fafdff;box-shadow:0 18px 38px #357ba72b}.ppt-dashboards .ds-default-filter-panel .multiselect-search{border-color:#b8d8ea;background:#fff;color:#275f86}.ppt-dashboards .ds-default-filter-panel .multiselect-action{background:#dceef9;color:#275f86}.ppt-dashboards .ds-default-filter-panel .multiselect-action:hover:not(:disabled){background:#c9e4f5;color:#1e5278}.ppt-dashboards .ds-default-filter-panel .multiselect-option{color:#275f86}.ppt-dashboards .ds-default-filter-panel .multiselect-option span{color:#275f86}.ppt-dashboards .ds-default-filter-panel .multiselect-option:hover{background:#e4f2fb;color:#1e5278}.ppt-dashboards .ds-default-filter-panel .multiselect-option input{accent-color:#397fa9}
+.ppt-dashboards .ds-additional-filter-panel .multiselect-trigger{border-color:#dda7c0;background:#fffafd;color:#7c3158}.ppt-dashboards .ds-additional-filter-panel .multiselect-trigger-label{color:#7c3158}.ppt-dashboards .ds-additional-filter-panel .multiselect-trigger-chip{border-color:#b75283}.ppt-dashboards .ds-additional-filter-panel .multiselect-menu{border-color:#dfa9c2;background:#fff8fb;box-shadow:0 20px 46px #923d6530}.ppt-dashboards .ds-additional-filter-panel .multiselect-action{background:#f8dce8;color:#903e67}.ppt-dashboards .ds-additional-filter-panel .multiselect-option:hover{background:#fbe7f0}.ppt-dashboards .ds-additional-filter-panel .multiselect-option input{accent-color:#b94f81}.ppt-dashboards .ds-additional-filter-panel .ds-facet-remove{border-color:#bd638d;background:#c76d98}.ppt-dashboards .ds-additional-filter-panel .ds-facet-remove:hover{background:#9a3149;border-color:#7d2439}
 .ds-custom{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end;gap:14px;margin-top:4px;padding-top:14px;border-top:1px solid #edcad9}.ds-custom label{grid-column:span 1;min-width:0}.ds-custom .multiselect-shell{width:100%;margin-top:6px}.ds-custom button{justify-self:start}
 .ds-preparing{display:flex;align-items:center;gap:14px;margin:18px 0 2px;padding:14px 18px;border:1px solid #e3c36d;border-radius:14px;background:linear-gradient(100deg,#fff5c9,#fffbee);box-shadow:0 8px 22px #8d6b1824;color:#72520d}.ds-preparing[hidden]{display:none!important}.ds-preparing strong,.ds-preparing span{display:block}.ds-preparing strong{font-size:1rem;font-weight:800}.ds-preparing>div:last-child>span{margin-top:2px;color:#836720;font-size:.9rem}.ds-preparing-progress{position:relative;height:.5rem;margin-top:.7rem;overflow:hidden;border-radius:999px;background:#eadb9d}.ds-preparing-progress>span{display:block;width:35%;height:100%;margin:0!important;border-radius:inherit;background:linear-gradient(90deg,#b58016,#e8bf43);transition:width .3s ease}.ds-preparing-progress-label{margin-top:.34rem!important;color:#765811!important;font-size:.76rem!important;font-weight:800;line-height:1.15}.ds-preparing-progress.is-indeterminate>span{animation:ds-preparing-progress-slide 1.25s ease-in-out infinite}.ds-preparing .ds-preparing-rows{margin-top:7px;font-size:.78rem;font-weight:750;letter-spacing:.01em}.ds-preparing-spinner{width:1.45rem;height:1.45rem;flex:0 0 auto;border:3px solid #f0dc98;border-top-color:#b58016;border-radius:50%;animation:ds-preparing-spin .8s linear infinite}.ds-preparing[data-state="ready"]{border-color:#83c69a;background:linear-gradient(100deg,#dcf6e4,#f3fff6);box-shadow:0 8px 22px #397a4b22;color:#24633a}.ds-preparing[data-state="ready"]>div:last-child>span{color:#39764c}.ds-preparing[data-state="ready"] .ds-preparing-spinner{border:0;animation:none}.ds-preparing[data-state="ready"] .ds-preparing-spinner::after{content:'✓';display:grid;place-items:center;width:1.45rem;height:1.45rem;border-radius:50%;background:#42a660;color:white;font-size:1rem;font-weight:900}@keyframes ds-preparing-spin{to{transform:rotate(360deg)}}@keyframes ds-preparing-progress-slide{from{transform:translateX(-110%)}to{transform:translateX(275%)}}
-.ds-preparing-status-actions{display:flex;flex:0 0 auto;flex-direction:column;align-items:center;gap:.42rem}.ds-preparing-status-actions [hidden]{display:none!important}.e2e-dashboards .ds-preparing-refresh{display:grid;place-items:center;width:1.45rem;min-width:1.45rem;height:1.45rem;min-height:1.45rem;padding:0!important;border:0;border-radius:50%;background:#2e8b4b;color:transparent;font-size:0;cursor:pointer}.ds-preparing-refresh::after{content:'';width:.88rem;height:.88rem;background:center/contain no-repeat;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.64 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z'/%3E%3C/svg%3E")}.e2e-dashboards .ds-preparing-refresh:hover:not(:disabled){background:#246f3c}.e2e-dashboards .ds-preparing-refresh:disabled{cursor:default;opacity:.42}
-.e2e-dashboards .ds-preparing-out-of-sync{display:grid;place-items:center;width:1.45rem;min-width:1.45rem;height:1.45rem;min-height:1.45rem;padding:0!important;border:0;border-radius:50%;background:#e08a1d;color:transparent;font-size:0;cursor:default}.ds-preparing-out-of-sync::after{content:'!';color:#fff;font-size:1rem;font-weight:900;line-height:1}
+.ds-preparing-status-actions{display:flex;flex:0 0 auto;flex-direction:column;align-items:center;gap:.42rem}.ds-preparing-status-actions [hidden]{display:none!important}.ppt-dashboards .ds-preparing-refresh{display:grid;place-items:center;width:1.45rem;min-width:1.45rem;height:1.45rem;min-height:1.45rem;padding:0!important;border:0;border-radius:50%;background:#2e8b4b;color:transparent;font-size:0;cursor:pointer}.ds-preparing-refresh::after{content:'';width:.88rem;height:.88rem;background:center/contain no-repeat;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.64 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z'/%3E%3C/svg%3E")}.ppt-dashboards .ds-preparing-refresh:hover:not(:disabled){background:#246f3c}.ppt-dashboards .ds-preparing-refresh:disabled{cursor:default;opacity:.42}
+.ppt-dashboards .ds-preparing-out-of-sync{display:grid;place-items:center;width:1.45rem;min-width:1.45rem;height:1.45rem;min-height:1.45rem;padding:0!important;border:0;border-radius:50%;background:#e08a1d;color:transparent;font-size:0;cursor:default}.ds-preparing-out-of-sync::after{content:'!';color:#fff;font-size:1rem;font-weight:900;line-height:1}
 .ds-overlay{z-index:1200;background:rgba(24,18,42,.62);backdrop-filter:blur(5px)}#ds-viewer.ds-overlay{z-index:8800}
 .ds-overlay[hidden]{display:none!important}.ds-secondary{z-index:1210}
 .ds-viewer-panel{position:relative;width:96vw!important;max-width:none!important;height:96vh;max-height:none;display:flex;flex-direction:column;padding:28px!important;overflow:hidden;background:#faf9fd}
@@ -91,23 +91,23 @@
 .ds-viewer-context-scope{color:#276c42}
 .ds-viewer-context-region{color:#0b7184}
 .ds-viewer-context-city{color:#9b3e70}
-.ds-slide-sidebar{display:flex;flex:0 0 auto;min-width:0;min-height:0;flex-direction:column}.ds-viewer-navigation-footer{display:flex;flex:0 0 auto;justify-content:center;padding:.55rem 0}.ds-slide-navigation{display:flex;align-items:center;justify-content:center;gap:4px}.e2e-dashboards .ds-slide-nav-button{display:grid;place-items:center;width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:1rem!important;font-weight:800;line-height:1}
+.ds-slide-sidebar{display:flex;flex:0 0 auto;min-width:0;min-height:0;flex-direction:column}.ds-viewer-navigation-footer{display:flex;flex:0 0 auto;justify-content:center;padding:.55rem 0}.ds-slide-navigation{display:flex;align-items:center;justify-content:center;gap:4px}.ppt-dashboards .ds-slide-nav-button{display:grid;place-items:center;width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:1rem!important;font-weight:800;line-height:1}
 .ds-slide-content{position:relative;display:flex;flex:1 1 auto;min-height:0;margin-top:22px;flex-direction:column}.ds-viewer-preparing{position:absolute;z-index:12;top:50%;left:50%;width:min(560px,86%);margin:0;transform:translate(-50%,-50%)}.ds-chart-stage{position:relative;flex:1 1 auto;width:100%;min-height:280px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
 .ds-chart-stage.ds-positioned{display:block}.ds-positioned .ds-chart{position:absolute}
 .ds-chart{min-width:0;min-height:0;border:2px solid #e9e3f1;border-radius:9px;overflow:hidden;background:white;box-shadow:0 2px 12px #40307812;position:relative;display:flex;align-items:center;justify-content:center}
 .ds-chart img,.ds-chart canvas{width:100%;height:100%;object-fit:fill}.ds-chart canvas{display:block;cursor:crosshair}.ds-chart canvas.ds-chart-selection-blocked,#ds-chart-expanded-canvas.ds-chart-selection-blocked{cursor:default!important}.ds-chart canvas.ds-chart-zoomed,#ds-chart-expanded-canvas.ds-chart-zoomed{cursor:grab!important;touch-action:none}.ds-chart canvas.is-panning,#ds-chart-expanded-canvas.is-panning{cursor:grabbing!important}.ds-chart-zoom-selection{position:absolute;z-index:4;box-sizing:border-box;border:2px solid #7751b9;background:rgba(119,81,185,.16);box-shadow:0 0 0 1px rgba(255,255,255,.8) inset;pointer-events:none}.ds-chart-zoom-selection[hidden]{display:none!important}.ds-chart-message{position:absolute;inset:0;z-index:3;display:grid;place-items:center;padding:24px;text-align:center;color:#55436d;background:linear-gradient(135deg,#fbf9feee,#f2edf9ee);font-size:clamp(.8rem,1.05vw,1rem);font-weight:750;pointer-events:none}.ds-chart-message[hidden]{display:none!important}
-.ds-chart-controls{position:absolute;top:9px;right:9px;z-index:5;display:flex;align-items:center;gap:6px;opacity:0;visibility:hidden;transform:translateY(-5px);transition:opacity .18s ease,transform .18s ease,visibility 0s linear .18s;pointer-events:none}.ds-chart-controls button:not(:disabled){cursor:pointer!important}.ds-chart.ds-hover .ds-chart-controls,.ds-chart:focus-within .ds-chart-controls{opacity:1;visibility:visible;transform:translateY(0);transition-delay:0s;pointer-events:auto}.ds-chart-zoom{position:static;display:flex;align-items:center;gap:3px;padding:4px;border:1px solid #cfc1df;border-radius:999px;background:rgba(255,255,255,.94);box-shadow:0 5px 16px #35204f2e;backdrop-filter:blur(5px)}.ds-chart-zoom[hidden]{display:none!important}.e2e-dashboards .ds-chart-zoom-button,.e2e-dashboards .ds-chart-data,.e2e-dashboards .ds-chart-expand{display:grid;place-items:center;width:1.65rem;min-width:1.65rem;height:1.65rem;min-height:1.65rem;padding:0!important;border-radius:999px!important;font-size:1rem!important;font-weight:800;line-height:1}.e2e-dashboards .ds-chart-zoom-button:disabled{opacity:.35}.ds-chart-zoom-level{min-width:2.9rem;color:#493363;font-size:.68rem;font-weight:800;text-align:center}.e2e-dashboards .ds-chart-zoom-reset{font-size:.88rem!important}.e2e-dashboards .ds-chart-data,.e2e-dashboards .ds-chart-expand{font-size:0!important}.e2e-dashboards .ds-chart-data::after,.e2e-dashboards .ds-chart-expand::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat}.e2e-dashboards .ds-chart-data::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 10h18M9 4v16'/%3E%3C/svg%3E")}.e2e-dashboards .ds-chart-expand::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5'/%3E%3C/svg%3E")}
-.ds-chart-expanded-overlay{position:absolute;inset:0;z-index:30;background:rgba(31,19,48,.5);backdrop-filter:blur(3px)}.ds-chart-expanded-overlay[hidden]{display:none!important}.ds-chart-expanded-dialog{position:absolute;inset:5%;display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-width:0;min-height:0;overflow:hidden;border:1px solid #cbb9df;border-radius:16px;background:#fff;box-shadow:0 24px 70px rgba(25,12,42,.4)}.ds-chart-expanded-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px;border-bottom:1px solid #dfd4ea;background:#f7f2fc}.ds-chart-expanded-titlebar{display:flex;flex:1 1 auto;align-items:center;min-width:0;gap:10px}.ds-chart-expanded-titlebar>div:first-child{flex:1 1 auto;min-width:0}.ds-chart-expanded-titlebar .eyebrow{margin:0 0 2px;color:#7150a0;font-size:.64rem}.ds-chart-expanded-header h2{min-width:0;margin:0;color:#4c3277;font-size:clamp(1rem,1.5vw,1.35rem)}.ds-chart-expanded-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px}.ds-chart-expanded-navigation{display:flex;align-items:center;gap:4px;flex:0 0 auto}.ds-chart-expanded-footer{display:flex;justify-content:center;padding:9px 16px;border-top:1px solid #dfd4ea;background:#f7f2fc}.e2e-dashboards .ds-chart-expanded-header button{width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:1.25rem!important;line-height:1}.e2e-dashboards .ds-chart-expanded-header .ds-chart-expanded-text-action{width:auto;min-width:0;height:2rem;min-height:2rem;padding:0 .65rem!important;border-radius:9px!important;font-size:.72rem!important;font-weight:750;line-height:1.1}.ds-chart-expanded-canvas{position:relative;min-width:0;min-height:0;overflow:hidden;background:#fff}.ds-chart-expanded-canvas canvas{display:block;width:100%;height:100%;cursor:crosshair}.ds-chart-expanded-canvas .ds-chart-controls{top:14px;right:14px}.ds-chart-expanded-canvas.ds-hover .ds-chart-controls,.ds-chart-expanded-canvas:focus-within .ds-chart-controls{opacity:1;visibility:visible;transform:translateY(0);transition-delay:0s;pointer-events:auto}
+.ds-chart-controls{position:absolute;top:9px;right:9px;z-index:5;display:flex;align-items:center;gap:6px;opacity:0;visibility:hidden;transform:translateY(-5px);transition:opacity .18s ease,transform .18s ease,visibility 0s linear .18s;pointer-events:none}.ds-chart-controls button:not(:disabled){cursor:pointer!important}.ds-chart.ds-hover .ds-chart-controls,.ds-chart:focus-within .ds-chart-controls{opacity:1;visibility:visible;transform:translateY(0);transition-delay:0s;pointer-events:auto}.ds-chart-zoom{position:static;display:flex;align-items:center;gap:3px;padding:4px;border:1px solid #cfc1df;border-radius:999px;background:rgba(255,255,255,.94);box-shadow:0 5px 16px #35204f2e;backdrop-filter:blur(5px)}.ds-chart-zoom[hidden]{display:none!important}.ppt-dashboards .ds-chart-zoom-button,.ppt-dashboards .ds-chart-data,.ppt-dashboards .ds-chart-expand{display:grid;place-items:center;width:1.65rem;min-width:1.65rem;height:1.65rem;min-height:1.65rem;padding:0!important;border-radius:999px!important;font-size:1rem!important;font-weight:800;line-height:1}.ppt-dashboards .ds-chart-zoom-button:disabled{opacity:.35}.ds-chart-zoom-level{min-width:2.9rem;color:#493363;font-size:.68rem;font-weight:800;text-align:center}.ppt-dashboards .ds-chart-zoom-reset{font-size:.88rem!important}.ppt-dashboards .ds-chart-data,.ppt-dashboards .ds-chart-expand{font-size:0!important}.ppt-dashboards .ds-chart-data::after,.ppt-dashboards .ds-chart-expand::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat}.ppt-dashboards .ds-chart-data::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 10h18M9 4v16'/%3E%3C/svg%3E")}.ppt-dashboards .ds-chart-expand::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5'/%3E%3C/svg%3E")}
+.ds-chart-expanded-overlay{position:absolute;inset:0;z-index:30;background:rgba(31,19,48,.5);backdrop-filter:blur(3px)}.ds-chart-expanded-overlay[hidden]{display:none!important}.ds-chart-expanded-dialog{position:absolute;inset:5%;display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-width:0;min-height:0;overflow:hidden;border:1px solid #cbb9df;border-radius:16px;background:#fff;box-shadow:0 24px 70px rgba(25,12,42,.4)}.ds-chart-expanded-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px;border-bottom:1px solid #dfd4ea;background:#f7f2fc}.ds-chart-expanded-titlebar{display:flex;flex:1 1 auto;align-items:center;min-width:0;gap:10px}.ds-chart-expanded-titlebar>div:first-child{flex:1 1 auto;min-width:0}.ds-chart-expanded-titlebar .eyebrow{margin:0 0 2px;color:#7150a0;font-size:.64rem}.ds-chart-expanded-header h2{min-width:0;margin:0;color:#4c3277;font-size:clamp(1rem,1.5vw,1.35rem)}.ds-chart-expanded-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px}.ds-chart-expanded-navigation{display:flex;align-items:center;gap:4px;flex:0 0 auto}.ds-chart-expanded-footer{display:flex;justify-content:center;padding:9px 16px;border-top:1px solid #dfd4ea;background:#f7f2fc}.ppt-dashboards .ds-chart-expanded-header button{width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:1.25rem!important;line-height:1}.ppt-dashboards .ds-chart-expanded-header .ds-chart-expanded-text-action{width:auto;min-width:0;height:2rem;min-height:2rem;padding:0 .65rem!important;border-radius:9px!important;font-size:.72rem!important;font-weight:750;line-height:1.1}.ds-chart-expanded-canvas{position:relative;min-width:0;min-height:0;overflow:hidden;background:#fff}.ds-chart-expanded-canvas canvas{display:block;width:100%;height:100%;cursor:crosshair}.ds-chart-expanded-canvas .ds-chart-controls{top:14px;right:14px}.ds-chart-expanded-canvas.ds-hover .ds-chart-controls,.ds-chart-expanded-canvas:focus-within .ds-chart-controls{opacity:1;visibility:visible;transform:translateY(0);transition-delay:0s;pointer-events:auto}
 .ds-chart-stage.ds-structural-stage{display:block;overflow:hidden;border:1px solid #cfc2df;border-radius:16px;background:#4b3676;box-shadow:0 12px 34px #2c174438}.ds-structural-slide{box-sizing:border-box;position:relative;width:100%;height:100%;overflow:hidden;display:flex;align-items:center;padding:8% 7%;color:#fff;background:linear-gradient(128deg,#36275f 0%,#7253a8 57%,#a28ac8 100%)}.ds-structural-slide::before{content:'';position:absolute;left:7%;bottom:14%;width:14%;height:7px;border-radius:999px;background:#ebc6dc}.ds-structural-transition{background:linear-gradient(135deg,#4a3477 0%,#8464b2 56%,#bf9fc4 100%)}.ds-structural-content{position:relative;z-index:1;max-width:78%}.ds-structural-title{margin:0;color:#fff;font-size:clamp(3.75rem,8vw,8.5rem);font-weight:850;letter-spacing:-.035em;line-height:.98;text-wrap:balance}.ds-structural-subtitle{max-width:100%;margin:clamp(1rem,2.2vw,2rem) 0 0;color:#f4eefa;font-size:clamp(1.7rem,2.5vw,2.75rem);font-weight:600;letter-spacing:.01em;line-height:1.2;text-wrap:balance}.ds-structural-slide.ds-structural-title .ds-structural-content{max-width:88%}.ds-structural-slide.ds-structural-title .ds-structural-title{font-size:clamp(3.75rem,7.75vw,8.25rem)}.ds-structural-slide p.ds-structural-subtitle{color:#fad22d}.ds-structural-geography{display:grid;gap:0;margin-top:clamp(.75rem,5cqh,2.5rem);font-size:clamp(.85rem,min(1.55cqw,4.2cqh),1.7rem);font-weight:800;letter-spacing:.01em;line-height:1.2}.ds-structural-slide .ds-structural-geography p{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ds-structural-slide .ds-structural-geography p.ds-structural-geography-scope{color:#8bf0a6}.ds-structural-slide .ds-structural-geography p.ds-structural-geography-region{color:#52ddf0}.ds-structural-slide .ds-structural-geography p.ds-structural-geography-city{color:#ffa6cb}.ds-structural-slide.ds-structural-transition .ds-structural-title{font-size:clamp(3.4rem,6.9vw,7.25rem)}.ds-structural-brand{position:absolute;z-index:2;top:5%;right:4%;display:flex;align-items:center;gap:13px;color:#fff;font-size:clamp(.9rem,1.35vw,1.35rem);font-weight:800;letter-spacing:-.015em;text-shadow:0 2px 8px #24133f55}.ds-structural-brand img{width:clamp(42px,4.7vw,72px);height:clamp(42px,4.7vw,72px);object-fit:contain;filter:drop-shadow(0 4px 9px #2515404d)}
 .ds-chart-stage.ds-slide-transition{animation:ds-slide-fade var(--ds-presentation-transition-duration,1s) ease both}.ds-chart-stage.ds-slide-transition[data-presentation-effect="slide"]{animation-name:ds-slide-enter}.ds-chart-stage.ds-slide-transition[data-presentation-effect="slide-left"]{animation-name:ds-slide-enter-left}.ds-chart-stage.ds-slide-transition[data-presentation-effect="zoom"]{animation-name:ds-slide-zoom}.ds-chart-stage.ds-slide-transition[data-presentation-effect="rise"]{animation-name:ds-slide-rise}.ds-chart-stage.ds-slide-transition[data-presentation-effect="blur"]{animation-name:ds-slide-blur}.ds-chart-stage.ds-slide-transition[data-presentation-effect="rotate"]{animation-name:ds-slide-rotate}.ds-chart-stage.ds-slide-transition[data-presentation-effect="flip"]{animation-name:ds-slide-flip;transform-origin:center}.ds-chart-stage.ds-slide-transition[data-presentation-effect="bounce"]{animation-name:ds-slide-bounce}.ds-chart-stage.ds-slide-transition[data-presentation-effect="wipe"]{animation-name:ds-slide-wipe}.ds-chart-stage.ds-slide-transition[data-presentation-effect="mosaic"]{animation-name:ds-slide-mosaic;animation-timing-function:steps(7,end)}.ds-chart-stage.ds-slide-transition[data-presentation-effect="curtain"]{animation-name:ds-slide-curtain}.ds-chart-stage.ds-slide-transition[data-presentation-effect="blinds"]{animation-name:ds-slide-blinds;animation-timing-function:steps(9,end)}.ds-chart-stage.ds-slide-transition[data-presentation-effect="none"]{animation:none}@keyframes ds-slide-fade{from{opacity:.15}to{opacity:1}}@keyframes ds-slide-enter{from{opacity:.15;transform:translateX(3%)}to{opacity:1;transform:translateX(0)}}@keyframes ds-slide-enter-left{from{opacity:.15;transform:translateX(-3%)}to{opacity:1;transform:translateX(0)}}@keyframes ds-slide-zoom{from{opacity:.15;transform:scale(.94)}to{opacity:1;transform:scale(1)}}@keyframes ds-slide-rise{from{opacity:.15;transform:translateY(4%)}to{opacity:1;transform:translateY(0)}}@keyframes ds-slide-blur{from{opacity:.15;filter:blur(12px)}to{opacity:1;filter:blur(0)}}@keyframes ds-slide-rotate{from{opacity:.1;transform:scale(.94) rotate(-2deg)}to{opacity:1;transform:scale(1) rotate(0)}}@keyframes ds-slide-flip{from{opacity:.1;transform:perspective(1400px) rotateY(-18deg) scale(.96)}to{opacity:1;transform:perspective(1400px) rotateY(0) scale(1)}}@keyframes ds-slide-bounce{0%{opacity:.1;transform:scale(.9)}65%{opacity:1;transform:scale(1.025)}100%{opacity:1;transform:scale(1)}}@keyframes ds-slide-wipe{from{clip-path:inset(0 100% 0 0);opacity:.45}to{clip-path:inset(0 0 0 0);opacity:1}}@keyframes ds-slide-mosaic{0%{opacity:.1;filter:blur(22px) saturate(.35);transform:scale(1.08)}55%{opacity:.75;filter:blur(8px) saturate(.7);transform:scale(1.025)}100%{opacity:1;filter:blur(0) saturate(1);transform:scale(1)}}@keyframes ds-slide-curtain{from{clip-path:inset(0 50% 0 50%);opacity:.6}to{clip-path:inset(0 0 0 0);opacity:1}}@keyframes ds-slide-blinds{from{clip-path:inset(0 0 100% 0);filter:brightness(1.35)}to{clip-path:inset(0 0 0 0);filter:brightness(1)}}
 .ds-chart-brand{position:absolute;z-index:2;top:2.5rem;right:12px;display:flex;align-items:center;gap:9px;color:#4c3277;font-size:clamp(.8rem,1.1vw,1.05rem);font-weight:850;letter-spacing:-.01em;text-shadow:none;transform:translateY(-50%);pointer-events:none}.ds-chart>.ds-chart-brand>img{position:static!important;inset:auto!important;width:2.65rem!important;height:2.65rem!important;object-fit:contain!important;filter:none}.ds-chart>img,.ds-chart>canvas{z-index:1}.ds-chart>.ds-chart-controls{top:calc(2.9rem + 9px)}
-.ds-slide-comments{flex:0 0 auto;min-width:0;min-height:0;margin:0;border:1px solid var(--ds-border);border-radius:14px;background:#fff;overflow:hidden}.ds-slide-comments>summary{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:.7rem 1rem;color:#4c3277;font-weight:850;cursor:pointer;list-style:none}.ds-slide-comments>summary::-webkit-details-marker{display:none}.ds-slide-comments>summary::after{content:'⌄';flex:0 0 auto;font-size:1rem;line-height:1;transition:transform .16s ease}.ds-slide-comments[open]>summary::after{transform:rotate(180deg)}.ds-slide-comments-body{display:grid;grid-template-rows:minmax(0,1fr) auto;gap:10px;min-height:0;max-height:clamp(180px,23vh,285px);padding:0 18px 16px}.ds-slide-content.ds-comments-right{flex-direction:row;gap:16px}.ds-slide-content.ds-comments-right .ds-chart-stage{height:100%;min-width:0}.ds-slide-content.ds-comments-right .ds-slide-sidebar{flex:0 0 clamp(260px,22vw,360px);height:100%}.ds-slide-content.ds-comments-right .ds-slide-comments[open]{display:flex;min-height:0;flex:1 1 auto;flex-direction:column}.ds-slide-content.ds-comments-right .ds-slide-comments-body{flex:1 1 auto;max-height:none}.ds-comments-list{display:grid;align-content:start;gap:7px;min-height:0;margin:0;padding:0 4px 0 0;overflow-y:auto;list-style:none}.ds-comment{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border-radius:8px;background:#f7f3fc;color:#403154}.ds-comment::before{content:'•';color:#7751b9;font-size:1.35rem;line-height:.8}.ds-comment input{flex:1;min-width:0;padding:3px 5px;border:1px solid transparent;border-radius:5px;background:transparent;color:inherit}.ds-comment input:hover,.ds-comment input:focus{border-color:#b79adf;background:#fff;outline:0}.e2e-dashboards .ds-comment-remove{width:1.45rem;min-width:1.45rem;height:1.45rem;min-height:1.45rem;padding:0!important;border-radius:999px!important;font-size:.95rem!important;line-height:1}.ds-comments-empty{margin:0;color:#756887;font-size:.9rem}.ds-comment-entry{display:flex;gap:9px}.ds-comment-entry input{flex:1;min-width:0}.ds-presentation-dialog{width:min(680px,94vw)!important}.ds-presentation-dialog h2{margin:0}.ds-presentation-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px}.ds-presentation-options label{display:grid;gap:6px}
+.ds-slide-comments{flex:0 0 auto;min-width:0;min-height:0;margin:0;border:1px solid var(--ds-border);border-radius:14px;background:#fff;overflow:hidden}.ds-slide-comments>summary{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:.7rem 1rem;color:#4c3277;font-weight:850;cursor:pointer;list-style:none}.ds-slide-comments>summary::-webkit-details-marker{display:none}.ds-slide-comments>summary::after{content:'⌄';flex:0 0 auto;font-size:1rem;line-height:1;transition:transform .16s ease}.ds-slide-comments[open]>summary::after{transform:rotate(180deg)}.ds-slide-comments-body{display:grid;grid-template-rows:minmax(0,1fr) auto;gap:10px;min-height:0;max-height:clamp(180px,23vh,285px);padding:0 18px 16px}.ds-slide-content.ds-comments-right{flex-direction:row;gap:16px}.ds-slide-content.ds-comments-right .ds-chart-stage{height:100%;min-width:0}.ds-slide-content.ds-comments-right .ds-slide-sidebar{flex:0 0 clamp(260px,22vw,360px);height:100%}.ds-slide-content.ds-comments-right .ds-slide-comments[open]{display:flex;min-height:0;flex:1 1 auto;flex-direction:column}.ds-slide-content.ds-comments-right .ds-slide-comments-body{flex:1 1 auto;max-height:none}.ds-comments-list{display:grid;align-content:start;gap:7px;min-height:0;margin:0;padding:0 4px 0 0;overflow-y:auto;list-style:none}.ds-comment{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border-radius:8px;background:#f7f3fc;color:#403154}.ds-comment::before{content:'•';color:#7751b9;font-size:1.35rem;line-height:.8}.ds-comment input{flex:1;min-width:0;padding:3px 5px;border:1px solid transparent;border-radius:5px;background:transparent;color:inherit}.ds-comment input:hover,.ds-comment input:focus{border-color:#b79adf;background:#fff;outline:0}.ppt-dashboards .ds-comment-remove{width:1.45rem;min-width:1.45rem;height:1.45rem;min-height:1.45rem;padding:0!important;border-radius:999px!important;font-size:.95rem!important;line-height:1}.ds-comments-empty{margin:0;color:#756887;font-size:.9rem}.ds-comment-entry{display:flex;gap:9px}.ds-comment-entry input{flex:1;min-width:0}.ds-presentation-dialog{width:min(680px,94vw)!important}.ds-presentation-dialog h2{margin:0}.ds-presentation-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px}.ds-presentation-options label{display:grid;gap:6px}
 .ds-live-chart-tooltip{position:absolute;z-index:4;display:grid;gap:2px;max-width:min(260px,80%);padding:9px 11px;border:1px solid #c9b8dd;border-radius:9px;background:rgba(255,255,255,.97);box-shadow:0 8px 24px #2d174d38;color:#34495a;font-size:.75rem;line-height:1.25;pointer-events:none}.ds-live-chart-tooltip[hidden]{display:none}.ds-live-chart-tooltip strong{color:#352747;font-size:.79rem}.ds-live-chart-tooltip span{display:block}
 .ds-filter-dialog,.ds-data-dialog{width:86vw!important;max-width:none!important;max-height:92vh;overflow:auto;padding:24px!important}#ds-filter-float .ds-filter-help{margin:26px 0 5px}#ds-filter-float .ds-data-panel>summary{pointer-events:none;cursor:default}#ds-filter-float .ds-data-panel .collapse-chip{display:none}.ds-dialog-close{float:right;margin-bottom:12px}.ds-filter-dialog .panel{box-shadow:none;margin:0;border:0}
-.ds-data-dialog table{font-size:12px;white-space:nowrap}.ds-data-dialog thead,.ds-data-dialog th{background:var(--ds-soft);color:#584079}.ds-data-dialog .table-wrap{max-height:65vh;overflow:auto;margin-top:16px}.ds-data-page-navigation{display:flex;align-items:center;gap:4px}.e2e-dashboards .ds-data-page-nav{display:grid;place-items:center;width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:1rem!important;font-weight:800;line-height:1}.ds-data-page-navigation span{min-width:150px;text-align:center}.e2e-dashboards .ds-data-download{display:grid;place-items:center;width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:0!important}.e2e-dashboards .ds-data-download::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v12'/%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3Cpath d='M5 21h14'/%3E%3C/svg%3E")}.ds-data-dialog .gcid-column{background:#fff6bf;color:#554000;font-weight:700}.ds-data-dialog .vendor-column{background:#ddf6e7;color:#225b35;font-weight:700}.ds-data-dialog .derived-cdr-column{background:#e6f7ed;color:#315b41;font-weight:700}.ds-data-dialog .main-cdr-column{background:#ccebd9;color:#205738;font-weight:700}.ds-data-dialog thead th.derived-cdr-column{background:#9fd8b7;color:#153f29}.ds-data-dialog thead th.main-cdr-column{background:#78bd94;color:#103b24}.ds-data-dialog .auto-calculated-preview-column{background:#eee5fb;color:#61368f;font-weight:700}
-.ds-data-filter-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:1.4rem;margin-top:.7rem}#ds-data-filter-count{color:#5d3b86;font-size:.82rem;font-weight:800}.ds-data-column-filter-menu{z-index:3200}.ds-data-dialog table.excel-filter-table thead th{padding:0}.e2e-dashboards .ds-data-dialog .excel-column-filter-trigger,.e2e-dashboards .ds-data-dialog .excel-column-filter-trigger:hover:not(:disabled),.e2e-dashboards .ds-data-dialog .excel-column-filter-trigger:focus-visible{border:0;border-radius:0;background:transparent;color:inherit;box-shadow:none}.e2e-dashboards .ds-data-dialog th.has-excel-column-filter .excel-column-filter-trigger{background:rgba(108,70,168,.16);box-shadow:inset 0 -3px #6d46a8}.e2e-dashboards .ds-data-column-filter-menu button{min-height:0}.ds-data-dialog thead th{position:sticky;top:0;z-index:2}.e2e-dashboards .ds-data-close-bottom{margin-left:auto;border-color:#a9b1b8;background:#e9edf0;color:#43515d;box-shadow:none}.e2e-dashboards .ds-data-close-bottom:hover{border-color:#87939d;background:#dce2e6;color:#2f3d48}
-.e2e-dashboards .ds-data-clear-filters{margin-left:auto;border-color:#d295ad;background:#f8dce7;color:#7d294b;box-shadow:none}.e2e-dashboards .ds-data-clear-filters:hover:not(:disabled){border-color:#bd6d91;background:#f2c8d8;color:#651d3c}.e2e-dashboards .ds-data-dialog th.has-excel-column-filter .excel-column-filter-trigger{background:#fce4ee;color:#692846;box-shadow:inset 0 -3px #d8799e}.e2e-dashboards .ds-data-dialog th.has-excel-column-filter .excel-column-filter-icon{border-color:#b85e83;background:#d8799e;color:#fff}
-.e2e-dashboards .ds-chart-data{width:2rem;min-width:2rem;height:2rem;min-height:2rem}
+.ds-data-dialog table{font-size:12px;white-space:nowrap}.ds-data-dialog thead,.ds-data-dialog th{background:var(--ds-soft);color:#584079}.ds-data-dialog .table-wrap{max-height:65vh;overflow:auto;margin-top:16px}.ds-data-page-navigation{display:flex;align-items:center;gap:4px}.ppt-dashboards .ds-data-page-nav{display:grid;place-items:center;width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:1rem!important;font-weight:800;line-height:1}.ds-data-page-navigation span{min-width:150px;text-align:center}.ppt-dashboards .ds-data-download{display:grid;place-items:center;width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:0!important}.ppt-dashboards .ds-data-download::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v12'/%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3Cpath d='M5 21h14'/%3E%3C/svg%3E")}.ds-data-dialog .gcid-column{background:#fff6bf;color:#554000;font-weight:700}.ds-data-dialog .vendor-column{background:#ddf6e7;color:#225b35;font-weight:700}.ds-data-dialog .derived-cdr-column{background:#e6f7ed;color:#315b41;font-weight:700}.ds-data-dialog .main-cdr-column{background:#ccebd9;color:#205738;font-weight:700}.ds-data-dialog thead th.derived-cdr-column{background:#9fd8b7;color:#153f29}.ds-data-dialog thead th.main-cdr-column{background:#78bd94;color:#103b24}.ds-data-dialog .auto-calculated-preview-column{background:#eee5fb;color:#61368f;font-weight:700}
+.ds-data-filter-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:1.4rem;margin-top:.7rem}#ds-data-filter-count{color:#5d3b86;font-size:.82rem;font-weight:800}.ds-data-column-filter-menu{z-index:3200}.ds-data-dialog table.excel-filter-table thead th{padding:0}.ppt-dashboards .ds-data-dialog .excel-column-filter-trigger,.ppt-dashboards .ds-data-dialog .excel-column-filter-trigger:hover:not(:disabled),.ppt-dashboards .ds-data-dialog .excel-column-filter-trigger:focus-visible{border:0;border-radius:0;background:transparent;color:inherit;box-shadow:none}.ppt-dashboards .ds-data-dialog th.has-excel-column-filter .excel-column-filter-trigger{background:rgba(108,70,168,.16);box-shadow:inset 0 -3px #6d46a8}.ppt-dashboards .ds-data-column-filter-menu button{min-height:0}.ds-data-dialog thead th{position:sticky;top:0;z-index:2}.ppt-dashboards .ds-data-close-bottom{margin-left:auto;border-color:#a9b1b8;background:#e9edf0;color:#43515d;box-shadow:none}.ppt-dashboards .ds-data-close-bottom:hover{border-color:#87939d;background:#dce2e6;color:#2f3d48}
+.ppt-dashboards .ds-data-clear-filters{margin-left:auto;border-color:#d295ad;background:#f8dce7;color:#7d294b;box-shadow:none}.ppt-dashboards .ds-data-clear-filters:hover:not(:disabled){border-color:#bd6d91;background:#f2c8d8;color:#651d3c}.ppt-dashboards .ds-data-dialog th.has-excel-column-filter .excel-column-filter-trigger{background:#fce4ee;color:#692846;box-shadow:inset 0 -3px #d8799e}.ppt-dashboards .ds-data-dialog th.has-excel-column-filter .excel-column-filter-icon{border-color:#b85e83;background:#d8799e;color:#fff}
+.ppt-dashboards .ds-chart-data{width:2rem;min-width:2rem;height:2rem;min-height:2rem}
 #ds-editor-frame{width:100%;height:78vh;border:0}.ds-empty{display:grid;place-content:center;text-align:center;height:100%;width:100%;color:#67547f}
 @media(max-width:900px){.ds-management,.ds-filter-columns{grid-template-columns:1fr}.ds-source-filters{border:0;padding:0;grid-template-columns:1fr}.ds-source-list{grid-template-columns:repeat(2,minmax(0,1fr))}.ds-facets,.ds-custom{grid-template-columns:repeat(2,minmax(0,1fr))}.ds-viewer-panel{width:96vw!important;height:96vh;overflow:auto}.ds-slide-content.ds-comments-right{flex-direction:column}.ds-slide-content.ds-comments-right .ds-chart-stage{height:auto}.ds-slide-content.ds-comments-right .ds-slide-comments{flex-basis:220px;height:auto;margin-top:16px}.ds-chart-stage.ds-positioned{display:grid;aspect-ratio:auto}.ds-positioned .ds-chart{position:relative!important;left:auto!important;top:auto!important;width:auto!important;height:300px!important}.ds-structural-content,.ds-structural-slide.ds-structural-title .ds-structural-content{max-width:92%}.ds-structural-title{font-size:clamp(2.25rem,8vw,4rem)}.ds-structural-subtitle{font-size:clamp(1rem,3.7vw,1.65rem)}.ds-structural-slide.ds-structural-title .ds-structural-title{font-size:clamp(2.5rem,8.5vw,4.5rem)}.ds-structural-slide.ds-structural-transition .ds-structural-title{font-size:clamp(2.3rem,7.25vw,3.9rem)}.ds-slide-comments{flex-basis:220px}.ds-structural-brand{gap:7px;font-size:clamp(.62rem,2.2vw,.95rem)}.ds-comment-entry,.ds-presentation-options{grid-template-columns:1fr;display:grid}.ds-filter-dialog,.ds-data-dialog{width:96vw!important}.ds-dashboards-table th,.ds-dashboards-table td{padding:9px}.ds-dashboard-actions{gap:4px}}
 @media(max-width:900px){.ds-filter-actions{justify-content:flex-start}}
@@ -124,13 +124,13 @@
 /* A positioned Canvas must use every pixel of its template chart frame. */
 .ds-positioned .ds-chart{box-sizing:border-box}
 .ds-chart img,.ds-chart canvas{position:absolute;inset:0;box-sizing:border-box;width:100%;height:100%;object-fit:fill}
-.e2e-dashboards .ds-chart-zoom-reset{font-size:0!important}
-.e2e-dashboards .ds-chart-zoom-reset svg{width:1rem;height:1rem;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.e2e-dashboards .ds-chart-zoom-reset text{fill:currentColor;stroke:none}
+.ppt-dashboards .ds-chart-zoom-reset{font-size:0!important}
+.ppt-dashboards .ds-chart-zoom-reset svg{width:1rem;height:1rem;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.ppt-dashboards .ds-chart-zoom-reset text{fill:currentColor;stroke:none}
 
 /* Dashboard PPT filters open in a readable floating panel instead of a clipped table tooltip. */
-.e2e-dashboards .ds-ppt-job-filters { cursor: pointer; padding: 0; border-color: #b58a2f; background: linear-gradient(145deg, #fff2b6, #ecd166); color: #6f5110; box-shadow: 0 5px 12px rgba(145, 105, 17, .16); }
-.e2e-dashboards .ds-ppt-job-filters:hover:not(:disabled) { border-color: #947022; background: linear-gradient(145deg, #ffeb92, #dfbd45); color: #533b09; }
-.e2e-dashboards .ds-ppt-job-filters::after { content: none !important; display: none !important; }
+.ppt-dashboards .ds-ppt-job-filters { cursor: pointer; padding: 0; border-color: #b58a2f; background: linear-gradient(145deg, #fff2b6, #ecd166); color: #6f5110; box-shadow: 0 5px 12px rgba(145, 105, 17, .16); }
+.ppt-dashboards .ds-ppt-job-filters:hover:not(:disabled) { border-color: #947022; background: linear-gradient(145deg, #ffeb92, #dfbd45); color: #533b09; }
+.ppt-dashboards .ds-ppt-job-filters::after { content: none !important; display: none !important; }
 .ds-ppt-job-filter-content,
 .ds-ppt-filter-dialog-content { display: grid; gap: .45rem; }
 .ds-ppt-job-filter-group,
@@ -176,14 +176,14 @@
 .ds-ppt-charts-panel #ds-ppt-charts-date { border-color: #27698d !important; background: #347ea7 !important; color: #fff !important; }
 .ds-ppt-charts-panel #ds-ppt-charts-scope { border-color: #28715e !important; background: #368a73 !important; color: #fff !important; }
 .ds-ppt-chart-filters { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-.e2e-dashboards .ds-ppt-charts-filters { align-self: end; width: auto; min-width: 8.5rem; height: 2.55rem; min-height: 2.55rem; margin-left: auto; padding: .3rem 1rem; border-color: #b58a2f; border-radius: 999px; background: #d7a921; color: #fff; font: inherit; font-size: .82rem; font-weight: 800; line-height: 1.2; cursor: pointer; box-shadow: none; }
-.e2e-dashboards .ds-ppt-charts-filters:hover { border-color: #947022; background: #bd8e13; }
-.e2e-dashboards .ds-ppt-charts-filters:focus-visible { outline: 3px solid #7751b9; outline-offset: 2px; }
-.e2e-dashboards .ds-generate-ppt-action{margin-left:auto;background:linear-gradient(135deg,#b44720,#e47736);border-color:#963817;box-shadow:0 7px 16px rgba(164,65,27,.26)}
-.e2e-dashboards .ds-view-dashboard-action{margin-left:0}
-.e2e-dashboards .ds-generate-ppt-action:hover:not(:disabled){background:linear-gradient(135deg,#913515,#c65d25);border-color:#7b2b10}
-.e2e-dashboards .ds-ppt-charts-filters{display:inline-flex;align-items:center;justify-content:center;gap:.48rem;font-size:.96rem}
-.e2e-dashboards .ds-ppt-charts-filters::before{content:'';width:1rem;height:1rem;flex:0 0 1rem;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h18l-7 8v5l-4 2v-7L3 5Z'/%3E%3C/svg%3E")}
+.ppt-dashboards .ds-ppt-charts-filters { align-self: end; width: auto; min-width: 8.5rem; height: 2.55rem; min-height: 2.55rem; margin-left: auto; padding: .3rem 1rem; border-color: #b58a2f; border-radius: 999px; background: #d7a921; color: #fff; font: inherit; font-size: .82rem; font-weight: 800; line-height: 1.2; cursor: pointer; box-shadow: none; }
+.ppt-dashboards .ds-ppt-charts-filters:hover { border-color: #947022; background: #bd8e13; }
+.ppt-dashboards .ds-ppt-charts-filters:focus-visible { outline: 3px solid #7751b9; outline-offset: 2px; }
+.ppt-dashboards .ds-generate-ppt-action{margin-left:auto;background:linear-gradient(135deg,#b44720,#e47736);border-color:#963817;box-shadow:0 7px 16px rgba(164,65,27,.26)}
+.ppt-dashboards .ds-view-dashboard-action{margin-left:0}
+.ppt-dashboards .ds-generate-ppt-action:hover:not(:disabled){background:linear-gradient(135deg,#913515,#c65d25);border-color:#7b2b10}
+.ppt-dashboards .ds-ppt-charts-filters{display:inline-flex;align-items:center;justify-content:center;gap:.48rem;font-size:.96rem}
+.ppt-dashboards .ds-ppt-charts-filters::before{content:'';width:1rem;height:1rem;flex:0 0 1rem;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h18l-7 8v5l-4 2v-7L3 5Z'/%3E%3C/svg%3E")}
 .ds-ppt-chart-job-picker { margin-top: .35rem; }
 .ds-ppt-chart-job-picker > summary { flex-wrap: wrap; row-gap: .15rem; }
 .ds-ppt-chart-job-picker > summary::after { top: 50%; transform: translateY(-50%); }
@@ -196,11 +196,11 @@
 .ds-ppt-chart-job-picker .ds-ppt-chart-job-region { color: #0b7184; }
 .ds-ppt-chart-job-picker .ds-ppt-chart-job-city { color: #9b3e70; }
 .ds-ppt-chart-job-picker .ds-ppt-chart-job-separator { display: inline-block; margin: 0 .45rem; color: #79529f; font-weight: 900; }
-.e2e-dashboards .ds-ppt-chart-job-option { border: 1px solid transparent; background: #f8f3fc; color: #49345f; line-height: 1.45; white-space: normal; }
-.e2e-dashboards .ds-ppt-chart-job-option:nth-child(even) { background: #f0e7f8; }
-.e2e-dashboards .ds-ppt-chart-job-option[aria-selected="true"] { border-color: #9e7ac3; background: #e5d7f2; }
-.e2e-dashboards .ds-ppt-chart-job-option:hover,.e2e-dashboards .ds-ppt-chart-job-option:focus-visible { border-color: #603782; background: #75469a; color: #fff; outline: none; }
-.e2e-dashboards .ds-ppt-chart-job-option:hover *, .e2e-dashboards .ds-ppt-chart-job-option:focus-visible * { color: #fff !important; }
+.ppt-dashboards .ds-ppt-chart-job-option { border: 1px solid transparent; background: #f8f3fc; color: #49345f; line-height: 1.45; white-space: normal; }
+.ppt-dashboards .ds-ppt-chart-job-option:nth-child(even) { background: #f0e7f8; }
+.ppt-dashboards .ds-ppt-chart-job-option[aria-selected="true"] { border-color: #9e7ac3; background: #e5d7f2; }
+.ppt-dashboards .ds-ppt-chart-job-option:hover,.ppt-dashboards .ds-ppt-chart-job-option:focus-visible { border-color: #603782; background: #75469a; color: #fff; outline: none; }
+.ppt-dashboards .ds-ppt-chart-job-option:hover *, .ppt-dashboards .ds-ppt-chart-job-option:focus-visible * { color: #fff !important; }
 @media(max-width:760px) { .ds-ppt-chart-filters { grid-template-columns: 1fr; } }
 /* One expanded Canvas viewer is shared by live Dashboard charts and PPT Job charts. */
 .ds-chart-expanded-overlay.ds-overlay { position: fixed; z-index: 9000; inset: 0; }
@@ -246,19 +246,19 @@
   pointer-events: none;
 }
 .ds-ppt-filter-tooltip[hidden] { display: none; }
-.ds-multivendor-dialog{box-sizing:border-box;width:min(58rem,94vw);max-height:88vh;overflow:auto;padding:1.2rem 1.35rem}.ds-multivendor-dialog .section-head{margin:0 0 .65rem}.ds-ppt-universe-section{margin-top:.85rem;padding:.85rem;border:1px solid #ded3ed;border-radius:.8rem;background:#fcfaff}.ds-ppt-universe-section>h3{margin:0 0 .65rem;color:#4c3277;font-size:.95rem}.ds-ppt-export-scope{width:min(24rem,100%);margin:0}.ds-multivendor-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.85rem;margin-top:.7rem}.ds-multivendor-group{min-width:0;padding:.8rem;border:1px solid #d6c8ea;border-radius:.75rem;background:#faf8fd}.ds-multivendor-group h3{margin:0 0 .55rem;color:#4c3277;font-size:.88rem}.ds-multivendor-options{display:grid;gap:.38rem;max-height:15rem;overflow:auto}.ds-multivendor-option{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:.45rem;padding:.35rem;border-radius:.4rem;color:#49395d;font-size:.78rem}.ds-multivendor-option:has(input:checked){background:#eee6f8}.ds-multivendor-option input{margin-top:.15rem}.ds-multivendor-option span{overflow-wrap:anywhere}.ds-ppt-date-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.85rem}.ds-ppt-date-choice{display:grid;gap:.5rem}.ds-ppt-date-choice>label:first-child{display:grid;gap:.35rem;color:#55436d;font-size:.82rem;font-weight:800}.ds-ppt-automatic-date{display:flex;align-items:center;gap:.45rem;color:#625474;font-size:.76rem;font-weight:700}.ds-ppt-automatic-date input{margin:0;accent-color:var(--ds-color)}.ds-ppt-date-status{min-height:1.1em;margin:.45rem 0 0;color:#a33850}.ds-multivendor-actions{display:flex;justify-content:flex-end;gap:.65rem;flex-wrap:wrap;margin-top:1rem}.e2e-dashboards #ds-ppt-dataset-cancel{background:#6d7780;border-color:#59636b}.e2e-dashboards #ds-ppt-dataset-cancel:hover{background:#59636b;border-color:#485159}.e2e-dashboards #ds-ppt-dataset-confirm{background:#6d46a8;border-color:#5f3b91}.e2e-dashboards #ds-ppt-dataset-confirm:hover{background:#56358b;border-color:#492d77}@media(max-width:760px){.ds-multivendor-choices,.ds-ppt-date-choices{grid-template-columns:1fr}}
-.ds-multivendor-dialog{display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden}.ds-ppt-universe-body{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:.2rem;-webkit-overflow-scrolling:touch}.ds-ppt-date-choice input[type="date"]{box-sizing:border-box;width:100%;min-width:0}.e2e-dashboards :is(.ds-multivendor-option,.ds-ppt-automatic-date) input[type="checkbox"]{box-sizing:border-box;width:1rem;min-width:1rem;height:1rem;min-height:1rem!important;padding:0}
-@media(max-width:640px){.ds-multivendor-dialog{width:calc(100vw - .75rem);max-height:calc(100dvh - .75rem);padding:.72rem}.ds-multivendor-dialog .section-head{margin-bottom:.25rem}.ds-multivendor-dialog .section-head h2{font-size:1.05rem;line-height:1.15}.ds-ppt-universe-section{margin-top:.5rem;padding:.55rem}.ds-ppt-universe-section>h3{margin-bottom:.42rem;font-size:.84rem}.ds-ppt-universe-section>.form-note{margin:.2rem 0;font-size:.68rem}.ds-multivendor-choices{grid-template-columns:1fr;gap:.45rem;margin-top:.45rem}.ds-multivendor-group{padding:.5rem}.ds-multivendor-group h3{margin-bottom:.3rem;font-size:.78rem}.ds-multivendor-options{gap:.2rem;max-height:6.25rem}.ds-multivendor-option{gap:.35rem;padding:.24rem;font-size:.7rem;line-height:1.2}.ds-ppt-date-choices{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}.ds-ppt-date-choice{gap:.3rem}.ds-ppt-date-choice>label:first-child{gap:.25rem;font-size:.72rem}.ds-ppt-date-choice input[type="date"]{min-height:2.45rem;padding:.35rem;font-size:16px}.ds-ppt-automatic-date{align-items:flex-start;gap:.3rem;font-size:.66rem;line-height:1.15}.ds-ppt-date-status{margin:.25rem 0 0;font-size:.66rem}.ds-multivendor-actions{margin-top:.55rem;padding-top:.55rem;border-top:1px solid #ded3ed;background:#fff}.e2e-dashboards .ds-multivendor-actions button{min-height:2.35rem;padding:.42rem .68rem;font-size:.72rem}}
+.ds-multivendor-dialog{box-sizing:border-box;width:min(58rem,94vw);max-height:88vh;overflow:auto;padding:1.2rem 1.35rem}.ds-multivendor-dialog .section-head{margin:0 0 .65rem}.ds-ppt-universe-section{margin-top:.85rem;padding:.85rem;border:1px solid #ded3ed;border-radius:.8rem;background:#fcfaff}.ds-ppt-universe-section>h3{margin:0 0 .65rem;color:#4c3277;font-size:.95rem}.ds-ppt-export-scope{width:min(24rem,100%);margin:0}.ds-multivendor-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.85rem;margin-top:.7rem}.ds-multivendor-group{min-width:0;padding:.8rem;border:1px solid #d6c8ea;border-radius:.75rem;background:#faf8fd}.ds-multivendor-group h3{margin:0 0 .55rem;color:#4c3277;font-size:.88rem}.ds-multivendor-options{display:grid;gap:.38rem;max-height:15rem;overflow:auto}.ds-multivendor-option{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:.45rem;padding:.35rem;border-radius:.4rem;color:#49395d;font-size:.78rem}.ds-multivendor-option:has(input:checked){background:#eee6f8}.ds-multivendor-option input{margin-top:.15rem}.ds-multivendor-option span{overflow-wrap:anywhere}.ds-ppt-date-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.85rem}.ds-ppt-date-choice{display:grid;gap:.5rem}.ds-ppt-date-choice>label:first-child{display:grid;gap:.35rem;color:#55436d;font-size:.82rem;font-weight:800}.ds-ppt-automatic-date{display:flex;align-items:center;gap:.45rem;color:#625474;font-size:.76rem;font-weight:700}.ds-ppt-automatic-date input{margin:0;accent-color:var(--ds-color)}.ds-ppt-date-status{min-height:1.1em;margin:.45rem 0 0;color:#a33850}.ds-multivendor-actions{display:flex;justify-content:flex-end;gap:.65rem;flex-wrap:wrap;margin-top:1rem}.ppt-dashboards #ds-ppt-dataset-cancel{background:#6d7780;border-color:#59636b}.ppt-dashboards #ds-ppt-dataset-cancel:hover{background:#59636b;border-color:#485159}.ppt-dashboards #ds-ppt-dataset-confirm{background:#6d46a8;border-color:#5f3b91}.ppt-dashboards #ds-ppt-dataset-confirm:hover{background:#56358b;border-color:#492d77}@media(max-width:760px){.ds-multivendor-choices,.ds-ppt-date-choices{grid-template-columns:1fr}}
+.ds-multivendor-dialog{display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden}.ds-ppt-universe-body{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:.2rem;-webkit-overflow-scrolling:touch}.ds-ppt-date-choice input[type="date"]{box-sizing:border-box;width:100%;min-width:0}.ppt-dashboards :is(.ds-multivendor-option,.ds-ppt-automatic-date) input[type="checkbox"]{box-sizing:border-box;width:1rem;min-width:1rem;height:1rem;min-height:1rem!important;padding:0}
+@media(max-width:640px){.ds-multivendor-dialog{width:calc(100vw - .75rem);max-height:calc(100dvh - .75rem);padding:.72rem}.ds-multivendor-dialog .section-head{margin-bottom:.25rem}.ds-multivendor-dialog .section-head h2{font-size:1.05rem;line-height:1.15}.ds-ppt-universe-section{margin-top:.5rem;padding:.55rem}.ds-ppt-universe-section>h3{margin-bottom:.42rem;font-size:.84rem}.ds-ppt-universe-section>.form-note{margin:.2rem 0;font-size:.68rem}.ds-multivendor-choices{grid-template-columns:1fr;gap:.45rem;margin-top:.45rem}.ds-multivendor-group{padding:.5rem}.ds-multivendor-group h3{margin-bottom:.3rem;font-size:.78rem}.ds-multivendor-options{gap:.2rem;max-height:6.25rem}.ds-multivendor-option{gap:.35rem;padding:.24rem;font-size:.7rem;line-height:1.2}.ds-ppt-date-choices{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}.ds-ppt-date-choice{gap:.3rem}.ds-ppt-date-choice>label:first-child{gap:.25rem;font-size:.72rem}.ds-ppt-date-choice input[type="date"]{min-height:2.45rem;padding:.35rem;font-size:16px}.ds-ppt-automatic-date{align-items:flex-start;gap:.3rem;font-size:.66rem;line-height:1.15}.ds-ppt-date-status{margin:.25rem 0 0;font-size:.66rem}.ds-multivendor-actions{margin-top:.55rem;padding-top:.55rem;border-top:1px solid #ded3ed;background:#fff}.ppt-dashboards .ds-multivendor-actions button{min-height:2.35rem;padding:.42rem .68rem;font-size:.72rem}}
 
 /* Keep the four geography selectors paired in the PowerPoint export dialog. */
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr);align-content:start;gap:.8rem;overflow-x:auto;overflow-y:auto;padding-right:.2rem}.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group{box-sizing:border-box;display:grid;grid-template-columns:repeat(2,minmax(14rem,1fr));align-content:start;align-items:stretch;gap:.6rem;min-width:0;margin:0;padding:.8rem;border:1px solid #cdb8e6;border-radius:.9rem;background:#f6f1fc}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section{box-sizing:border-box;min-width:0;margin:0}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>#ds-ppt-scope-section,.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>#ds-ppt-cdr-section,.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>#ds-ppt-dates-section{grid-column:1/-1}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section[hidden]{display:none}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>:is(#ds-ppt-operator-section,#ds-ppt-vendor-section,#ds-ppt-region-section,#ds-ppt-city-section){display:flex;flex-direction:column}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>:is(#ds-ppt-operator-section,#ds-ppt-vendor-section,#ds-ppt-region-section,#ds-ppt-city-section)>:is(select[multiple],.multiselect-shell){margin-top:auto}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section[hidden]{display:none!important}
-@media(max-width:640px){.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body{gap:.55rem}.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group{grid-template-columns:repeat(2,minmax(12rem,1fr));gap:.45rem;padding:.55rem}.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section{padding:.55rem}}
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-universe-body{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr);align-content:start;gap:.8rem;overflow-x:auto;overflow-y:auto;padding-right:.2rem}.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group{box-sizing:border-box;display:grid;grid-template-columns:repeat(2,minmax(14rem,1fr));align-content:start;align-items:stretch;gap:.6rem;min-width:0;margin:0;padding:.8rem;border:1px solid #cdb8e6;border-radius:.9rem;background:#f6f1fc}
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section{box-sizing:border-box;min-width:0;margin:0}
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group>#ds-ppt-scope-section,.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group>#ds-ppt-cdr-section,.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group>#ds-ppt-dates-section{grid-column:1/-1}
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section[hidden]{display:none}
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group>:is(#ds-ppt-operator-section,#ds-ppt-vendor-section,#ds-ppt-region-section,#ds-ppt-city-section){display:flex;flex-direction:column}
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group>:is(#ds-ppt-operator-section,#ds-ppt-vendor-section,#ds-ppt-region-section,#ds-ppt-city-section)>:is(select[multiple],.multiselect-shell){margin-top:auto}
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section[hidden]{display:none!important}
+@media(max-width:640px){.ppt-dashboards .ds-multivendor-dialog .ds-ppt-universe-body{gap:.55rem}.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group{grid-template-columns:repeat(2,minmax(12rem,1fr));gap:.45rem;padding:.55rem}.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section{padding:.55rem}}
 
 .ds-scope-control.ds-filter-applied-unsaved select,
 .ds-date-picker.ds-date-picker-applied-unsaved .ds-date-picker-control>input,
@@ -314,9 +314,9 @@
 }
 .ds-chart-filter-panel.ds-live-chart-filter-panel { z-index: 20; top: 0; bottom: 0; }
 .ds-live-chart-filter-panel .ds-chart-filter-toggle { display: none; }
-.e2e-dashboards .ds-chart-definition-toggle { position: absolute; z-index: 6; right: 0; bottom: 0; width: auto; min-width: 0; height: 1.7rem; min-height: 0; padding: .25rem .55rem!important; border: 1px solid #60408f; border-right: 0; border-bottom: 0; border-radius: .55rem 0 0 0; background: #60408f; color: #fff; font-size: .68rem; font-weight: 750; white-space: nowrap; cursor: pointer; opacity: 0; visibility: hidden; pointer-events: none; }
+.ppt-dashboards .ds-chart-definition-toggle { position: absolute; z-index: 6; right: 0; bottom: 0; width: auto; min-width: 0; height: 1.7rem; min-height: 0; padding: .25rem .55rem!important; border: 1px solid #60408f; border-right: 0; border-bottom: 0; border-radius: .55rem 0 0 0; background: #60408f; color: #fff; font-size: .68rem; font-weight: 750; white-space: nowrap; cursor: pointer; opacity: 0; visibility: hidden; pointer-events: none; }
 .ds-chart.ds-hover .ds-chart-definition-toggle,.ds-chart:focus-within .ds-chart-definition-toggle { opacity: 1; visibility: visible; pointer-events: auto; }
-.e2e-dashboards .ds-chart-definition-toggle:disabled { display: none; }
+.ppt-dashboards .ds-chart-definition-toggle:disabled { display: none; }
 #ds-viewer.ds-presentation-active .ds-chart-definition-toggle { display: none; }
 .ds-chart-expanded-canvas.ds-hover .ds-chart-filter-panel,
 .ds-chart-expanded-canvas:focus-within .ds-chart-filter-panel,
@@ -329,7 +329,7 @@
 .ds-chart-filter-panel.is-open {
   transform: translateX(-.9rem);
 }
-.e2e-dashboards .ds-chart-filter-toggle {
+.ppt-dashboards .ds-chart-filter-toggle {
   position: absolute;
   top: 0;
   left: -2.7rem;
@@ -366,8 +366,8 @@
   flex: 0 0 .95rem;
   background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 19V5M4 19h16'/%3E%3Cpath d='M8 16v-4M12 16V8M16 16v-7'/%3E%3Cpath d='m15.5 4.5 4 4M14 10l5.8-5.8'/%3E%3C/svg%3E");
 }
-.e2e-dashboards .ds-chart-filter-toggle:hover,
-.e2e-dashboards .ds-chart-filter-toggle:focus-visible {
+.ppt-dashboards .ds-chart-filter-toggle:hover,
+.ppt-dashboards .ds-chart-filter-toggle:focus-visible {
   border-color: #4d2e78;
   background: linear-gradient(145deg, #684799, #51327c);
   box-shadow: 0 0 0 3px rgba(112, 76, 168, .15), 0 6px 16px rgba(73, 46, 111, .22);
@@ -407,8 +407,8 @@
   scrollbar-gutter: stable;
 }
 .ds-chart-filter-content .report-chart-viewer-fields label { gap: .28rem; color: #4d376b; font-size: .68rem; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-preview-select-trigger,
-.e2e-dashboards .ds-chart-filter-panel .report-chart-viewer-fields input[type="text"] {
+.ppt-dashboards .ds-chart-filter-panel .report-chart-preview-select-trigger,
+.ppt-dashboards .ds-chart-filter-panel .report-chart-viewer-fields input[type="text"] {
   display: block;
   box-sizing: border-box;
   width: 100%;
@@ -424,33 +424,33 @@
   text-align: left;
   box-shadow: 0 1px 2px rgba(45, 30, 62, .04);
 }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-preview-select-trigger:hover,
-.e2e-dashboards .ds-chart-filter-panel .report-chart-preview-select-trigger:focus-visible,
-.e2e-dashboards .ds-chart-filter-panel .report-chart-viewer-fields input[type="text"]:focus {
+.ppt-dashboards .ds-chart-filter-panel .report-chart-preview-select-trigger:hover,
+.ppt-dashboards .ds-chart-filter-panel .report-chart-preview-select-trigger:focus-visible,
+.ppt-dashboards .ds-chart-filter-panel .report-chart-viewer-fields input[type="text"]:focus {
   border-color: #9574bd;
   background: #fff;
   color: #352747;
   box-shadow: 0 0 0 3px rgba(119, 81, 185, .1);
 }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-trigger { display: block; width: 100%; min-height: 2rem; padding: .38rem .55rem; border: 1px solid #d2c5e2; border-radius: .48rem; background: #fff; color: #352747; font: inherit; font-size: .75rem; font-weight: 550; text-align: left; cursor: pointer; box-shadow: 0 1px 2px rgba(45, 30, 62, .04); }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-field-toggle { cursor: pointer; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-trigger:hover, .e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-trigger:focus-visible { border-color: #9574bd; background: #fbf8ff; box-shadow: 0 0 0 3px rgba(119, 81, 185, .1); }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance { display: grid; gap: .6rem; margin: .45rem 0 0; padding: .7rem; border: 1px solid #d8cbe7; border-radius: .55rem; background: #fff; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance[hidden] { display: none !important; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance legend { padding: 0 .25rem; color: #4d376b; font-size: .72rem; font-weight: 700; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance label { display: grid; gap: .25rem; color: #4d376b; font-size: .68rem; font-weight: 700; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance select { width: 100%; min-height: 2rem; border: 1px solid #d2c5e2; border-radius: .48rem; background: #fff; color: #352747; font: inherit; font-size: .75rem; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance .catalogue-label-format-colour-row { display: flex; align-items: center; gap: .5rem; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance input[type="color"] { width: 2.5rem; min-width: 2.5rem; height: 2rem; min-height: 2rem; padding: .12rem; border: 1px solid #d2c5e2; border-radius: .45rem; background: #fff; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance output { display: inline-flex; min-height: 2rem; align-items: center; padding: 0 .55rem; border-radius: .45rem; background: #f2edf8; color: #4d376b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .68rem; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance .catalogue-label-format-styles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance .catalogue-label-format-styles label { display: flex; align-items: center; gap: .3rem; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance .catalogue-label-format-styles input { width: .9rem; height: .9rem; min-height: 0; margin: 0; accent-color: #6c4aa3; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-automatic { justify-self: start; margin-top: .15rem; padding: .35rem .55rem; border: 1px solid #c1ade0; border-radius: .4rem; background: #eee5fa; color: #513587; font-size: .68rem; font-weight: 700; box-shadow: none; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-trigger { display: block; width: 100%; min-height: 2rem; padding: .38rem .55rem; border: 1px solid #d2c5e2; border-radius: .48rem; background: #fff; color: #352747; font: inherit; font-size: .75rem; font-weight: 550; text-align: left; cursor: pointer; box-shadow: 0 1px 2px rgba(45, 30, 62, .04); }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-field-toggle { cursor: pointer; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-trigger:hover, .ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-trigger:focus-visible { border-color: #9574bd; background: #fbf8ff; box-shadow: 0 0 0 3px rgba(119, 81, 185, .1); }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance { display: grid; gap: .6rem; margin: .45rem 0 0; padding: .7rem; border: 1px solid #d8cbe7; border-radius: .55rem; background: #fff; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance[hidden] { display: none !important; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance legend { padding: 0 .25rem; color: #4d376b; font-size: .72rem; font-weight: 700; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance label { display: grid; gap: .25rem; color: #4d376b; font-size: .68rem; font-weight: 700; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance select { width: 100%; min-height: 2rem; border: 1px solid #d2c5e2; border-radius: .48rem; background: #fff; color: #352747; font: inherit; font-size: .75rem; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance .catalogue-label-format-colour-row { display: flex; align-items: center; gap: .5rem; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance input[type="color"] { width: 2.5rem; min-width: 2.5rem; height: 2rem; min-height: 2rem; padding: .12rem; border: 1px solid #d2c5e2; border-radius: .45rem; background: #fff; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance output { display: inline-flex; min-height: 2rem; align-items: center; padding: 0 .55rem; border-radius: .45rem; background: #f2edf8; color: #4d376b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .68rem; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance .catalogue-label-format-styles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance .catalogue-label-format-styles label { display: flex; align-items: center; gap: .3rem; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance .catalogue-label-format-styles input { width: .9rem; height: .9rem; min-height: 0; margin: 0; accent-color: #6c4aa3; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-label-format-automatic { justify-self: start; margin-top: .15rem; padding: .35rem .55rem; border: 1px solid #c1ade0; border-radius: .4rem; background: #eee5fa; color: #513587; font-size: .68rem; font-weight: 700; box-shadow: none; }
 .ds-chart-filter-content .report-chart-filter-builder { padding: .55rem; border-color: #ddd3e8; background: #fff; }
 .ds-chart-filter-content .report-chart-filter-condition { grid-template-columns: minmax(0, 1fr) 5.5rem minmax(0, 1fr) 1.75rem; }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-filter-condition button,
-.e2e-dashboards .ds-chart-filter-panel .report-chart-filter-add {
+.ppt-dashboards .ds-chart-filter-panel .report-chart-filter-condition button,
+.ppt-dashboards .ds-chart-filter-panel .report-chart-filter-add {
   min-width: 0;
   min-height: 1.8rem;
   padding: .22rem .4rem;
@@ -461,7 +461,7 @@
   font-size: .7rem;
   box-shadow: none;
 }
-.e2e-dashboards .ds-chart-filter-panel .report-chart-filter-add { width: 100%; }
+.ppt-dashboards .ds-chart-filter-panel .report-chart-filter-add { width: 100%; }
 .ds-chart-filter-actions {
   display: flex;
   justify-content: flex-end;
@@ -470,7 +470,7 @@
   padding-top: .75rem;
   border-top: 1px solid #e5ddec;
 }
-.e2e-dashboards .ds-chart-filter-actions button {
+.ppt-dashboards .ds-chart-filter-actions button {
   min-width: 5.25rem;
   min-height: 2rem;
   padding: .38rem .75rem;
@@ -478,44 +478,44 @@
   font-size: .74rem;
   box-shadow: none;
 }
-.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-close { border-color: #cbc2d3; background: #fff; color: #554a60; }
-.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-apply { border-color: #60408f; background: #6c4aa3; color: #fff; }
-.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-apply:hover,
-.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-apply:focus-visible { background: #553782; }
-.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-update { border-color: #9f3b48; background: #ad4351; color: #fff; }
-.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-update:hover,
-.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-update:focus-visible { background: #8f3340; }
-.e2e-dashboards .ds-chart-expanded-pan { position: absolute; top: 50%; z-index: 6; display: grid; place-items: center; width: 2.55rem; min-width: 2.55rem; height: 2.55rem; min-height: 2.55rem; padding: 0 !important; border: 1px solid #bda0df; border-radius: 999px !important; background: rgba(238, 229, 251, 0.94); color: #513587; box-shadow: 0 3px 11px rgba(54, 32, 86, 0.22); transform: translateY(-50%); }
-.e2e-dashboards .ds-chart-expanded-pan-left { left: 0.65rem; }
-.e2e-dashboards .ds-chart-expanded-pan-right { right: 0.65rem; }
-.e2e-dashboards .ds-chart-expanded-pan-up { top: 0.65rem; left: 50%; transform: translateX(-50%); }
-.e2e-dashboards .ds-chart-expanded-pan-down { top: auto; bottom: 0.65rem; left: 50%; transform: translateX(-50%); }
-.e2e-dashboards .ds-chart-expanded-pan[hidden] { display: none !important; }
-.e2e-dashboards .ds-chart-expanded-pan:disabled { opacity: 0.35; cursor: default; }
-.e2e-dashboards .ds-chart-expanded-pan:hover:not(:disabled), .e2e-dashboards .ds-chart-expanded-pan:focus-visible { border-color: #8d67c3; background: #dfd0f6; color: #43266e; }
-.e2e-dashboards .ds-chart-expanded-pan svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-.e2e-dashboards .ds-chart-pan-button { position: absolute; z-index: 6; display: grid; place-items: center; width: 2rem; min-width: 2rem; height: 2rem; min-height: 2rem; padding: 0 !important; border: 1px solid #bda0df; border-radius: 999px !important; background: rgba(238, 229, 251, 0.94); color: #513587; box-shadow: 0 3px 10px rgba(54, 32, 86, 0.2); }
-.e2e-dashboards .ds-chart-pan-button[hidden] { display: none !important; }
-.e2e-dashboards .ds-chart-pan-button:disabled { opacity: 0.35; cursor: default; }
-.e2e-dashboards .ds-chart-pan-button:hover:not(:disabled), .e2e-dashboards .ds-chart-pan-button:focus-visible { border-color: #8d67c3; background: #dfd0f6; color: #43266e; }
-.e2e-dashboards .ds-chart-pan-button svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-.e2e-dashboards .ds-chart-pan-left { top: 50%; left: 0.45rem; transform: translateY(-50%); }
-.e2e-dashboards .ds-chart-pan-right { top: 50%; right: 0.45rem; transform: translateY(-50%); }
-.e2e-dashboards .ds-chart-pan-up { top: 0.45rem; left: 50%; transform: translateX(-50%); }
-.e2e-dashboards .ds-chart-pan-down { bottom: 0.45rem; left: 50%; transform: translateX(-50%); }
-.e2e-dashboards .ds-chart-expanded-navigation { gap: 0.65rem; }
-.e2e-dashboards .ds-chart-expanded-navigation button { display: grid; place-items: center; width: 2.7rem; min-width: 2.7rem; height: 2.45rem; min-height: 2.45rem; padding: 0 !important; border: 1px solid #5f3b91; border-radius: 999px !important; background: linear-gradient(135deg, #6d46a8, #9870d0); color: #fff; box-shadow: 0 5px 13px rgba(95, 69, 142, 0.22); font-size: 1.1rem; }
-.e2e-dashboards .ds-chart-expanded-navigation button:hover:not(:disabled), .e2e-dashboards .ds-chart-expanded-navigation button:focus-visible { border-color: #45246f; background: linear-gradient(135deg, #4f2d82, #7549b0); color: #fff; }
-.e2e-dashboards .ds-chart-expanded-navigation button:disabled { border-color: #b9aacd; background: #ded5e9; color: #837493; opacity: 1; box-shadow: none; }
-.e2e-dashboards .ds-chart-expanded-arrow-icon { display: block; width: 1.1rem; height: 1.1rem; margin: auto; fill: none; stroke: currentColor; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
-.e2e-dashboards .ds-slide-navigation { gap: 0.65rem; }
-.e2e-dashboards .ds-slide-nav-button { width: 2.7rem; min-width: 2.7rem; height: 2.45rem; min-height: 2.45rem; border: 1px solid #5f3b91; background: linear-gradient(135deg, #6d46a8, #9870d0); color: #fff; box-shadow: 0 5px 13px rgba(95, 69, 142, 0.22); font-size: 1.1rem !important; }
-.e2e-dashboards .ds-slide-nav-button:hover:not(:disabled), .e2e-dashboards .ds-slide-nav-button:focus-visible { border-color: #45246f; background: linear-gradient(135deg, #4f2d82, #7549b0); color: #fff; }
-.e2e-dashboards .ds-slide-nav-button:disabled { border-color: #b9aacd; background: #ded5e9; color: #837493; opacity: 1; box-shadow: none; }
-.e2e-dashboards .ds-slide-arrow-icon { display: block; width: 1.1rem; height: 1.1rem; margin: auto; fill: none; stroke: currentColor; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
+.ppt-dashboards .ds-chart-filter-actions #ds-chart-filter-close { border-color: #cbc2d3; background: #fff; color: #554a60; }
+.ppt-dashboards .ds-chart-filter-actions #ds-chart-filter-apply { border-color: #60408f; background: #6c4aa3; color: #fff; }
+.ppt-dashboards .ds-chart-filter-actions #ds-chart-filter-apply:hover,
+.ppt-dashboards .ds-chart-filter-actions #ds-chart-filter-apply:focus-visible { background: #553782; }
+.ppt-dashboards .ds-chart-filter-actions #ds-chart-filter-update { border-color: #9f3b48; background: #ad4351; color: #fff; }
+.ppt-dashboards .ds-chart-filter-actions #ds-chart-filter-update:hover,
+.ppt-dashboards .ds-chart-filter-actions #ds-chart-filter-update:focus-visible { background: #8f3340; }
+.ppt-dashboards .ds-chart-expanded-pan { position: absolute; top: 50%; z-index: 6; display: grid; place-items: center; width: 2.55rem; min-width: 2.55rem; height: 2.55rem; min-height: 2.55rem; padding: 0 !important; border: 1px solid #bda0df; border-radius: 999px !important; background: rgba(238, 229, 251, 0.94); color: #513587; box-shadow: 0 3px 11px rgba(54, 32, 86, 0.22); transform: translateY(-50%); }
+.ppt-dashboards .ds-chart-expanded-pan-left { left: 0.65rem; }
+.ppt-dashboards .ds-chart-expanded-pan-right { right: 0.65rem; }
+.ppt-dashboards .ds-chart-expanded-pan-up { top: 0.65rem; left: 50%; transform: translateX(-50%); }
+.ppt-dashboards .ds-chart-expanded-pan-down { top: auto; bottom: 0.65rem; left: 50%; transform: translateX(-50%); }
+.ppt-dashboards .ds-chart-expanded-pan[hidden] { display: none !important; }
+.ppt-dashboards .ds-chart-expanded-pan:disabled { opacity: 0.35; cursor: default; }
+.ppt-dashboards .ds-chart-expanded-pan:hover:not(:disabled), .ppt-dashboards .ds-chart-expanded-pan:focus-visible { border-color: #8d67c3; background: #dfd0f6; color: #43266e; }
+.ppt-dashboards .ds-chart-expanded-pan svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.ppt-dashboards .ds-chart-pan-button { position: absolute; z-index: 6; display: grid; place-items: center; width: 2rem; min-width: 2rem; height: 2rem; min-height: 2rem; padding: 0 !important; border: 1px solid #bda0df; border-radius: 999px !important; background: rgba(238, 229, 251, 0.94); color: #513587; box-shadow: 0 3px 10px rgba(54, 32, 86, 0.2); }
+.ppt-dashboards .ds-chart-pan-button[hidden] { display: none !important; }
+.ppt-dashboards .ds-chart-pan-button:disabled { opacity: 0.35; cursor: default; }
+.ppt-dashboards .ds-chart-pan-button:hover:not(:disabled), .ppt-dashboards .ds-chart-pan-button:focus-visible { border-color: #8d67c3; background: #dfd0f6; color: #43266e; }
+.ppt-dashboards .ds-chart-pan-button svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.ppt-dashboards .ds-chart-pan-left { top: 50%; left: 0.45rem; transform: translateY(-50%); }
+.ppt-dashboards .ds-chart-pan-right { top: 50%; right: 0.45rem; transform: translateY(-50%); }
+.ppt-dashboards .ds-chart-pan-up { top: 0.45rem; left: 50%; transform: translateX(-50%); }
+.ppt-dashboards .ds-chart-pan-down { bottom: 0.45rem; left: 50%; transform: translateX(-50%); }
+.ppt-dashboards .ds-chart-expanded-navigation { gap: 0.65rem; }
+.ppt-dashboards .ds-chart-expanded-navigation button { display: grid; place-items: center; width: 2.7rem; min-width: 2.7rem; height: 2.45rem; min-height: 2.45rem; padding: 0 !important; border: 1px solid #5f3b91; border-radius: 999px !important; background: linear-gradient(135deg, #6d46a8, #9870d0); color: #fff; box-shadow: 0 5px 13px rgba(95, 69, 142, 0.22); font-size: 1.1rem; }
+.ppt-dashboards .ds-chart-expanded-navigation button:hover:not(:disabled), .ppt-dashboards .ds-chart-expanded-navigation button:focus-visible { border-color: #45246f; background: linear-gradient(135deg, #4f2d82, #7549b0); color: #fff; }
+.ppt-dashboards .ds-chart-expanded-navigation button:disabled { border-color: #b9aacd; background: #ded5e9; color: #837493; opacity: 1; box-shadow: none; }
+.ppt-dashboards .ds-chart-expanded-arrow-icon { display: block; width: 1.1rem; height: 1.1rem; margin: auto; fill: none; stroke: currentColor; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
+.ppt-dashboards .ds-slide-navigation { gap: 0.65rem; }
+.ppt-dashboards .ds-slide-nav-button { width: 2.7rem; min-width: 2.7rem; height: 2.45rem; min-height: 2.45rem; border: 1px solid #5f3b91; background: linear-gradient(135deg, #6d46a8, #9870d0); color: #fff; box-shadow: 0 5px 13px rgba(95, 69, 142, 0.22); font-size: 1.1rem !important; }
+.ppt-dashboards .ds-slide-nav-button:hover:not(:disabled), .ppt-dashboards .ds-slide-nav-button:focus-visible { border-color: #45246f; background: linear-gradient(135deg, #4f2d82, #7549b0); color: #fff; }
+.ppt-dashboards .ds-slide-nav-button:disabled { border-color: #b9aacd; background: #ded5e9; color: #837493; opacity: 1; box-shadow: none; }
+.ppt-dashboards .ds-slide-arrow-icon { display: block; width: 1.1rem; height: 1.1rem; margin: auto; fill: none; stroke: currentColor; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
 .ds-viewer-tool-actions { display: flex; align-items: center; gap: 0.5rem; margin-left: 0.45rem; padding-left: 1rem; border-left: 1px solid #cfc1df; }
-.e2e-dashboards .ds-viewer-tool-actions .ds-viewer-icon-action { width: 2.45rem; min-width: 2.45rem; height: 2.45rem; min-height: 2.45rem; }
-.e2e-dashboards .ds-viewer-tool-actions .ds-viewer-icon-action::after { width: 1.2rem; height: 1.2rem; }
+.ppt-dashboards .ds-viewer-tool-actions .ds-viewer-icon-action { width: 2.45rem; min-width: 2.45rem; height: 2.45rem; min-height: 2.45rem; }
+.ppt-dashboards .ds-viewer-tool-actions .ds-viewer-icon-action::after { width: 1.2rem; height: 1.2rem; }
 .ds-chart-expanded-overlay.ds-overlay { display: grid; place-items: center; padding: .35rem; }
 .ds-chart-expanded-overlay.ds-overlay[hidden] { display: none !important; }
 .ds-chart-expanded-overlay .ds-chart-expanded-dialog { position: relative; inset: auto; box-sizing: border-box; width: min(calc(100vw - 1rem), 1840px); height: min(calc(100dvh - .7rem), 1200px); padding: 1.25rem 1.4rem; gap: 1rem; border-radius: 24px; border-color: rgba(75, 32, 138, .2); background: linear-gradient(180deg, #fffdfd, #fbf6fc); }
@@ -525,8 +525,8 @@
 .ds-chart-expanded-meta { min-height: 1.2em; margin: 0; color: #617080; font-size: .95rem; font-weight: 600; }
 .ds-chart-expanded-overlay .ds-chart-expanded-canvas { border: 1px solid rgba(75, 32, 138, .18); border-radius: 10px; background: #fff; }
 .ds-chart-expanded-overlay .ds-chart-expanded-footer { padding: 0; border: 0; background: transparent; }
-.e2e-dashboards .ds-chart-expanded-titlebar #ds-chart-expanded-close.report-chart-viewer-close, .e2e-dashboards .ds-viewer-header #ds-viewer-close.report-chart-viewer-close { width: 2.3rem; min-width: 2.3rem; height: 2.3rem; min-height: 2.3rem; padding: 0; border: 1px solid #8f202b; border-radius: 999px !important; background: #b72f3a; color: #fff; font-size: 1.55rem !important; line-height: 1; box-shadow: none; }
-.e2e-dashboards .ds-chart-expanded-titlebar #ds-chart-expanded-close.report-chart-viewer-close:hover:not(:disabled), .e2e-dashboards .ds-chart-expanded-titlebar #ds-chart-expanded-close.report-chart-viewer-close:focus-visible, .e2e-dashboards .ds-viewer-header #ds-viewer-close.report-chart-viewer-close:hover:not(:disabled), .e2e-dashboards .ds-viewer-header #ds-viewer-close.report-chart-viewer-close:focus-visible { border-color: #741821; background: #98242e; color: #fff; box-shadow: none; }
+.ppt-dashboards .ds-chart-expanded-titlebar #ds-chart-expanded-close.report-chart-viewer-close, .ppt-dashboards .ds-viewer-header #ds-viewer-close.report-chart-viewer-close { width: 2.3rem; min-width: 2.3rem; height: 2.3rem; min-height: 2.3rem; padding: 0; border: 1px solid #8f202b; border-radius: 999px !important; background: #b72f3a; color: #fff; font-size: 1.55rem !important; line-height: 1; box-shadow: none; }
+.ppt-dashboards .ds-chart-expanded-titlebar #ds-chart-expanded-close.report-chart-viewer-close:hover:not(:disabled), .ppt-dashboards .ds-chart-expanded-titlebar #ds-chart-expanded-close.report-chart-viewer-close:focus-visible, .ppt-dashboards .ds-viewer-header #ds-viewer-close.report-chart-viewer-close:hover:not(:disabled), .ppt-dashboards .ds-viewer-header #ds-viewer-close.report-chart-viewer-close:focus-visible { border-color: #741821; background: #98242e; color: #fff; box-shadow: none; }
 .ds-manage-panel .collapsible-panel-body { display:grid; gap:.75rem; }
 .ds-manage-panel .ds-actions,
 .ds-manage-panel .ds-dashboards-table-wrap,
@@ -534,13 +534,13 @@
 @media (max-width:720px) { .ds-chart-filter-panel { width: calc(100% - 3rem); } }
 
 @media (max-width:640px) {
-  .e2e-dashboards .collapsible-panel-body { min-width: 0; }
+  .ppt-dashboards .collapsible-panel-body { min-width: 0; }
   .ds-management, .ds-source-list, .ds-facets, .ds-custom { grid-template-columns: minmax(0, 1fr); }
   .ds-actions { width: 100%; gap: .45rem; margin-top: .75rem; }
   .ds-actions select { width: 100%; max-width: none; }
-  .e2e-dashboards .ds-view-dashboard-action,
-  .e2e-dashboards .ds-generate-ppt-action,
-  .e2e-dashboards .ds-view-filters-action {
+  .ppt-dashboards .ds-view-dashboard-action,
+  .ppt-dashboards .ds-generate-ppt-action,
+  .ppt-dashboards .ds-view-filters-action {
     flex: 1 1 8.5rem; justify-content: center; min-width: 0; min-height: 2.45rem;
     margin-left: 0; padding: .5rem .65rem; font-size: .76rem; line-height: 1.2;
   }
@@ -576,17 +576,17 @@
     width:100%;
     white-space:normal;
   }
-  .e2e-dashboards .ds-dashboard-action {
+  .ppt-dashboards .ds-dashboard-action {
     justify-self:center;
     width:2rem;
     min-width:2rem;
     height:2rem;
     min-height:2rem;
   }
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-view,
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-open,
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-close,
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-ppt {
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-view,
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-open,
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-close,
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-ppt {
     grid-column:span 2;
     display:grid;
     grid-template-columns:auto auto;
@@ -604,17 +604,17 @@
     font-size:.72rem!important;
     line-height:1.05;
   }
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt)::after {
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt)::after {
     grid-column:1;
     grid-row:1;
     order:initial;
     width:1.25rem;
     height:1.25rem;
   }
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label{display:contents}
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label>span:first-child{grid-column:2;grid-row:1}
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label>span:last-child{grid-column:1 / -1;grid-row:2}
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label>span+span::before{content:none}
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label{display:contents}
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label>span:first-child{grid-column:2;grid-row:1}
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label>span:last-child{grid-column:1 / -1;grid-row:2}
+  .ppt-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label>span+span::before{content:none}
   .report-jobs-table.ds-ppt-jobs-table { width: 100%; min-width: 0; }
   .ds-ppt-jobs-table tbody tr { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .ds-ppt-jobs-table tbody td { width: auto !important; min-width: 0 !important; max-width: none !important; }
@@ -646,7 +646,7 @@
   .ds-chart-expanded-titlebar .eyebrow, .ds-chart-expanded-meta { display: none; }
   .ds-chart-expanded-overlay .ds-chart-expanded-header h2 { font-size: 1rem; }
   .ds-chart-expanded-actions { flex: 1 1 auto; gap: .3rem; }
-  .e2e-dashboards .ds-chart-expanded-header .ds-chart-expanded-text-action {
+  .ppt-dashboards .ds-chart-expanded-header .ds-chart-expanded-text-action {
     flex: 1 1 7rem; width: auto; height: auto; min-height: 2rem; padding: .35rem .45rem !important;
     font-size: .66rem !important; white-space: normal;
   }
@@ -659,21 +659,21 @@
 /* Dashboard-specific final mobile overrides live after the desktop viewer
    rules so narrow layouts cannot be widened again by component styling. */
 @media (max-width:640px) {
-  .e2e-dashboards input:not([type="checkbox"]):not([type="radio"]),
-  .e2e-dashboards select, .e2e-dashboards textarea,
-  .e2e-dashboards [contenteditable="true"],
-  .e2e-dashboards .multiselect-search,
-  .e2e-dashboards .report-chart-viewer-fields input[type="text"] {
+  .ppt-dashboards input:not([type="checkbox"]):not([type="radio"]),
+  .ppt-dashboards select, .ppt-dashboards textarea,
+  .ppt-dashboards [contenteditable="true"],
+  .ppt-dashboards .multiselect-search,
+  .ppt-dashboards .report-chart-viewer-fields input[type="text"] {
     font-size:16px!important;
     line-height:1.25;
     touch-action:manipulation;
   }
-  .e2e-dashboards :is(input:not([type="checkbox"]):not([type="radio"]),select,.multiselect-trigger) {
+  .ppt-dashboards :is(input:not([type="checkbox"]):not([type="radio"]),select,.multiselect-trigger) {
     min-height:2.5rem;
     padding:.48rem .65rem;
     border-radius:10px;
   }
-  .e2e-dashboards .multiselect-menu {
+  .ppt-dashboards .multiselect-menu {
     box-sizing:border-box;
     width:100%;
     min-width:0;
@@ -683,8 +683,8 @@
     max-height:min(18rem,calc(100dvh - 1rem));
   }
 
-  .e2e-dashboards .ds-actions {display:flex;align-items:stretch;flex-wrap:wrap;gap:.4rem}
-  .e2e-dashboards .ds-actions>button {
+  .ppt-dashboards .ds-actions {display:flex;align-items:stretch;flex-wrap:wrap;gap:.4rem}
+  .ppt-dashboards .ds-actions>button {
     flex:0 1 auto;
     width:auto;
     min-width:0;
@@ -695,7 +695,7 @@
     line-height:1.2;
     white-space:nowrap;
   }
-  .e2e-dashboards #ds-view.ds-view-dashboard-action {
+  .ppt-dashboards #ds-view.ds-view-dashboard-action {
     box-sizing:border-box;
     flex:1 0 100%;
     width:100%;
@@ -705,7 +705,7 @@
     padding:.75rem 1rem;
     font-size:1rem;
   }
-  .e2e-dashboards .ds-actions>#ds-rows {flex:1 1 100%;margin:.15rem 0 0}
+  .ppt-dashboards .ds-actions>#ds-rows {flex:1 1 100%;margin:.15rem 0 0}
   .ds-column-actions,.ds-dashboard-primary-actions{align-items:stretch;gap:.4rem}.ds-column-actions>button,.ds-dashboard-primary-actions>button{flex:1 1 8.5rem;justify-content:center;margin-left:0!important;padding:.5rem .65rem;font-size:.72rem}.ds-dashboard-primary-actions #ds-view{flex-basis:100%}
   .ds-filter-columns,.ds-filter-groups,.ds-source-filters {min-width:0;gap:.65rem}
   .ds-filter-group,.ds-universe-dataset-panel {min-width:0;padding:.7rem;gap:.6rem;border-radius:11px}
@@ -735,12 +735,12 @@
   .ds-viewer-panel>.ds-actions {flex:0 0 auto;margin-top:0}
   .ds-viewer-panel>.ds-actions>select {flex:1 1 100%}
   .ds-slide-navigation {justify-content:center;gap:.35rem}
-  .e2e-dashboards .ds-slide-nav-button,
-  .e2e-dashboards .ds-chart-expanded-navigation button {
+  .ppt-dashboards .ds-slide-nav-button,
+  .ppt-dashboards .ds-chart-expanded-navigation button {
     width:2.25rem;min-width:2.25rem;height:2.25rem;min-height:2.25rem;font-size:.95rem!important
   }
   .ds-viewer-tool-actions {gap:.3rem;padding-left:.4rem}
-  .e2e-dashboards .ds-viewer-tool-actions .ds-viewer-icon-action {
+  .ppt-dashboards .ds-viewer-tool-actions .ds-viewer-icon-action {
     width:2.25rem;min-width:2.25rem;height:2.25rem;min-height:2.25rem
   }
   .ds-slide-content {flex:1 0 auto;min-height:13rem}
@@ -772,13 +772,13 @@
   .ds-chart-expanded-header {display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center}
   .ds-chart-expanded-titlebar {min-width:0}
   .ds-chart-expanded-actions {display:flex;min-width:0;flex-wrap:wrap;justify-content:flex-end}
-  .e2e-dashboards .ds-chart-expanded-header .ds-chart-expanded-text-action {flex:1 1 6rem}
+  .ppt-dashboards .ds-chart-expanded-header .ds-chart-expanded-text-action {flex:1 1 6rem}
   .ds-chart-filter-panel {top:2.65rem;right:0;bottom:.25rem;width:calc(100% - 2.7rem)}
   .ds-chart-filter-content {padding:.65rem}
   .ds-chart-filter-content .form-note {display:none}
   .ds-chart-filter-content .report-chart-filter-condition {grid-template-columns:minmax(0,1fr)}
   .ds-chart-filter-actions {gap:.35rem;padding-top:.5rem}
-  .e2e-dashboards .ds-chart-filter-actions button {flex:1 1 0;min-width:0}
+  .ppt-dashboards .ds-chart-filter-actions button {flex:1 1 0;min-width:0}
 
   .ds-overlay {box-sizing:border-box;max-width:100vw;max-width:100dvw;overflow:hidden}
   .ds-filter-dialog,.ds-data-dialog,.ds-presentation-dialog,.ds-ppt-filter-dialog {
@@ -797,7 +797,7 @@
   .ds-presentation-options {gap:.5rem}
   .ds-ppt-filter-overlay {padding:.35rem}
   .ds-ppt-chart-filters {gap:.45rem}
-  .e2e-dashboards .ds-ppt-charts-filters {width:100%;min-width:0;margin-left:0;font-size:.76rem}
+  .ppt-dashboards .ds-ppt-charts-filters {width:100%;min-width:0;margin-left:0;font-size:.76rem}
 }
 
 /* Presentation mode dedicates the complete viewport to the current slide.
@@ -861,13 +861,13 @@
 #ds-viewer.ds-presentation-active #ds-presentation-stop-viewer:hover {
   background:rgba(139,29,46,.96);
 }
-.e2e-dashboards .ds-presentation-action.is-running::after {
+.ppt-dashboards .ds-presentation-action.is-running::after {
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Crect x='6' y='5' width='4' height='14' rx='1'/%3E%3Crect x='14' y='5' width='4' height='14' rx='1'/%3E%3C/svg%3E");
 }
-.e2e-dashboards .ds-presentation-stop-action::after {
+.ppt-dashboards .ds-presentation-stop-action::after {
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Crect x='6' y='6' width='12' height='12' rx='1.5'/%3E%3C/svg%3E");
 }
-.e2e-dashboards :is(#ds-presentation-toggle-viewer,#ds-presentation-stop-viewer)[hidden] {
+.ppt-dashboards :is(#ds-presentation-toggle-viewer,#ds-presentation-stop-viewer)[hidden] {
   display:none!important;
 }
 #ds-viewer.ds-presentation-active .ds-slide-content,
@@ -1136,7 +1136,7 @@
 
 /* Viewer controls use comfortable touch targets and clear separation. */
 .ds-viewer-primary-controls>.ds-viewer-tool-actions { gap:.8rem; }
-.e2e-dashboards .ds-viewer-primary-controls .ds-viewer-icon-action {
+.ppt-dashboards .ds-viewer-primary-controls .ds-viewer-icon-action {
   width:3rem;
   min-width:3rem;
   height:3rem;
@@ -1144,7 +1144,7 @@
 }
 .ds-viewer-navigation-footer { padding:.45rem 0 .65rem; }
 .ds-viewer-navigation-footer .ds-slide-navigation { gap:.7rem; }
-.e2e-dashboards .ds-viewer-navigation-footer .ds-slide-nav-button {
+.ppt-dashboards .ds-viewer-navigation-footer .ds-slide-nav-button {
   width:3.25rem;
   min-width:3.25rem;
   height:3rem;
@@ -1152,8 +1152,8 @@
   font-size:1.15rem!important;
 }
 .ds-chart-expanded-overlay .ds-chart-expanded-footer { padding:.55rem 0 .1rem; }
-.e2e-dashboards .ds-chart-expanded-navigation { gap:.7rem; }
-.e2e-dashboards .ds-chart-expanded-navigation button {
+.ppt-dashboards .ds-chart-expanded-navigation { gap:.7rem; }
+.ppt-dashboards .ds-chart-expanded-navigation button {
   flex:0 0 3.25rem;
   width:3.25rem;
   min-width:3.25rem;
@@ -1161,7 +1161,7 @@
   min-height:3rem;
   font-size:1.15rem!important;
 }
-.e2e-dashboards .ds-chart-expanded-navigation .ds-chart-expanded-arrow-icon {
+.ppt-dashboards .ds-chart-expanded-navigation .ds-chart-expanded-arrow-icon {
   width:1.25rem;
   height:1.25rem;
 }
@@ -1243,7 +1243,7 @@
     text-overflow:ellipsis;
     white-space:nowrap;
   }
-  .e2e-dashboards #ds-viewer:not(.ds-presentation-active) #ds-viewer-close {
+  .ppt-dashboards #ds-viewer:not(.ds-presentation-active) #ds-viewer-close {
     width:2rem;
     min-width:2rem;
     height:2rem;
@@ -1395,7 +1395,7 @@
     -webkit-box-orient:vertical;
     -webkit-line-clamp:2;
   }
-  .e2e-dashboards #ds-viewer:not(.ds-presentation-active) #ds-viewer-close {
+  .ppt-dashboards #ds-viewer:not(.ds-presentation-active) #ds-viewer-close {
     width:2rem;
     min-width:2rem;
     height:2rem;
@@ -1458,8 +1458,8 @@
   #ds-viewer:not(.ds-presentation-active) .ds-slide-navigation {
     gap:.25rem;
   }
-  .e2e-dashboards #ds-viewer:not(.ds-presentation-active) .ds-viewer-tool-actions .ds-viewer-icon-action,
-  .e2e-dashboards #ds-viewer:not(.ds-presentation-active) .ds-slide-nav-button {
+  .ppt-dashboards #ds-viewer:not(.ds-presentation-active) .ds-viewer-tool-actions .ds-viewer-icon-action,
+  .ppt-dashboards #ds-viewer:not(.ds-presentation-active) .ds-slide-nav-button {
     width:2rem;
     min-width:2rem;
     height:2rem;
@@ -1594,10 +1594,10 @@
 }
 
 /* Keep the wide Dashboard column and retain the original Close glyph stroke. */
-.e2e-dashboards .ds-dashboard-close::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 21V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v17'/%3E%3Cpath d='M16 21H4'/%3E%3Cpath d='M10 12h10'/%3E%3Cpath d='m17 8 4 4-4 4'/%3E%3Ccircle cx='13' cy='12' r='.6' fill='white' stroke='none'/%3E%3C/svg%3E")}
+.ppt-dashboards .ds-dashboard-close::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 21V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v17'/%3E%3Cpath d='M16 21H4'/%3E%3Cpath d='M10 12h10'/%3E%3Cpath d='m17 8 4 4-4 4'/%3E%3Ccircle cx='13' cy='12' r='.6' fill='white' stroke='none'/%3E%3C/svg%3E")}
 
 /* Viewer export and refresh match the other full-size upper-row actions. */
-#ds-viewer.e2e-dashboards .ds-viewer-top-action {
+#ds-viewer.ppt-dashboards .ds-viewer-top-action {
   display:inline-flex;
   align-items:center;
   justify-content:center;
@@ -1606,54 +1606,54 @@
   font-weight:800;
   white-space:nowrap;
 }
-#ds-viewer.e2e-dashboards .ds-viewer-top-action::before {
+#ds-viewer.ppt-dashboards .ds-viewer-top-action::before {
   content:'';
   width:1.05rem;
   height:1.05rem;
   flex:0 0 1.05rem;
   background:center/contain no-repeat;
 }
-#ds-viewer.e2e-dashboards .ds-viewer-top-ppt {
+#ds-viewer.ppt-dashboards .ds-viewer-top-ppt {
   background:linear-gradient(135deg,#b44720,#e47736);
   border-color:#963817;
   box-shadow:0 5px 13px rgba(164,65,27,.26);
 }
-#ds-viewer.e2e-dashboards .ds-viewer-top-ppt::before {
+#ds-viewer.ppt-dashboards .ds-viewer-top-ppt::before {
   width:1.3rem;
   flex-basis:1.3rem;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 25'%3E%3Crect x='2' y='2' width='26' height='18' rx='2.5' fill='none' stroke='white' stroke-width='2.2'/%3E%3Ctext x='15' y='14.5' fill='white' font-family='Arial,sans-serif' font-size='8.5' font-weight='900' text-anchor='middle'%3EPPT%3C/text%3E%3Cpath d='M15 20v3M10.5 23h9' fill='none' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
 }
-#ds-viewer.e2e-dashboards .ds-viewer-top-filters::before {
+#ds-viewer.ppt-dashboards .ds-viewer-top-filters::before {
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h18l-7 8v5l-4 2v-7L3 5Z'/%3E%3C/svg%3E");
 }
-#ds-viewer.e2e-dashboards .ds-viewer-top-auto-fields::before {
+#ds-viewer.ppt-dashboards .ds-viewer-top-auto-fields::before {
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='3'/%3E%3Cpath d='M8 8h4M10 6v4M15 7h3M15 12h3M15 17h3M7 15l4 4M11 15l-4 4'/%3E%3C/svg%3E");
 }
-#ds-viewer.e2e-dashboards .ds-viewer-top-edit::before {
+#ds-viewer.ppt-dashboards .ds-viewer-top-edit::before {
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20h4L19 9l-4-4L4 16v4Z'/%3E%3Cpath d='m13.5 6.5 4 4'/%3E%3C/svg%3E");
 }
-#ds-viewer.e2e-dashboards .ds-viewer-top-ppt:hover:not(:disabled) {
+#ds-viewer.ppt-dashboards .ds-viewer-top-ppt:hover:not(:disabled) {
   background:linear-gradient(135deg,#913515,#c65d25);
   border-color:#7b2b10;
 }
-#ds-viewer.e2e-dashboards .ds-viewer-top-ppt:disabled {
+#ds-viewer.ppt-dashboards .ds-viewer-top-ppt:disabled {
   background:#d9d5df;
   border-color:#c5bfcc;
   box-shadow:none;
 }
-#ds-viewer.e2e-dashboards .ds-viewer-top-refresh {
+#ds-viewer.ppt-dashboards .ds-viewer-top-refresh {
   background:linear-gradient(135deg,#98242e,#c43c48);
   border-color:#741821;
   box-shadow:0 5px 13px rgba(143,32,43,.24);
 }
-#ds-viewer.e2e-dashboards .ds-viewer-top-refresh::before {
+#ds-viewer.ppt-dashboards .ds-viewer-top-refresh::before {
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.64 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z'/%3E%3C/svg%3E");
 }
-#ds-viewer.e2e-dashboards .ds-viewer-top-refresh:hover:not(:disabled) {
+#ds-viewer.ppt-dashboards .ds-viewer-top-refresh:hover:not(:disabled) {
   background:linear-gradient(135deg,#741821,#a52934);
   border-color:#5f121a;
 }
-#ds-viewer.e2e-dashboards:not(.ds-presentation-active) .ds-presentation-navigation-separator {
+#ds-viewer.ppt-dashboards:not(.ds-presentation-active) .ds-presentation-navigation-separator {
   display:flex;
   align-items:center;
   align-self:stretch;
@@ -1674,7 +1674,7 @@
 #ds-filter-home:not(:has(> #ds-filter-panel:not([hidden]))) {
   display:none;
 }
-.e2e-dashboards :is(.ds-ppt-jobs-panel,.ds-ppt-charts-panel) {
+.ppt-dashboards :is(.ds-ppt-jobs-panel,.ds-ppt-charts-panel) {
   margin-top:0;
 }
 
@@ -1715,7 +1715,7 @@
 .ds-dashboards-table tr.ds-filter-row > td.ds-filter-row-cell { padding:0 .6rem .9rem 1.4rem; background:rgba(114,83,168,.06); border-left:3px solid #7253a8; }
 .ds-dashboards-table tr.ds-filter-row .ds-data-panel { margin:.2rem 0 0; box-shadow:none; }
 .ds-dashboards-table tr.ds-filter-row .ds-data-panel > .collapsible-summary { padding-top:.7rem; }
-.e2e-dashboards .report-job-retry-button.is-busy { opacity:.55; cursor:progress; animation:ds-retry-spin 1s linear infinite; }
+.ppt-dashboards .report-job-retry-button.is-busy { opacity:.55; cursor:progress; animation:ds-retry-spin 1s linear infinite; }
 @keyframes ds-retry-spin { to { transform:rotate(360deg); } }
 #ds-ppt-dataset-confirm.is-busy { cursor:progress; }
 
@@ -1734,7 +1734,7 @@
 .report-jobs-table.ds-ppt-jobs-table td:nth-child(7) .ds-ppt-job-filters { display: grid; margin-inline: auto; }
 .report-jobs-table.ds-ppt-jobs-table th:last-child, .report-jobs-table.ds-ppt-jobs-table td:last-child { width: 20.5rem; min-width: 20.5rem; }
 
-/* Manage Dashboards gives the Dashboard name and its Template equal widths. */
+/* PPT Manage Dashboards gives the Dashboard name and its Template equal widths. */
 @media (min-width:641px) {
   .ds-dashboards-table th:first-child, .ds-dashboards-table td:first-child,
   .ds-dashboards-table th:nth-child(3), .ds-dashboards-table td:nth-child(3) { width:27%; min-width:15rem; }
@@ -1744,7 +1744,7 @@
    tooltip; the Filters dialog keeps its light palette. */
 .ds-ppt-filter-tooltip { border-color: rgba(222, 207, 240, .4); background: #34264a; color: #fff; box-shadow: 0 12px 30px rgba(27, 17, 44, .32); }
 .ds-ppt-filter-tooltip .ds-ppt-job-filter-kind { color: #d9b9ff; }
-.e2e-dashboards #ds-chart-expanded-refresh.is-busy { opacity:.55; cursor:progress; animation:ds-retry-spin 1s linear infinite; }
+.ppt-dashboards #ds-chart-expanded-refresh.is-busy { opacity:.55; cursor:progress; animation:ds-retry-spin 1s linear infinite; }
 
 /* Campaigns lead the viewer context and the cover details in orange, a hue no
    other context or cover line uses; on the cover they are larger than Scope. */
@@ -1758,66 +1758,66 @@
 /* The PPT export dialog groups the Dashboard Universe (lavender, like the
    filter panel's universe column) above the Dashboard Filters (blue, like
    its default filters). */
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group-title { grid-column:1/-1; margin:0; color:#4c3277; font-size:1rem; font-weight:850; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group > .ds-ppt-universe-section { margin:0; background:#fff; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group { border-color:#afd1e8; background:#f1f8fd; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .ds-ppt-group-title,
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .ds-ppt-universe-section > h3 { color:#275f86; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .ds-ppt-universe-section { border-color:#c7def0; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .multiselect-trigger { border-color:#b8d5e9; color:#275f86; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group:not(:has(> .ds-ppt-universe-section:not([hidden]))) { display:none; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group-title { grid-column:1/-1; margin:0; color:#4c3277; font-size:1rem; font-weight:850; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group > .ds-ppt-universe-section { margin:0; background:#fff; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-filters-group { border-color:#afd1e8; background:#f1f8fd; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .ds-ppt-group-title,
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .ds-ppt-universe-section > h3 { color:#275f86; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .ds-ppt-universe-section { border-color:#c7def0; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .multiselect-trigger { border-color:#b8d5e9; color:#275f86; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-filters-group:not(:has(> .ds-ppt-universe-section:not([hidden]))) { display:none; }
 
 /* Main Dashboard Filters heading with Show All Filters, the extra filters it
    reveals (Additional Filters in pink, as in the filter panel) and the
    dialog's Save Universe / Save Filters actions. */
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group-head { grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; gap:.75rem; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-show-all-filters { min-height:0; padding:.38rem .8rem; border:1px solid #6a9cc4; border-radius:999px; background:#fff; color:#275f86; font-size:.78rem; font-weight:800; box-shadow:none; white-space:nowrap; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-show-all-filters:hover:not(:disabled) { background:#dcedf8; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-show-all-filters[aria-expanded="true"] { border-color:#397fa9; background:#397fa9; color:#fff; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-extra-filters { display:contents; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-extra-filters[hidden] { display:none; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-extra-filter { display:flex; flex-direction:column; gap:.45rem; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-extra-filter > :is(select[multiple], .multiselect-shell) { margin-top:auto; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group[hidden] { display:none; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group { border-color:#e7b8cd; background:#fff5f9; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .ds-ppt-group-title,
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .ds-ppt-universe-section > h3 { color:#843b61; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .ds-ppt-universe-section { border-color:#efc9da; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .multiselect-trigger { border-color:#dda7c0; background:#fffafd; color:#7c3158; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group > .form-note { grid-column:1/-1; margin:0; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-group-head { grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; gap:.75rem; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-show-all-filters { min-height:0; padding:.38rem .8rem; border:1px solid #6a9cc4; border-radius:999px; background:#fff; color:#275f86; font-size:.78rem; font-weight:800; box-shadow:none; white-space:nowrap; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-show-all-filters:hover:not(:disabled) { background:#dcedf8; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-show-all-filters[aria-expanded="true"] { border-color:#397fa9; background:#397fa9; color:#fff; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-extra-filters { display:contents; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-extra-filters[hidden] { display:none; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-extra-filter { display:flex; flex-direction:column; gap:.45rem; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-extra-filter > :is(select[multiple], .multiselect-shell) { margin-top:auto; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-additional-group[hidden] { display:none; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-additional-group { border-color:#e7b8cd; background:#fff5f9; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .ds-ppt-group-title,
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .ds-ppt-universe-section > h3 { color:#843b61; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .ds-ppt-universe-section { border-color:#efc9da; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .multiselect-trigger { border-color:#dda7c0; background:#fffafd; color:#7c3158; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-additional-group > .form-note { grid-column:1/-1; margin:0; }
 @media (min-width:901px) {
-  .e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters { width:min(82rem,96vw); }
-  .e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) { grid-template-columns:repeat(auto-fill,minmax(15rem,1fr)); }
+  .ppt-dashboards .ds-multivendor-dialog.ds-ppt-all-filters { width:min(82rem,96vw); }
+  .ppt-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) { grid-template-columns:repeat(auto-fill,minmax(15rem,1fr)); }
 }
-.e2e-dashboards #ds-ppt-save-universe { background:linear-gradient(135deg,#456d9c,#6594c5); border-color:#365d89; color:#fff; }
-.e2e-dashboards #ds-ppt-save-universe:hover:not(:disabled) { background:linear-gradient(135deg,#355b86,#4c7dac); border-color:#294d75; }
-.e2e-dashboards #ds-ppt-save-filters { background:linear-gradient(135deg,#1f7a5c,#2fa37b); border-color:#18654b; color:#fff; }
-.e2e-dashboards #ds-ppt-save-filters:hover:not(:disabled) { background:linear-gradient(135deg,#17624a,#238a66); border-color:#124f3b; }
-.e2e-dashboards :is(#ds-ppt-save-universe,#ds-ppt-save-filters):disabled { background:#d9d5df; border-color:#c5bfcc; color:#807887; box-shadow:none; opacity:.8; }
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-extra-filters > .ds-ppt-universe-section { margin:0; background:#fff; }
+.ppt-dashboards #ds-ppt-save-universe { background:linear-gradient(135deg,#456d9c,#6594c5); border-color:#365d89; color:#fff; }
+.ppt-dashboards #ds-ppt-save-universe:hover:not(:disabled) { background:linear-gradient(135deg,#355b86,#4c7dac); border-color:#294d75; }
+.ppt-dashboards #ds-ppt-save-filters { background:linear-gradient(135deg,#1f7a5c,#2fa37b); border-color:#18654b; color:#fff; }
+.ppt-dashboards #ds-ppt-save-filters:hover:not(:disabled) { background:linear-gradient(135deg,#17624a,#238a66); border-color:#124f3b; }
+.ppt-dashboards :is(#ds-ppt-save-universe,#ds-ppt-save-filters):disabled { background:#d9d5df; border-color:#c5bfcc; color:#807887; box-shadow:none; opacity:.8; }
+.ppt-dashboards .ds-multivendor-dialog .ds-ppt-extra-filters > .ds-ppt-universe-section { margin:0; background:#fff; }
 
 /* Show All Filters: every filter card looks the same (no per-selector help
    text) and cards are compact so more of them fit on each row. */
-.e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .ds-ppt-universe-section > .form-note { display:none; }
-.e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) { gap:.45rem; padding:.65rem; }
-.e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .ds-ppt-universe-section { gap:.35rem; padding:.5rem .6rem; border-radius:.65rem; }
-.e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .ds-ppt-universe-section > h3 { margin:0 0 .3rem; font-size:.82rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .multiselect-trigger { min-height:2.2rem; padding:.3rem .7rem; font-size:.8rem; }
+.ppt-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .ds-ppt-universe-section > .form-note { display:none; }
+.ppt-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) { gap:.45rem; padding:.65rem; }
+.ppt-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .ds-ppt-universe-section { gap:.35rem; padding:.5rem .6rem; border-radius:.65rem; }
+.ppt-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .ds-ppt-universe-section > h3 { margin:0 0 .3rem; font-size:.82rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ppt-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .multiselect-trigger { min-height:2.2rem; padding:.3rem .7rem; font-size:.8rem; }
 @media (min-width:901px) {
-  .e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) { grid-template-columns:repeat(auto-fill,minmax(11.5rem,1fr)); }
+  .ppt-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) { grid-template-columns:repeat(auto-fill,minmax(11.5rem,1fr)); }
 }
 
 /* PowerPoint export heading: NR Mode (NSA gold, SA blue) · Dashboard name ·
    PowerPoint export, with a dot only between non-empty parts. */
-.e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-part:empty { display:none; }
-.e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-part:not(:empty) ~ .ds-ppt-eyebrow-part:not(:empty)::before { content:'●'; margin:0 .6rem; color:#695678; font-size:.75em; vertical-align:.12em; }
-.e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-nr-mode-nsa { color:#9a6c00; font-weight:850; }
-.e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-nr-mode-sa { color:#1f5f99; font-weight:850; }
-.e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-dashboard { color:#6d46a8; font-weight:850; }
+.ppt-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-part:empty { display:none; }
+.ppt-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-part:not(:empty) ~ .ds-ppt-eyebrow-part:not(:empty)::before { content:'●'; margin:0 .6rem; color:#695678; font-size:.75em; vertical-align:.12em; }
+.ppt-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-nr-mode-nsa { color:#9a6c00; font-weight:850; }
+.ppt-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-nr-mode-sa { color:#1f5f99; font-weight:850; }
+.ppt-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-dashboard { color:#6d46a8; font-weight:850; }
 
 /* Generate PPT is a labelled library action right after Open Filters; its
    PPT icon keeps its wider proportions. */
-.e2e-dashboards .ds-dashboard-action.ds-dashboard-ppt::after { flex:0 0 1.3rem; width:1.3rem; height:1.08rem; }
+.ppt-dashboards .ds-dashboard-action.ds-dashboard-ppt::after { flex:0 0 1.3rem; width:1.3rem; height:1.08rem; }
 
 .ds-ppt-scope-controls{display:flex;align-items:flex-start;gap:.85rem}.ds-ppt-scope-controls>.ds-scope-control{flex:1;min-width:0;width:auto;margin:0}.ds-ppt-vendor-comparison-control[hidden]{display:none}.ds-ppt-vendor-comparison-control .form-note{margin:0;white-space:normal;font-weight:400}@media(max-width:760px){.ds-ppt-scope-controls{flex-direction:column}.ds-ppt-scope-controls>.ds-scope-control{width:100%}}
 
@@ -1825,15 +1825,15 @@
 
 /* Distinct colours for slide titles and subtitles in the picker. */
 .ds-viewer-panel>.ds-actions>.ds-slide-picker { min-width:0; width:100%; max-width:32rem; }
-.e2e-dashboards .ds-slide-picker-trigger { width:100%; min-width:0; padding:.85rem 2.6rem .85rem 1rem!important; border:1px solid var(--ds-border); border-radius:14px!important; background:#fff; text-align:left; box-shadow:none; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ppt-dashboards .ds-slide-picker-trigger { width:100%; min-width:0; padding:.85rem 2.6rem .85rem 1rem!important; border:1px solid var(--ds-border); border-radius:14px!important; background:#fff; text-align:left; box-shadow:none; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ds-slide-picker .ds-slide-picker-number { color:#647580; }
 .ds-slide-picker .ds-slide-picker-title { color:#563487; }
 .ds-slide-picker .ds-slide-picker-subtitle { color:#087b7f; }
 .ds-slide-picker .ds-slide-picker-separator { color:#394b59; font-weight:900; }
 .ds-slide-picker .searchable-select-menu { width:max-content; min-width:100%; max-width:min(70rem,calc(100vw - 4rem)); max-height:min(32rem,60vh); z-index:100; background:#fff; }
-.e2e-dashboards .ds-slide-picker .searchable-select-option { display:block; padding:.65rem .8rem!important; border-radius:8px!important; background:transparent; text-align:left; box-shadow:none; font-weight:600; white-space:normal; }
-.e2e-dashboards .ds-slide-picker .searchable-select-option:hover { background:#f0ebf7; }
-.e2e-dashboards .ds-slide-picker .searchable-select-option[aria-selected="true"] { background:#e2f2f3; outline:1px solid #9ccacc; }
+.ppt-dashboards .ds-slide-picker .searchable-select-option { display:block; padding:.65rem .8rem!important; border-radius:8px!important; background:transparent; text-align:left; box-shadow:none; font-weight:600; white-space:normal; }
+.ppt-dashboards .ds-slide-picker .searchable-select-option:hover { background:#f0ebf7; }
+.ppt-dashboards .ds-slide-picker .searchable-select-option[aria-selected="true"] { background:#e2f2f3; outline:1px solid #9ccacc; }
 .ds-slide-picker .searchable-select-input { position:sticky; top:0; background:#fff; }
 
 .ds-universe-scope-controls { display:flex; align-items:flex-start; gap:.85rem; }
@@ -1861,4 +1861,4 @@
 .ds-hidden-slide-notice{grid-column:1/-1;align-self:center;justify-self:center;display:flex;flex-direction:column;align-items:center;gap:.8rem;max-width:36rem;margin:auto;padding:1.4rem 1.6rem;border:1px dashed #cfc4e2;border-radius:.8rem;background:#faf8fe;color:#4a3d63;text-align:center}
 .ds-hidden-slide-notice p{margin:0;font-weight:700}
 /* View as Dashboard sits beside View Filters with the same height and shape. */
-.e2e-dashboards .ds-ppt-charts-view-dashboard { display: inline-flex; align-items: center; justify-content: center; align-self: end; width: auto; height: 2.55rem; min-height: 2.55rem; padding: .3rem 1rem; border-radius: 999px; font-size: .96rem; line-height: 1; }
+.ppt-dashboards .ds-ppt-charts-view-dashboard { display: inline-flex; align-items: center; justify-content: center; align-self: end; width: auto; height: 2.55rem; min-height: 2.55rem; padding: .3rem 1rem; border-radius: 999px; font-size: .96rem; line-height: 1; }

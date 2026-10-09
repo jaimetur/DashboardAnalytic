@@ -21,7 +21,7 @@ from time import monotonic
 from pathlib import Path
 from threading import Condition, Event, Lock, RLock, Thread
 from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 import pandas as pd
@@ -62,9 +62,35 @@ from src.modules.runtime_config import ignore_event_time_filtering
 from src.modules.ingestion import apply_operator_mappings
 
 KINDS = ('data', 'voice', 'speech')
-STATE_KEY = 'e2e_dashboards_v2'
-LEGACY_STATE_KEY = 'e2e_dashboard_sets_v1'
-DEFAULT_FILTERS_MIGRATION_KEY = 'e2e_dashboard_default_filters_v6'
+
+
+def existing_dataset_selection(definition: Any, dataset_kinds: dict[int, str]) -> Any:
+    """A Dashboard without the CDRs that are not in its workspace with their type (deleted, or from another workspace).
+
+    When none of its chosen CDRs is left, the Dashboard uses the latest CDRs again, like a Dashboard without CDRs.
+    """
+    if not isinstance(definition, dict) or not isinstance(definition.get('datasets'), dict):
+        return definition
+    stored = definition['datasets']
+    kept: dict[str, list] = {}
+    for kind, ids in stored.items():
+        values = ids if isinstance(ids, list) else []
+        kept[kind] = [value for value in values if _dataset_id(value) is not None and dataset_kinds.get(_dataset_id(value)) == kind]
+    if all(kept.get(kind) == (ids if isinstance(ids, list) else []) for kind, ids in stored.items()):
+        return definition
+    if any(kept.values()):
+        return {**definition, 'datasets': kept}
+    return {key: value for key, value in definition.items() if key != 'datasets'}
+
+
+def _dataset_id(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+STATE_KEY = 'ppt_dashboards_v2'
+LEGACY_STATE_KEY = 'ppt_dashboard_sets_v1'
+DEFAULT_FILTERS_MIGRATION_KEY = 'ppt_dashboard_default_filters_v6'
 DASHBOARD_PPT_JOBS_TABLE = 'dashboard_ppt_jobs'
 
 
@@ -437,7 +463,7 @@ def install_dashboard_routes(core):
 
     def workspace_key():
         if not core.active_workspace:
-            raise HTTPException(400, 'Open a workspace before using E2E Dashboards.')
+            raise HTTPException(400, 'Open a workspace before using PPT Dashboards.')
         return str(Path(core.repository.db_path).resolve())
 
     def dashboard_user(user=Depends(core.current_user)):
@@ -688,13 +714,13 @@ def install_dashboard_routes(core):
             'duration_seconds': duration,
             'slides': int(row['slide_count'] or 0), 'charts': int(row['chart_count'] or 0),
             'error': str(row['last_error'] or ''),
-            'download_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/download' if ready else None,
-            'charts_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts' if charts_ready else None,
-            'charts_api_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json' if charts_ready else None,
-            'charts_download_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.zip' if charts_ready else None,
-            'retry_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/retry' if str(row['status']) in {'ready', 'failed', 'stopped'} else None,
-            'stop_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/stop' if str(row['status']) in {'queued', 'processing'} else None,
-            'delete_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/delete',
+            'download_url': f'/api/ppt-dashboards/ppt-jobs/{job_id}/download' if ready else None,
+            'charts_url': f'/api/ppt-dashboards/ppt-jobs/{job_id}/charts' if charts_ready else None,
+            'charts_api_url': f'/api/ppt-dashboards/ppt-jobs/{job_id}/charts.json' if charts_ready else None,
+            'charts_download_url': f'/api/ppt-dashboards/ppt-jobs/{job_id}/charts.zip' if charts_ready else None,
+            'retry_url': f'/api/ppt-dashboards/ppt-jobs/{job_id}/retry' if str(row['status']) in {'ready', 'failed', 'stopped'} else None,
+            'stop_url': f'/api/ppt-dashboards/ppt-jobs/{job_id}/stop' if str(row['status']) in {'queued', 'processing'} else None,
+            'delete_url': f'/api/ppt-dashboards/ppt-jobs/{job_id}/delete',
         }
 
     def dashboard_preview_fingerprint(raw_definition, task_repository):
@@ -1068,7 +1094,7 @@ def install_dashboard_routes(core):
                     progress=model_progress_end, last_error='',
                 )
             update_dashboard_ppt_job(task_repository, job_id, progress=90, last_error='')
-            presentation = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
+            presentation = Presentation(core.settings.powerpoint_templates_dir / 'Template_01.pptx')
             _remove_all_slides(presentation)
             # Legend entries hidden in the viewer stay hidden in the PPT charts.
             job_row = dashboard_ppt_job(task_repository, job_id)
@@ -1306,8 +1332,15 @@ def install_dashboard_routes(core):
         if not isinstance(dashboards, dict):
             return dashboards
         reset_defaults = task_repository.get_workspace_state(DEFAULT_FILTERS_MIGRATION_KEY) != '1'
+        try:
+            dataset_kinds = {int(row['id']): str(row['dataset_kind'] or '') for row in task_repository.list_datasets()}
+        except (AttributeError, sqlite3.Error):
+            dataset_kinds = None
         migrated = {
-            dashboard_id: normalize_dashboard_filters(definition, reset_defaults=reset_defaults)
+            dashboard_id: normalize_dashboard_filters(
+                definition if dataset_kinds is None else existing_dataset_selection(definition, dataset_kinds),
+                reset_defaults=reset_defaults,
+            )
             for dashboard_id, definition in dashboards.items()
         }
         if migrated != dashboards or reset_defaults or task_repository.get_workspace_state(STATE_KEY) is None:
@@ -1526,7 +1559,7 @@ def install_dashboard_routes(core):
             for rows in range(1, row_limit + 1) for columns in range(1, column_limit + 1)
         }
         if names and deck is None:
-            deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
+            deck = Presentation(core.settings.powerpoint_templates_dir / 'Template_01.pptx')
         payload['grid_layouts'] = {
             name: normalized_frame_positions(_layout_chart_frames(_named_slide_layout(deck, name)))
             for name in sorted(names)
@@ -1574,12 +1607,12 @@ def install_dashboard_routes(core):
                                       operator_mappings=mappings, vendor_mappings=chart_mapping_settings['vendor_mappings'], vendor_comparison=definition.vendor_comparison, vendor_families=vendor_families,
                                       mapping_groups=chart_mapping_settings)
 
-    @app.get('/e2e-dashboards', response_class=HTMLResponse)
+    @app.get('/ppt-dashboards', response_class=HTMLResponse)
     def page(request: Request, user=Depends(dashboard_user)):
         workspace = workspace_key()
         with lock:
             dashboards = read_dashboards(bound_repository())
-        # Start cache preparation as soon as the E2E Dashboards module opens.
+        # Start cache preparation as soon as the PPT Dashboards module opens.
         # It must not depend on the browser opening a Dashboard or its filters.
         for dashboard_id, raw_definition in dashboards.items():
             if isinstance(raw_definition, dict):
@@ -1590,7 +1623,7 @@ def install_dashboard_routes(core):
             row['id'] for row in ready if row.get('dataset_kind') in KINDS
         )
         options = {tech: core.report_catalogue_options(tech) for tech in ('nsa', 'sa')}
-        return core.render_template(request, 'e2e_dashboards.html', {
+        return core.render_template(request, 'ppt_dashboards.html', {
             'user': user, 'dashboard_datasets': {kind: [row for row in ready if row.get('dataset_kind') == kind] for kind in KINDS},
             'dashboard_templates': {tech: [{'name': row['name'], 'identifier': row['identifier']} for row in rows] for tech, rows in options.items()},
             'dashboard_workspace_id': core.active_workspace.id,
@@ -1604,7 +1637,7 @@ def install_dashboard_routes(core):
             'dashboard_main_cities': core.repository.list_main_cities(),
         })
 
-    @app.get('/api/e2e-dashboards')
+    @app.get('/api/ppt-dashboards')
     def list_dashboards(user=Depends(dashboard_user)):
         workspace = workspace_key()
         with lock:
@@ -1619,7 +1652,7 @@ def install_dashboard_routes(core):
             headers={'Cache-Control': 'no-store, max-age=0, must-revalidate'},
         )
 
-    @app.get('/api/e2e-dashboards/{dashboard_id}/export')
+    @app.get('/api/ppt-dashboards/{dashboard_id}/export')
     def export_dashboard_definition(dashboard_id: str, user=Depends(dashboard_user)):
         """Create the same Dashboard archive accepted by Admin Import."""
         task_repository = bound_repository()
@@ -1905,7 +1938,7 @@ def install_dashboard_routes(core):
             dashboard_id, preview_fingerprint, cover_regions, cover_cities, cover_campaigns,
         )
 
-    @app.post('/api/e2e-dashboards/{dashboard_id}/export-ppt')
+    @app.post('/api/ppt-dashboards/{dashboard_id}/export-ppt')
     def export_dashboard_ppt(
         dashboard_id: str, request: DashboardPptExportRequest | None = None,
         user=Depends(dashboard_user),
@@ -1922,7 +1955,7 @@ def install_dashboard_routes(core):
         )
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
 
-    @app.get('/api/e2e-dashboards/ppt-jobs')
+    @app.get('/api/ppt-dashboards/ppt-jobs')
     def dashboard_ppt_jobs(user=Depends(dashboard_user)):
         task_repository = bound_repository()
         ensure_dashboard_ppt_jobs(task_repository)
@@ -1933,7 +1966,7 @@ def install_dashboard_routes(core):
             ).fetchall()
         return {'jobs': [serialize_dashboard_ppt_job(row) for row in rows]}
 
-    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/download')
+    @app.get('/api/ppt-dashboards/ppt-jobs/{job_id}/download')
     def download_dashboard_ppt(job_id: int, user=Depends(dashboard_user)):
         row = dashboard_ppt_job(bound_repository(), job_id)
         path = Path(str(row['output_path'])) if row else None
@@ -1944,7 +1977,7 @@ def install_dashboard_routes(core):
             media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation',
         )
 
-    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts')
+    @app.get('/api/ppt-dashboards/ppt-jobs/{job_id}/charts')
     def open_dashboard_ppt_charts(job_id: int, user=Depends(dashboard_user)):
         row = dashboard_ppt_job(bound_repository(), job_id)
         if row is None:
@@ -1956,7 +1989,7 @@ def install_dashboard_routes(core):
             raise HTTPException(404, 'Dashboard charts are not available.')
         cards = ''.join(
             f'<article><h2>{html.escape(str(item.get("title") or "Chart"))}</h2>'
-            f'<img src="/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{html.escape(str(item.get("file") or ""))}" alt=""></article>'
+            f'<img src="/api/ppt-dashboards/ppt-jobs/{job_id}/charts/{html.escape(str(item.get("file") or ""))}" alt=""></article>'
             for item in manifest.get('charts', []) if isinstance(item, dict)
         )
         return HTMLResponse(
@@ -1965,7 +1998,7 @@ def install_dashboard_routes(core):
             'img{display:block;width:100%;height:auto}h2{font-size:18px}</style></head><body>' + cards + '</body></html>'
         )
 
-    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json')
+    @app.get('/api/ppt-dashboards/ppt-jobs/{job_id}/charts.json')
     def dashboard_ppt_charts_manifest(job_id: int, user=Depends(dashboard_user)):
         row = dashboard_ppt_job(bound_repository(), job_id)
         if row is None:
@@ -2029,8 +2062,8 @@ def install_dashboard_routes(core):
                 'focus_row': int(item['focus_row']) if isinstance(item.get('focus_row'), int) else (
                     fallback_focus_rows[chart_index] if chart_index < len(fallback_focus_rows) else None
                 ),
-                'image_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{chart_file}',
-                'payload_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/chart-models/{model_file}' if model_available else None,
+                'image_url': f'/api/ppt-dashboards/ppt-jobs/{job_id}/charts/{chart_file}',
+                'payload_url': f'/api/ppt-dashboards/ppt-jobs/{job_id}/chart-models/{model_file}' if model_available else None,
                 'data_url': f'/ppt-jobs/{job_id}/data/{chart_index}' if definition_available and isinstance(item.get('entry_index'), int) else None,
             })
         chart_by_entry = {
@@ -2076,7 +2109,7 @@ def install_dashboard_routes(core):
             ),
         }
 
-    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{chart_index}/filter-context')
+    @app.get('/api/ppt-dashboards/ppt-jobs/{job_id}/charts/{chart_index}/filter-context')
     def dashboard_ppt_chart_filter_context(
         job_id: int, chart_index: int, prepare: bool = False, user=Depends(dashboard_user),
     ):
@@ -2138,7 +2171,7 @@ def install_dashboard_routes(core):
             'columns_by_source': columns_by_source, 'columns': columns,
         })
 
-    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/chart-models/{model_file}')
+    @app.get('/api/ppt-dashboards/ppt-jobs/{job_id}/chart-models/{model_file}')
     def dashboard_ppt_chart_model(job_id: int, model_file: str, user=Depends(dashboard_user)):
         if not re.fullmatch(r'slide-\d+-chart-\d+\.model\.json', model_file):
             raise HTTPException(404, 'Chart model not found.')
@@ -2150,7 +2183,7 @@ def install_dashboard_routes(core):
             raise HTTPException(404, 'Chart model not found.')
         return JSONResponse(payload)
 
-    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/data/{chart_index}')
+    @app.get('/api/ppt-dashboards/ppt-jobs/{job_id}/data/{chart_index}')
     def dashboard_ppt_chart_data(
         job_id: int, chart_index: int, page: int = 0, download: bool = False,
         column_filters: str = '', include_filter_values: bool = False, filter_column: str = '',
@@ -2229,7 +2262,7 @@ def install_dashboard_routes(core):
             'page_size': 100, 'unfiltered_total': chart_total,
         }
 
-    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{chart_file}')
+    @app.get('/api/ppt-dashboards/ppt-jobs/{job_id}/charts/{chart_file}')
     def dashboard_ppt_chart(job_id: int, chart_file: str, user=Depends(dashboard_user)):
         if not re.fullmatch(r'slide-\d+-chart-\d+\.png', chart_file):
             raise HTTPException(404, 'Chart not found.')
@@ -2239,7 +2272,7 @@ def install_dashboard_routes(core):
             raise HTTPException(404, 'Chart not found.')
         return FileResponse(path, media_type='image/png')
 
-    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts.zip')
+    @app.get('/api/ppt-dashboards/ppt-jobs/{job_id}/charts.zip')
     def download_dashboard_ppt_charts(job_id: int, user=Depends(dashboard_user)):
         row = dashboard_ppt_job(bound_repository(), job_id)
         charts_dir = Path(str(row['output_path'])).parent / 'dashboard-charts' if row else None
@@ -2256,7 +2289,7 @@ def install_dashboard_routes(core):
             media_type='application/zip', background=BackgroundTask(archive.unlink, missing_ok=True),
         )
 
-    @app.post('/api/e2e-dashboards/ppt-jobs/{job_id}/stop')
+    @app.post('/api/ppt-dashboards/ppt-jobs/{job_id}/stop')
     def stop_dashboard_ppt(job_id: int, user=Depends(dashboard_user)):
         task_repository = bound_repository()
         row = dashboard_ppt_job(task_repository, job_id)
@@ -2268,7 +2301,7 @@ def install_dashboard_routes(core):
         )
         return {'stopped': job_id}
 
-    @app.post('/api/e2e-dashboards/ppt-jobs/{job_id}/retry')
+    @app.post('/api/ppt-dashboards/ppt-jobs/{job_id}/retry')
     def retry_dashboard_ppt(job_id: int, user=Depends(dashboard_user)):
         task_repository = bound_repository()
         row = dashboard_ppt_job(task_repository, job_id)
@@ -2318,7 +2351,7 @@ def install_dashboard_routes(core):
         )
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
 
-    @app.post('/api/e2e-dashboards/ppt-jobs/delete-all')
+    @app.post('/api/ppt-dashboards/ppt-jobs/delete-all')
     def delete_all_dashboard_ppts(user=Depends(dashboard_editor_user)):
         task_repository = bound_repository()
         ensure_dashboard_ppt_jobs(task_repository)
@@ -2336,7 +2369,7 @@ def install_dashboard_routes(core):
         task_repository.add_log(user.username, 'delete_all_dashboard_ppts', json.dumps({'count': len(rows)}))
         return {'deleted': len(rows)}
 
-    @app.post('/api/e2e-dashboards/ppt-jobs/{job_id}/delete')
+    @app.post('/api/ppt-dashboards/ppt-jobs/{job_id}/delete')
     def delete_dashboard_ppt(job_id: int, user=Depends(dashboard_editor_user)):
         task_repository = bound_repository()
         row = dashboard_ppt_job(task_repository, job_id)
@@ -2360,7 +2393,7 @@ def install_dashboard_routes(core):
         ):
             raise HTTPException(409, f'An {target} Dashboard with this name already exists.')
 
-    @app.put('/api/e2e-dashboards/{dashboard_id}')
+    @app.put('/api/ppt-dashboards/{dashboard_id}')
     def save_dashboard(dashboard_id: str, definition: DashboardDefinition, user=Depends(dashboard_editor_user)):
         workspace = workspace_key()
         with lock:
@@ -2378,7 +2411,7 @@ def install_dashboard_routes(core):
         schedule_dashboard_warmup(workspace, dashboard_id, saved_definition, user.username, force=True)
         return {'id': dashboard_id, 'definition': saved_definition}
 
-    @app.patch('/api/e2e-dashboards/{dashboard_id}/name')
+    @app.patch('/api/ppt-dashboards/{dashboard_id}/name')
     def rename_dashboard(dashboard_id: str, payload: DashboardName, user=Depends(dashboard_editor_user)):
         name = payload.name.strip()
         if not name:
@@ -2394,7 +2427,7 @@ def install_dashboard_routes(core):
             task_repository.add_log(user.username, 'rename_dashboard', json.dumps({'id': dashboard_id, 'name': name}))
         return {'id': dashboard_id, 'name': name}
 
-    @app.patch('/api/e2e-dashboards/{dashboard_id}/template')
+    @app.patch('/api/ppt-dashboards/{dashboard_id}/template')
     def change_dashboard_template(
         dashboard_id: str, payload: DashboardTemplateSelection, user=Depends(dashboard_editor_user),
     ):
@@ -2435,7 +2468,7 @@ def install_dashboard_routes(core):
         schedule_dashboard_warmup(workspace, dashboard_id, saved_definition, user.username, force=True)
         return {'id': dashboard_id, 'definition': saved_definition, 'invalidated': True}
 
-    @app.delete('/api/e2e-dashboards/{dashboard_id}')
+    @app.delete('/api/ppt-dashboards/{dashboard_id}')
     def delete_dashboard(dashboard_id: str, user=Depends(dashboard_editor_user)):
         with lock:
             task_repository = bound_repository()
@@ -2447,7 +2480,7 @@ def install_dashboard_routes(core):
             task_repository.add_log(user.username, 'delete_dashboard', json.dumps({'id': dashboard_id}))
         return {'deleted': True}
 
-    @app.patch('/api/e2e-dashboards/{dashboard_id}/comments')
+    @app.patch('/api/ppt-dashboards/{dashboard_id}/comments')
     def save_dashboard_comments(dashboard_id: str, payload: DashboardComments, user=Depends(dashboard_editor_user)):
         with lock:
             task_repository = bound_repository()
@@ -3362,7 +3395,7 @@ def install_dashboard_routes(core):
         slide_entries_by_number: dict[int, list] = defaultdict(list)
         for entry in entries:
             slide_entries_by_number[entry.slide].append(entry)
-        deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
+        deck = Presentation(core.settings.powerpoint_templates_dir / 'Template_01.pptx')
         for editor_index, (index, entry) in enumerate(sorted(enumerate(entries), key=lambda item: (item[1].slide, item[0]))):
             editor_index = entry.template_index if entry.template_index is not None else editor_index
             slide = slides.setdefault(entry.slide, {
@@ -4012,7 +4045,7 @@ def install_dashboard_routes(core):
             while len(direct_preparation_results) > 256:
                 direct_preparation_results.popitem(last=False)
 
-    @app.post('/api/e2e-dashboards/prepare')
+    @app.post('/api/ppt-dashboards/prepare')
     def prepare(
         definition: DashboardDefinition,
         dashboard_id: str | None = None,
@@ -4083,7 +4116,7 @@ def install_dashboard_routes(core):
         Thread(target=execute_in_background, name='dashboard-preparation', daemon=True).start()
         return JSONResponse({'preparation_id': preparation_id, 'status': 'queued'}, status_code=202)
 
-    @app.post('/api/e2e-dashboards/filter-options')
+    @app.post('/api/ppt-dashboards/filter-options')
     def filter_options(request: DashboardFilterOptionsRequest, user=Depends(dashboard_user)):
         try:
             task_repository = bound_repository()
@@ -4092,7 +4125,7 @@ def install_dashboard_routes(core):
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post('/api/e2e-dashboards/filter-options/batch')
+    @app.post('/api/ppt-dashboards/filter-options/batch')
     def filter_options_batch(request: DashboardFilterOptionsBatchRequest, user=Depends(dashboard_user)):
         """Return the values the selected CDRs offer for several filters in one request."""
         try:
@@ -4101,14 +4134,14 @@ def install_dashboard_routes(core):
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post('/api/e2e-dashboards/geography-options')
+    @app.post('/api/ppt-dashboards/geography-options')
     def geography_options(definition: DashboardDefinition, user=Depends(dashboard_user)):
         try:
             return load_dashboard_geography_options(definition, bound_repository())
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.get('/api/e2e-dashboards/prepared/{token}')
+    @app.get('/api/ppt-dashboards/prepared/{token}')
     def prepared_preview(token: str, user=Depends(dashboard_user)):
         with lock:
             snapshot = snapshots.get(token)
@@ -4116,7 +4149,7 @@ def install_dashboard_routes(core):
                 raise HTTPException(410, 'Dashboard preview expired. Refresh the Dashboard.')
             return {**snapshot.payload, 'token': token}
 
-    @app.get('/api/e2e-dashboards/preparation-progress/{preparation_id}')
+    @app.get('/api/ppt-dashboards/preparation-progress/{preparation_id}')
     def preparation_progress(preparation_id: str, user=Depends(dashboard_user)):
         workspace = workspace_key()
         with lock:
@@ -4144,7 +4177,7 @@ def install_dashboard_routes(core):
             return restored
         raise HTTPException(409, 'Dashboard preparation is required.')
 
-    @app.get('/api/e2e-dashboards/prefetched/{dashboard_id}')
+    @app.get('/api/ppt-dashboards/prefetched/{dashboard_id}')
     def prefetched_dashboard(dashboard_id: str, user=Depends(dashboard_user)):
         task_repository = bound_repository()
         with lock:
@@ -4154,7 +4187,7 @@ def install_dashboard_routes(core):
             definition = DashboardDefinition.model_validate(runtime_dashboard_definition(raw_definition, task_repository))
         return prefetched_dashboard_response(dashboard_id, definition, user)
 
-    @app.post('/api/e2e-dashboards/prefetched/{dashboard_id}')
+    @app.post('/api/ppt-dashboards/prefetched/{dashboard_id}')
     def prefetched_dashboard_for_definition(
         dashboard_id: str,
         definition: DashboardDefinition,
@@ -5277,7 +5310,7 @@ def install_dashboard_routes(core):
             while visible_chart_requests.get(workspace, 0) and not core.APP_SHUTTING_DOWN.is_set():
                 visible_chart_condition.wait(timeout=0.5)
 
-    @app.get('/api/e2e-dashboards/chart/{token}/{index}')
+    @app.get('/api/ppt-dashboards/chart/{token}/{index}')
     def interactive_chart(token: str, index: int, priority: str = 'high', user=Depends(dashboard_user)):
         with lock:
             snapshot = snapshots.get(token)
@@ -5296,13 +5329,13 @@ def install_dashboard_routes(core):
         # Dashboard refresh and reintroduce an obsolete ordering/model.
         return JSONResponse(payload, headers={'Cache-Control': 'no-store'})
 
-    @app.post('/api/e2e-dashboards/chart/{token}/{index}/refresh')
+    @app.post('/api/ppt-dashboards/chart/{token}/{index}/refresh')
     def refresh_interactive_chart(token: str, index: int, user=Depends(dashboard_user)):
         """Invalidate and rebuild only the requested Canvas chart model."""
         payload = chart_model(token, index, user, force=True)
         return JSONResponse(payload, headers={'Cache-Control': 'no-store'})
 
-    @app.post('/api/e2e-dashboards/charts/{token}/refresh')
+    @app.post('/api/ppt-dashboards/charts/{token}/refresh')
     def refresh_interactive_charts(token: str, user=Depends(dashboard_user)):
         """Invalidate and rebuild every available Canvas model in a Dashboard snapshot."""
         with lock:
@@ -5318,7 +5351,7 @@ def install_dashboard_routes(core):
         ))
         with ThreadPoolExecutor(
             max_workers=DASHBOARD_CHART_RENDER_WORKERS,
-            thread_name_prefix='e2e-dashboard-refresh',
+            thread_name_prefix='ppt-dashboard-refresh',
         ) as chart_executor:
             futures = [
                 chart_executor.submit(
@@ -5331,7 +5364,7 @@ def install_dashboard_routes(core):
         core.invalidate_workspace_size_cache(Path(workspace).parent)
         return {'refreshed': len(indexes)}
 
-    @app.get('/api/e2e-dashboards/chart/{token}/{index}/filter-context')
+    @app.get('/api/ppt-dashboards/chart/{token}/{index}/filter-context')
     def interactive_chart_filter_context(token: str, index: int, user=Depends(dashboard_user)):
         """Return filter fields available to an expanded Dashboard chart."""
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
@@ -5514,7 +5547,7 @@ def install_dashboard_routes(core):
             if job is not None:
                 job.update(result)
 
-    @app.post('/api/e2e-dashboards/chart/{token}/{index}/filter-preview')
+    @app.post('/api/ppt-dashboards/chart/{token}/{index}/filter-preview')
     def interactive_chart_filter_preview(
         token: str,
         index: int,
@@ -5553,7 +5586,7 @@ def install_dashboard_routes(core):
             headers={'Cache-Control': 'no-store'},
         )
 
-    @app.get('/api/e2e-dashboards/chart-preview-jobs/{job_id}')
+    @app.get('/api/ppt-dashboards/chart-preview-jobs/{job_id}')
     def interactive_chart_filter_preview_status(job_id: str, user=Depends(dashboard_user)):
         """Return a temporary Chart Definition preview once its query completes."""
         with lock:
@@ -5574,7 +5607,7 @@ def install_dashboard_routes(core):
             raise HTTPException(int(result.get('status') or 500), str(result.get('detail') or 'Unable to render chart preview.'))
         return JSONResponse(result['payload'], headers={'Cache-Control': 'no-store'})
 
-    @app.post('/api/e2e-dashboards/chart/{token}/{index}/update-template')
+    @app.post('/api/ppt-dashboards/chart/{token}/{index}/update-template')
     def update_interactive_chart_template(
         token: str,
         index: int,
@@ -5871,11 +5904,11 @@ def install_dashboard_routes(core):
             result[dashboard_id] = {'state': 'loading-data', 'label': label}
         return JSONResponse(result, headers={'Cache-Control': 'no-store, max-age=0, must-revalidate'})
 
-    @app.get('/api/e2e-dashboards/statuses')
+    @app.get('/api/ppt-dashboards/statuses')
     def dashboard_statuses(active_dashboard_id: str | None = None, user=Depends(dashboard_user)):
         return dashboard_status_payload(username=user.username, active_dashboard_id=active_dashboard_id)
 
-    @app.post('/api/e2e-dashboards/statuses')
+    @app.post('/api/ppt-dashboards/statuses')
     def dashboard_statuses_for_session(
         definitions: dict[str, DashboardDefinition], active_dashboard_id: str | None = None,
         user=Depends(dashboard_user),
@@ -5995,14 +6028,14 @@ def install_dashboard_routes(core):
             schedule_dashboard_warmup(workspace, dashboard_id, definition, username, force=True)
         return len(changed)
 
-    core.e2e_dashboard_tasks = dashboard_task_payloads
-    core.e2e_dashboard_cancel_workspace_tasks = cancel_workspace_dashboard_tasks
-    core.e2e_dashboard_invalidate_chart_models = invalidate_workspace_chart_models
-    core.e2e_dashboard_stop_task = stop_dashboard_task
-    core.e2e_dashboard_rename_template_references = rename_template_dashboards
-    core.e2e_dashboard_reconcile_template_slide_comments = reconcile_template_slide_comments
+    core.ppt_dashboard_tasks = dashboard_task_payloads
+    core.ppt_dashboard_cancel_workspace_tasks = cancel_workspace_dashboard_tasks
+    core.ppt_dashboard_invalidate_chart_models = invalidate_workspace_chart_models
+    core.ppt_dashboard_stop_task = stop_dashboard_task
+    core.ppt_dashboard_rename_template_references = rename_template_dashboards
+    core.ppt_dashboard_reconcile_template_slide_comments = reconcile_template_slide_comments
 
-    @app.get('/api/e2e-dashboards/preview/{token}/{index}.png')
+    @app.get('/api/ppt-dashboards/preview/{token}/{index}.png')
     def chart(token: str, index: int, user=Depends(dashboard_user)):
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
         entry_key = sha256(repr(entry).encode()).hexdigest()
@@ -6055,7 +6088,7 @@ def install_dashboard_routes(core):
         # server has rebuilt its model or mapping-dependent frame.
         return Response(png, media_type='image/png', headers={'Cache-Control': 'no-store, max-age=0, must-revalidate'})
 
-    @app.get('/api/e2e-dashboards/data/{token}/{index}')
+    @app.get('/api/ppt-dashboards/data/{token}/{index}')
     def chart_data(
         token: str, index: int, page: int = 0, download: bool = False,
         column_filters: str = '', include_filter_values: bool = False, filter_column: str = '',

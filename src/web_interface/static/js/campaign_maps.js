@@ -5,7 +5,6 @@
   const root = document.querySelector('[data-campaign-maps]');
   if (!root) return;
 
-  const DEFAULT_MAP = {format: '{year}-Q{quarter}{-mode}', mode_order: ['', 'NSA', 'SA'], exceptions: []};
   const MODE_LABELS = {'': 'Without mode (for example 2026-Q2)', NSA: 'NSA', SA: 'SA'};
   const $ = (selector) => root.querySelector(selector);
   const node = (tag, text, className) => {
@@ -18,6 +17,9 @@
     try { return JSON.parse(document.getElementById(id)?.textContent || 'null') ?? fallback; } catch (_error) { return fallback; }
   };
   const campaigns = readJson('campaign-map-campaigns', []);
+  // The default map of the application (assets/labels-campaigns/default-campaign-map.json).
+  const DEFAULT_MAP = {format: '{year}-Q{quarter}{-mode}', mode_order: ['', 'NSA', 'SA'], exceptions: [],
+    ...(readJson('campaign-map-default', {}) || {})};
   const saved = {...DEFAULT_MAP, ...(readJson('campaign-map', {}) || {})};
 
   const iconButton = (label, title, action) => {

@@ -42,13 +42,13 @@
   let pptDashboardViewer = null;
   let dashboardPptJobsLoaded = false, dashboardPptJobsRefreshing = false;
   const authenticatedSession = document.body.dataset.authenticatedSession || 'anonymous';
-  const openStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:open:${authenticatedSession}`;
-  const filtersOpenStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:filters-open:${authenticatedSession}`;
-  const libraryStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:library`;
-  const scrollStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:scroll`;
-  const preparedStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:prepared`;
-  const universeStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:universes`;
-  const presentationEffectStorageKey = 'drivetest-analyzer:e2e-dashboards:presentation-effect';
+  const openStorageKey = `drivetest-analyzer:ppt-dashboards:${config.workspace}:open:${authenticatedSession}`;
+  const filtersOpenStorageKey = `drivetest-analyzer:ppt-dashboards:${config.workspace}:filters-open:${authenticatedSession}`;
+  const libraryStorageKey = `drivetest-analyzer:ppt-dashboards:${config.workspace}:library`;
+  const scrollStorageKey = `drivetest-analyzer:ppt-dashboards:${config.workspace}:scroll`;
+  const preparedStorageKey = `drivetest-analyzer:ppt-dashboards:${config.workspace}:prepared`;
+  const universeStorageKey = `drivetest-analyzer:ppt-dashboards:${config.workspace}:universes`;
+  const presentationEffectStorageKey = 'drivetest-analyzer:ppt-dashboards:presentation-effect';
   try {
     const storedPresentationEffect = localStorage.getItem(presentationEffectStorageKey);
     const effectSelect = $('ds-presentation-effect');
@@ -360,7 +360,7 @@
     syncPreparationRefresh();
   };
   const api = async (path = '', method = 'GET', body, signal) => {
-    const request = () => fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
+    const request = () => fetch(`/api/ppt-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
     let response = await request();
     // Some reverse proxies can return a transient, non-JSON 501 while the
     // preparation worker route is being refreshed. A single retry is safe:
@@ -396,7 +396,7 @@
     if (!payload) throw new Error('The Dashboard API returned HTML instead of JSON. Please reload the page and try again.');
     return payload;
   };
-  const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
+  const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'PPT Dashboards',tone:'error'}); } } };
   const bind = (id, fn) => $(id).addEventListener('click', safe(fn));
   // Pre-caching never blocks an export: the export job pre-caches the chosen
   // universe itself. Only a Dashboard without usable CDRs cannot be exported.
@@ -606,7 +606,7 @@
     if (values.length) dashboard.filters[selectionField] = values;
     return dashboard;
   };
-  const pptDialogStorageKey = dashboardId => `drivetest-analyzer:e2e-dashboards:${config.workspace}:ppt-dialog:${config.username || authenticatedSession}:${dashboardId}`;
+  const pptDialogStorageKey = dashboardId => `drivetest-analyzer:ppt-dashboards:${config.workspace}:ppt-dialog:${config.username || authenticatedSession}:${dashboardId}`;
   // The PPT export dialog scrolls its body, which would clip an opened
   // selector menu. The menu is fixed right below its field instead, so it can
   // overflow the panel and the dialog without anything scrolling.
@@ -876,7 +876,7 @@
         library();
         status(`Saved ${part === 'universe' ? 'Dataset Universe' : 'filters'} for “${result.definition.name}”.`);
       } catch (error) {
-        window.showInfoDialog?.(error.message, {title: 'E2E Dashboards', tone: 'error'});
+        window.showInfoDialog?.(error.message, {title: 'PPT Dashboards', tone: 'error'});
       } finally {
         savingDashboardPart = false; updateSaveState();
       }
@@ -1221,7 +1221,7 @@
     status(`Updated NR Mode and Template for “${item.name}”. Dataset Universe and filters were preserved.`);
     void refreshDashboardStatuses();
   };
-  // "Dashboard Datasets & Filters" is a sub-panel of Manage Dashboards: it is
+  // "Dashboard Datasets & Filters" is a sub-panel of PPT Manage Dashboards: it is
   // shown in a table row directly below the Dashboard whose filters are open,
   // and parked (hidden) whenever no Dashboard has its filters open. Compact
   // screens show it in the same floating dialog used by the Dashboard viewer.
@@ -2535,7 +2535,7 @@
     const result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id);
   }
   async function exportDashboard(id, item) {
-    const response = await fetch(`/api/e2e-dashboards/${encodeURIComponent(id)}/export`, {credentials: 'same-origin'});
+    const response = await fetch(`/api/ppt-dashboards/${encodeURIComponent(id)}/export`, {credentials: 'same-origin'});
     if (!response.ok) throw new Error(await response.text() || 'Unable to export the Dashboard.');
     const blob = await response.blob(), url = URL.createObjectURL(blob), link = node('a');
     link.href = url; link.download = `${item.name.replace(/[^a-z0-9_-]/gi, '_')}_dashboard.zip`; link.click();
@@ -2679,7 +2679,7 @@
     if (item) await queueDashboardPptExport(activeId, item);
   });
   bind('ds-view', openActiveDashboardViewer);
-  const chartPayloadUrl = chart => chart.payload_url || `/api/e2e-dashboards/chart/${prepared.token}/${chart.index}`;
+  const chartPayloadUrl = chart => chart.payload_url || `/api/ppt-dashboards/chart/${prepared.token}/${chart.index}`;
   const rememberRenderedChartPayload = (chart, payload) => {
     const url = chartPayloadUrl(chart);
     renderedChartPayloads.set(url, payload);
@@ -2692,7 +2692,7 @@
   // the PPT export uses too). They last for the browser session.
   const legendVisibilityStates = new Map();
   const legendCharts = new Map();
-  const legendVisibilityStorageKey = id => `drivetest-analyzer:e2e-dashboards:${config.workspace}:legend:${authenticatedSession}:${id}`;
+  const legendVisibilityStorageKey = id => `drivetest-analyzer:ppt-dashboards:${config.workspace}:legend:${authenticatedSession}:${id}`;
   const legendVisibility = (id = activeId) => {
     if (!legendVisibilityStates.has(id)) {
       let stored = {};
@@ -3166,7 +3166,7 @@
     return sync;
   };
   const expandedOverlayHost = $('ds-chart-expanded-overlay');
-  expandedOverlayHost.classList.add('ds-overlay', 'e2e-dashboards');
+  expandedOverlayHost.classList.add('ds-overlay', 'ppt-dashboards');
   document.body.append(expandedOverlayHost);
   document.body.append($('ds-editor-overlay'));
   document.body.append($('ds-data-overlay'));
@@ -3663,7 +3663,7 @@
     const chart = expandedChart;
     const token = prepared.token;
     const request = expandedChartRequest;
-    const url = `/api/e2e-dashboards/chart/${token}/${chart.index}`;
+    const url = `/api/ppt-dashboards/chart/${token}/${chart.index}`;
     setExpandedRefreshBusy(true);
     status(`Rendering ${chart.title || 'chart'} again…`);
     try {
@@ -4155,7 +4155,7 @@
     if (request.filter_column) parameters.set('filter_column', request.filter_column);
     const downloadParameters = new URLSearchParams({download: 'true'});
     if (encodedFilters !== '{}') downloadParameters.set('column_filters', encodedFilters);
-    $('ds-data-download').href = `/api/e2e-dashboards${dataEndpoint}?${downloadParameters}`;
+    $('ds-data-download').href = `/api/ppt-dashboards${dataEndpoint}?${downloadParameters}`;
     return api(`${dataEndpoint}?${parameters}`);
   };
   async function renderData() {

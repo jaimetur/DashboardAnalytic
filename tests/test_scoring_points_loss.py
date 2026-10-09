@@ -93,10 +93,13 @@ def test_map_areas_take_the_points_of_the_city_or_route_that_loses_most_in_them(
 
 
 
-def test_bundled_itl3_boundaries_cover_the_uk():
-    boundaries = points_loss.bundled_boundaries('ITL3')
+def test_the_itl3_areas_shipped_for_the_uk_cover_it():
+    from src.modules import map_areas
+
+    assert map_areas.bundled_layers()['GBR']['level_label'] == 'ITL3 area'
+    boundaries = map_areas.bundled_rings('GBR')
     assert len(boundaries) == 182 and 'Leeds' in boundaries
-    names = points_loss.boundary_names('ITL3', pd.Series([53.80, 51.51, 0.0]), pd.Series([-1.55, -0.13, 0.0]))
+    names = map_areas.area_index(None).names_of(pd.Series([53.80, 51.51, 0.0]), pd.Series([-1.55, -0.13, 0.0]))
     assert names.iloc[0] == 'Leeds' and names.iloc[1] == 'Westminster and City of London' and pd.isna(names.iloc[2])
 
 
@@ -161,9 +164,9 @@ def test_job_api_serves_the_map_layers_without_the_raw_shares(scoring_api, monke
     payload = client.get(f'/api/scoring/jobs/{job_id}').json()
     assert 'points_loss' not in payload
     assert any(item['field'] == 'Area' for item in payload['views']['insights']['points_loss_maps'])
-    # UK tests use the bundled ITL3 areas; no country outline is needed under them.
+    # UK tests use the ITL3 areas shipped with the application, over the outline of the country.
     layer = client.get(f'/api/scoring/jobs/{job_id}/boundaries/Area').json()
-    assert layer['field'] == 'Area' and len(layer['boundaries']) == 182 and layer['background'] == []
+    assert layer['field'] == 'Area' and len(layer['boundaries']) == 182 and layer['background']
     assert client.get(f'/api/scoring/jobs/{job_id}/boundaries/ITL3').status_code == 404
     # Without a Clusters dataset applied to the CDRs the Cluster layer has no polygons.
     assert client.get(f'/api/scoring/jobs/{job_id}/boundaries/Cluster').json()['boundaries'] == {}

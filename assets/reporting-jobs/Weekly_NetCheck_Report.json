@@ -1,0 +1,48 @@
+{
+  "name": "Weekly NetCheck Report",
+  "enabled": false,
+  "send_email": false,
+  "recipients": [],
+  "schedule": {
+    "mode": "weekly",
+    "time": "08:00",
+    "weekdays": [
+      0
+    ]
+  },
+  "definition": {
+    "dashboards": [
+      {
+        "dashboard": {
+          "name": "NetCheck CDR Report",
+          "template_technology": "nsa"
+        },
+        "cdr_selection": "newest"
+      },
+      {
+        "dashboard": {
+          "name": "NetCheck CDR Report",
+          "template_technology": "sa"
+        },
+        "cdr_selection": "newest"
+      },
+      {
+        "dashboard": {
+          "name": "RF Quality (RSRP & SINR)",
+          "template_technology": "nsa"
+        },
+        "cdr_selection": "newest"
+      }
+    ],
+    "scoring": [
+      {
+        "nr_mode": "NSA",
+        "cdr_selection": "newest",
+        "formats": [
+          "powerpoint"
+        ],
+        "report_configuration": "National & Main Cities"
+      }
+    ]
+  }
+}

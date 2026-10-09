@@ -1193,4 +1193,11 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
             repository, job_id, status='failed', progress=100,
             message='Scoring calculation failed', last_error=str(exc), finished_at=local_now_iso(),
         )
+        # App Logs show why a calculation failed, with where it happened.
+        if hasattr(repository, 'try_add_log'):
+            import traceback
+            repository.try_add_log(str(job.get('created_by') or 'system'), 'scoring_job_failed', json.dumps({
+                'job_id': job_id, 'error': f'{type(exc).__name__}: {exc}',
+                'location': ''.join(traceback.format_exception(exc)[-3:]).strip()[-1500:],
+            }, ensure_ascii=False))
     return get_scoring_job(repository, job_id, include_result=True)

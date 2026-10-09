@@ -1280,7 +1280,7 @@ def test_catalogue_editor_offers_result_group_for_every_cdr_source(client) -> No
     dimensions = app_module.parse_calculated_dimensions(app_module.default_calculated_dimensions())
     columns = app_module.catalogue_editor_columns([], dimensions)
 
-    assert all('Result Group' in values for values in columns.values())
+    assert all('Test_Result_Group' in values for values in columns.values())
 
 
 def test_cdr_all_assistance_fields_union_every_individual_source(client) -> None:
@@ -1369,7 +1369,7 @@ def test_configuration_access_matches_editor_and_viewer_roles(client) -> None:
     assert 'href="/application-config"' in workspace_page.text
     assert 'href="/workspace-config"' in workspace_page.text
     assert 'class="module-tab module-tab-config active"' in workspace_page.text
-    assert '<h2>Report Templates Management</h2>' in workspace_page.text
+    assert '<h2>PPT Templates Management</h2>' in workspace_page.text
     assert '<h2>Operator Maps</h2>' in workspace_page.text
     assert '<h2>Vendor Maps</h2>' in workspace_page.text
     assert client.get('/admin').status_code == 403
@@ -1433,12 +1433,12 @@ def test_cdr_materialisation_adds_workspace_dimensions_to_dataset_rows() -> None
     dimensions = app_module.parse_calculated_dimensions(app_module.default_calculated_dimensions())
     frame = app_module.materialize_calculated_dimensions(pd.DataFrame({
         'Session_Type': ['VoLTE'], 'Type_of_Test': ['HTTP'], 'Test_Name': ['YouTube'],
-        'Test Family': ['stale duplicate candidate'],
+        'Test_Family': ['stale duplicate candidate'],
     }), dimensions, 'cdr-data')
 
-    assert 'Call Family' not in frame.columns
-    assert frame['Test Family'].tolist() == ['YouTube']
-    assert frame.columns.tolist().count('Test Family') == 1
+    assert 'Call_Family' not in frame.columns
+    assert frame['Test_Family'].tolist() == ['YouTube']
+    assert frame.columns.tolist().count('Test_Family') == 1
 
 
 def test_calculated_dimension_rules_ignore_case_and_compact_redundant_field_aliases() -> None:
@@ -2259,12 +2259,12 @@ def test_renaming_calculated_dimension_rebuilds_references_in_templates_and_dash
         },
     }))
     dimensions = app_module.calculated_dimensions_json(app_module.load_workspace_calculated_dimensions())
-    renamed = next(item for item in dimensions if item['name'] == 'Test Family')
+    renamed = next(item for item in dimensions if item['name'] == 'Test_Family')
     renamed['name'] = 'Test Classification'
 
     response = client.put('/api/workspace/calculated-dimensions', json={
         'dimensions': dimensions,
-        'renames': [{'from': 'Test Family', 'to': 'Test Classification'}],
+        'renames': [{'from': 'Test_Family', 'to': 'Test Classification'}],
     })
 
     assert response.status_code == 200
@@ -2283,16 +2283,16 @@ def test_renaming_calculated_dimension_rebuilds_references_in_templates_and_dash
     assert dashboards['dashboard-1']['filters'] == {'Test Classification': ['Video'], 'Operator': ['EE']}
 
 
-def test_reporting_deletion_requires_admin(client, reporting_old) -> None:
+def test_reporting_deletion_requires_admin(client, ppt_reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     endpoints = [
-        '/reporting-old/chart-sets/delete-all',
-        '/reporting-old/chart-sets/missing/delete',
-        '/reporting-old/chart-jobs/999999/delete',
-        '/reporting-old/jobs/999999/charts/delete',
-        '/reporting-old/jobs/999999/delete',
-        '/reporting-old/jobs/delete-all',
+        '/ppt-reporting-old/chart-sets/delete-all',
+        '/ppt-reporting-old/chart-sets/missing/delete',
+        '/ppt-reporting-old/chart-jobs/999999/delete',
+        '/ppt-reporting-old/jobs/999999/charts/delete',
+        '/ppt-reporting-old/jobs/999999/delete',
+        '/ppt-reporting-old/jobs/delete-all',
     ]
     # E2E Reporting is limited to super-admins and the EJAITUR user; deletion
     # additionally requires an administrative role.
@@ -2303,7 +2303,7 @@ def test_reporting_deletion_requires_admin(client, reporting_old) -> None:
     ]:
         app_module.SESSIONS[token] = app_module.SessionUser(username=username, role=role)
         client.cookies.set(app_module.SESSION_COOKIE, token)
-        page = client.get('/reporting-old')
+        page = client.get('/ppt-reporting-old')
         assert page.status_code == 200
         assert ('data-report-chart-set-delete>Delete Selected' in page.text) == allowed
         assert ('class="report-jobs-bulk-actions"' in page.text) == allowed
@@ -2637,7 +2637,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert 'import_export_notice=' in imported_response.headers['location']
     assert any(workspace.name == 'Default' for workspace in app_module.workspace_registry.list())
 
-    app_module.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({
+    app_module.repository.set_workspace_state('ppt_dashboards_v2', json.dumps({
         'exported-dashboard': {'name': 'Exported Dashboard'},
     }))
     app_module.repository.set_main_cities(['London', 'Leeds'])
@@ -4417,7 +4417,7 @@ def test_admin_dataset_rows_can_be_reordered_in_descending_order_and_all_ids_are
         processing_options_json=json.dumps({'vodafone_mapping_dataset_id': 1}),
     )
     app_module.repository.set_workspace_state(
-        'e2e_dashboards_v2',
+        'ppt_dashboards_v2',
         json.dumps({'dashboard': {'datasets': {'data': [3, 1]}}}),
     )
     with app_module.repository.connection() as connection:
@@ -4479,7 +4479,7 @@ def test_admin_dataset_rows_can_be_reordered_in_descending_order_and_all_ids_are
         'three_mapping_dataset_id': None,
         'region_mapping_dataset_id': None,
     }]
-    dashboard_state = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))
+    dashboard_state = json.loads(app_module.repository.get_workspace_state('ppt_dashboards_v2'))
     assert dashboard_state['dashboard']['datasets']['data'] == [2, 3]
     with app_module.repository.connection() as connection:
         job = connection.execute(
@@ -4959,7 +4959,7 @@ def test_workspace_cache_clear_removes_only_derived_dashboard_artifacts(client, 
             raise AssertionError('Cache clearing must not wait for Dashboard workers.')
 
     monkeypatch.setattr(
-        app_module, 'e2e_dashboard_cancel_workspace_tasks',
+        app_module, 'ppt_dashboard_cancel_workspace_tasks',
         lambda _workspace: [StillRunningWorker()],
     )
 
@@ -5170,7 +5170,7 @@ def test_interrupted_background_jobs_become_retryable_failures(client) -> None:
     report = app_module.repository.get_report_run(report_id)
     assert report['status'] == 'failed'
     assert 'application restarted' in report['last_error']
-    assert app_module.serialize_report_job(report)['retry_url'] == f'/reporting-old/jobs/{report_id}/retry'
+    assert app_module.serialize_report_job(report)['retry_url'] == f'/ppt-reporting-old/jobs/{report_id}/retry'
 
 
 def test_interrupted_dataset_processing_is_resumed_instead_of_failed(client) -> None:
@@ -5588,8 +5588,8 @@ def test_backup_list_marks_zips_cut_short_as_incomplete(client) -> None:
 
 def test_dashboard_library_open_close_and_view_actions_include_labels() -> None:
     root = Path(__file__).parents[1] / 'src' / 'web_interface' / 'static'
-    script = (root / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
-    styles = (root / 'css' / 'e2e_dashboards.css').read_text(encoding='utf-8')
+    script = (root / 'js' / 'ppt_dashboards.js').read_text(encoding='utf-8')
+    styles = (root / 'css' / 'ppt_dashboards.css').read_text(encoding='utf-8')
 
     assert "action('View Dashboard', 'View Dashboard'" in script
     assert "filtersAreOpen ? 'Close Filters' : 'Open Filters'" in script
@@ -5606,9 +5606,9 @@ def test_dashboard_library_open_close_and_view_actions_include_labels() -> None:
 
 def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     root = Path(__file__).parents[1] / 'src' / 'web_interface'
-    template = (root / 'templates' / 'e2e_dashboards.html').read_text(encoding='utf-8')
-    script = (root / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
-    styles = (root / 'static' / 'css' / 'e2e_dashboards.css').read_text(encoding='utf-8')
+    template = (root / 'templates' / 'ppt_dashboards.html').read_text(encoding='utf-8')
+    script = (root / 'static' / 'js' / 'ppt_dashboards.js').read_text(encoding='utf-8')
+    styles = (root / 'static' / 'css' / 'ppt_dashboards.css').read_text(encoding='utf-8')
 
     assert 'id="ds-ppt-dataset-overlay"' in template
     assert 'id="ds-ppt-dataset-choices"' in template
@@ -5659,7 +5659,7 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
 
 def test_dashboard_filters_panel_defaults_hidden_and_expanded_and_persists_for_the_session() -> None:
     root = Path(__file__).parents[1] / 'src' / 'web_interface'
-    template = (root / 'templates' / 'e2e_dashboards.html').read_text(encoding='utf-8')
+    template = (root / 'templates' / 'ppt_dashboards.html').read_text(encoding='utf-8')
     app_script = (root / 'static' / 'js' / 'app.js').read_text(encoding='utf-8')
 
     panel = template.split('id="ds-filter-panel"', 1)[1].split('>', 1)[0]
@@ -5668,7 +5668,7 @@ def test_dashboard_filters_panel_defaults_hidden_and_expanded_and_persists_for_t
     assert "const sessionScoped = panel.dataset.panelStateStorage === 'session';" in app_script
     assert 'const storage = sessionScoped ? window.sessionStorage : window.localStorage;' in app_script
 
-    dashboard_script = (root / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+    dashboard_script = (root / 'static' / 'js' / 'ppt_dashboards.js').read_text(encoding='utf-8')
     assert "const authenticatedSession = document.body.dataset.authenticatedSession || 'anonymous';" in dashboard_script
     assert ':open:${authenticatedSession}`' in dashboard_script
     assert ':filters-open:${authenticatedSession}`' in dashboard_script
@@ -5676,7 +5676,7 @@ def test_dashboard_filters_panel_defaults_hidden_and_expanded_and_persists_for_t
 
 
 def test_dashboard_open_hydrates_saved_state_before_preparation_catalogues() -> None:
-    script = (Path(__file__).parents[1] / 'src' / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+    script = (Path(__file__).parents[1] / 'src' / 'web_interface' / 'static' / 'js' / 'ppt_dashboards.js').read_text(encoding='utf-8')
 
     assert 'return hasStoredUniverse(value) ? saved : {...saved, ...(rememberedUniverse(id) || {})};' in script
     assert 'const hasStoredSelection = Object.prototype.hasOwnProperty.call(definition.filters, field);' in script
@@ -5684,7 +5684,7 @@ def test_dashboard_open_hydrates_saved_state_before_preparation_catalogues() -> 
 
 
 def test_ready_open_dashboard_preloads_chart_models_before_viewer_opens() -> None:
-    script = (Path(__file__).parents[1] / 'src' / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+    script = (Path(__file__).parents[1] / 'src' / 'web_interface' / 'static' / 'js' / 'ppt_dashboards.js').read_text(encoding='utf-8')
 
     assert 'function scheduleBackgroundChartPreload(token)' in script
     assert "scheduleBackgroundChartPreload(payload.token);" in script
@@ -5694,8 +5694,8 @@ def test_ready_open_dashboard_preloads_chart_models_before_viewer_opens() -> Non
 
 def test_dashboard_standard_universe_warmup_and_open_state_restoration_are_configured() -> None:
     root = Path(__file__).parents[1] / 'src'
-    dashboard_source = (root / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
-    script = (root / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+    dashboard_source = (root / 'modules' / 'ppt_dashboards.py').read_text(encoding='utf-8')
+    script = (root / 'web_interface' / 'static' / 'js' / 'ppt_dashboards.js').read_text(encoding='utf-8')
 
     # Every CDR plus the latest 1..4 CDRs of each type, of the Dashboard's NR Mode.
     assert "universes = [{kind: [int(row['id']) for row in rows] for kind, rows in ordered.items()}]" in dashboard_source
@@ -5713,9 +5713,9 @@ def test_dashboard_standard_universe_warmup_and_open_state_restoration_are_confi
 
 def test_ppt_job_can_open_its_immutable_dashboard_snapshot() -> None:
     root = Path(__file__).parents[1] / 'src'
-    dashboard_source = (root / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
-    script = (root / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
-    styles = (root / 'web_interface' / 'static' / 'css' / 'e2e_dashboards.css').read_text(encoding='utf-8')
+    dashboard_source = (root / 'modules' / 'ppt_dashboards.py').read_text(encoding='utf-8')
+    script = (root / 'web_interface' / 'static' / 'js' / 'ppt_dashboards.js').read_text(encoding='utf-8')
+    styles = (root / 'web_interface' / 'static' / 'css' / 'ppt_dashboards.css').read_text(encoding='utf-8')
 
     # The snapshot keeps the viewer slides as exported, with hidden dynamic cards removed.
     assert "for slide in snapshot.payload.get('slides', []):" in dashboard_source
@@ -5733,8 +5733,8 @@ def test_ppt_job_can_open_its_immutable_dashboard_snapshot() -> None:
 
 def test_dashboard_ppt_job_is_queued_before_preparation_and_chart_rendering() -> None:
     root = Path(__file__).parents[1] / 'src'
-    dashboard_source = (root / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
-    script = (root / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+    dashboard_source = (root / 'modules' / 'ppt_dashboards.py').read_text(encoding='utf-8')
+    script = (root / 'web_interface' / 'static' / 'js' / 'ppt_dashboards.js').read_text(encoding='utf-8')
 
     assert 'never make the library button wait for' in script
     assert 'scopePreview = await api' not in script
@@ -5744,7 +5744,7 @@ def test_dashboard_ppt_job_is_queued_before_preparation_and_chart_rendering() ->
 
 
 def test_cold_dashboard_ppt_job_progress_covers_prepare_models_and_presentation() -> None:
-    source = (Path(__file__).parents[1] / 'src' / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
+    source = (Path(__file__).parents[1] / 'src' / 'modules' / 'ppt_dashboards.py').read_text(encoding='utf-8')
 
     # Universe pre-caching owns 1-12% and the export's own preparation 12-24%.
     assert 'progress=max(1, min(12, 1 + round(percent * 0.11))),' in source
@@ -5765,7 +5765,7 @@ def test_dashboard_background_tasks_are_named_without_dashboard_subgroups() -> N
 
 
 def test_complete_dashboard_universe_uses_materialized_row_counts() -> None:
-    source = (Path(__file__).parents[1] / 'src' / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
+    source = (Path(__file__).parents[1] / 'src' / 'modules' / 'ppt_dashboards.py').read_text(encoding='utf-8')
 
     assert 'def is_complete_unfiltered_universe(' in source
     assert 'known_full_row_counts=selected_source_rows if complete_unfiltered_universe else None' in source
@@ -5774,7 +5774,7 @@ def test_complete_dashboard_universe_uses_materialized_row_counts() -> None:
 
 def test_dashboard_reduced_and_filtered_universes_share_one_combined_count_query(tmp_path: Path) -> None:
     root = Path(__file__).parents[1] / 'src' / 'modules'
-    dashboard_source = (root / 'e2e_dashboards.py').read_text(encoding='utf-8')
+    dashboard_source = (root / 'ppt_dashboards.py').read_text(encoding='utf-8')
     repository_source = (root / 'repository.py').read_text(encoding='utf-8')
 
     assert 'COUNT(*) AS universe_count' in dashboard_source
@@ -5824,7 +5824,7 @@ def test_ready_chart_set_job_supports_relaunch_and_row_reuse(client) -> None:
 
     ready_job = app_module.repository.get_report_chart_job(job_id)
     assert ready_job is not None
-    assert app_module.serialize_report_chart_job(ready_job)['retry_url'] == f'/reporting-old/chart-jobs/{job_id}/retry'
+    assert app_module.serialize_report_chart_job(ready_job)['retry_url'] == f'/ppt-reporting-old/chart-jobs/{job_id}/retry'
     assert app_module.repository.retry_report_chart_job(job_id)
 
     relaunched_job = app_module.repository.get_report_chart_job(job_id)
@@ -6482,7 +6482,7 @@ def test_interactive_template_save_returns_before_dashboard_comment_reconciliati
     monkeypatch.setattr(app_module, 'submit_background_task', lambda *_args: None)
     monkeypatch.setattr(app_module, 'queue_workspace_dimension_materialization', lambda _workspace: None)
     monkeypatch.setattr(
-        app_module, 'e2e_dashboard_reconcile_template_slide_comments',
+        app_module, 'ppt_dashboard_reconcile_template_slide_comments',
         lambda *_args: reconciled.append(True),
     )
     response = client.post(
@@ -6510,7 +6510,7 @@ def test_template_filter_only_edit_skips_dashboard_comment_scan() -> None:
         def get_workspace_state(self, _key):
             raise AssertionError('Filter-only edits must not scan saved Dashboards.')
 
-    assert app_module.e2e_dashboard_reconcile_template_slide_comments(
+    assert app_module.ppt_dashboard_reconcile_template_slide_comments(
         'nsa', 'Template', entries, edited, UnexpectedDashboardRead(),
     ) == 0
 
@@ -6521,7 +6521,7 @@ def test_dashboard_interruption_succeeds_when_its_audit_log_is_locked(client, mo
     login(client)
     workspace = app_module.active_workspace
     assert workspace is not None
-    monkeypatch.setattr(app_module, 'e2e_dashboard_stop_task', lambda _database_path, _task_id: True)
+    monkeypatch.setattr(app_module, 'ppt_dashboard_stop_task', lambda _database_path, _task_id: True)
     monkeypatch.setattr(app_module.Repository, 'try_add_log', lambda *_args, **_kwargs: False)
 
     response = client.post(
@@ -6643,7 +6643,7 @@ def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(clien
     assert not (imported.database_path.parent / 'slides-templates').exists()
 
 
-def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, reporting_old, tmp_path: Path) -> None:
+def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, ppt_reporting_old, tmp_path: Path) -> None:
     import src.DriveTestAnalyzer as app_module
 
     login_super(client)
@@ -6669,13 +6669,13 @@ def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, reportin
     imported = app_module.import_workspace_archive(payload, {'name': 'Imported chart workspace'})
     app_module.activate_workspace(imported.id)
 
-    reporting = client.get('/reporting-old')
+    reporting = client.get('/ppt-reporting-old')
     assert reporting.status_code == 200
     assert 'Imported template' in reporting.text
     assert generation in reporting.text
 
 
-def test_delete_all_reports_removes_orphaned_output_directories(client, reporting_old) -> None:
+def test_delete_all_reports_removes_orphaned_output_directories(client, ppt_reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     login_super(client)
@@ -6687,13 +6687,13 @@ def test_delete_all_reports_removes_orphaned_output_directories(client, reportin
     orphaned.mkdir(parents=True, exist_ok=True)
     (orphaned / 'chart-1.png').write_bytes(b'old chart')
 
-    response = client.post('/reporting-old/jobs/delete-all')
+    response = client.post('/ppt-reporting-old/jobs/delete-all')
 
     assert response.status_code == 202
     job_id = response.json()['job_id']
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        status_response = client.get(f'/api/reporting-old/bulk-deletions/{job_id}')
+        status_response = client.get(f'/api/ppt-reporting-old/bulk-deletions/{job_id}')
         assert status_response.status_code == 200
         if status_response.json()['status'] in {'ready', 'failed'}:
             break
@@ -6742,11 +6742,11 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     )
     page = client.get('/workspace-config')
     assert page.status_code == 200
-    assert '<h2>Report Templates Management</h2>' not in client.get('/admin').text
+    assert '<h2>PPT Templates Management</h2>' not in client.get('/admin').text
     assert 'data-panel-state-key="admin:operator-mappings"' in page.text
     assert '<h2>Operator Maps</h2>' in page.text
     assert '<h2>Vendor Maps</h2>' in page.text
-    assert page.text.index('<h2>Report Templates Management</h2>') < page.text.index('<h2>Operator Maps</h2>')
+    assert page.text.index('<h2>PPT Templates Management</h2>') < page.text.index('<h2>Operator Maps</h2>')
     assert 'value="VF"' in page.text
     assert 'value="Legacy Carrier"' in page.text
     assert 'Legacy A\nLegacy B' in page.text
@@ -6856,7 +6856,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
     app_module.repository.add_report_template(
         'nsa', 'Mapping references', app_module.catalogue_csv([entry]),
     )
-    app_module.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({
+    app_module.repository.set_workspace_state('ppt_dashboards_v2', json.dumps({
         'mapping-dashboard': {
             'name': 'VF vs VF_SA',
             'template': 'VF',
@@ -6885,7 +6885,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
         'Operator IN (VF_UK, VF_SA); '
         'Vendor IN (VF_UK_Ericsson, VF_SA_Ericsson, Ericsson)'
     )
-    dashboard = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))['mapping-dashboard']
+    dashboard = json.loads(app_module.repository.get_workspace_state('ppt_dashboards_v2'))['mapping-dashboard']
     assert dashboard['name'] == 'VF_UK vs VF_SA'
     assert dashboard['template'] == 'VF'
     assert dashboard['filters']['Operator'] == ['VF_UK', 'VF_SA']
@@ -6908,7 +6908,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
         'Operator IN (VF_UK, VF_SA); '
         'Vendor IN (VF_UK_ERI, VF_SA_ERI, ERI)'
     )
-    dashboard = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))['mapping-dashboard']
+    dashboard = json.loads(app_module.repository.get_workspace_state('ppt_dashboards_v2'))['mapping-dashboard']
     assert dashboard['filters']['Vendor'] == ['VF_UK_ERI', 'VF_SA_ERI', 'ERI']
 
     duplicate = client.post('/workspace-config/operator-mappings/save', data={
@@ -7988,9 +7988,9 @@ def test_cdr_preview_paginates_and_filters_every_column(client, monkeypatch) -> 
     assert footer.count('<svg viewBox="0 0 24 24"') == 5
     assert 'data-preview-first-page disabled aria-label="First page"' in footer
     assert 'data-preview-last-page aria-label="Last page"' in footer
-    assert '>Call Family<' not in default_preview.text
+    assert '>Call_Family<' not in default_preview.text
     assert 'class="auto-calculated-preview-column"' in default_preview.text
-    assert 'data-column-label="Test Family"' in default_preview.text
+    assert 'data-column-label="Test_Family"' in default_preview.text
     assert 'data-server-preview-column-search' in default_preview.text
     assert 'data-server-preview-export' in default_preview.text
     assert 'data-preview-dataset-switch' in default_preview.text
@@ -8024,15 +8024,15 @@ def test_cdr_preview_paginates_and_filters_every_column(client, monkeypatch) -> 
     assert 'Select Workspace Dataset' in default_preview.text
     assert 'target="_blank" rel="noopener">Back to Workspace</a>' in default_preview.text
     assert '>Auto-calculated</button>' in default_preview.text
-    assert 'data-column-label="Result Group"' in default_preview.text
+    assert 'data-column-label="Test_Result_Group"' in default_preview.text
     header = default_preview.text.split('<thead>', 1)[1].split('</thead>', 1)[0]
     assert header.index('data-column-label="Source_File"') < header.index('data-column-label="Source_Sheet"')
     assert header.index('data-column-label="Source_Sheet"') < header.index('data-column-label="Dataset_Kind"')
     assert header.index('data-column-label="Operator"') < header.index('data-column-label="Campaign"')
     assert header.index('data-column-label="Test_Name"') < header.index('data-column-label="Test_Result"') < header.index('data-column-label="Call_Status"')
     assert 'preview-column-kind-badge' not in header
-    assert header.index('data-column-name="operator"') < header.index('data-column-name="Result Group"')
-    assert header.index('data-column-name="Test Family"') < header.index('data-column-name="score"')
+    assert header.index('data-column-name="operator"') < header.index('data-column-name="Test_Result_Group"')
+    assert header.index('data-column-name="Test_Family"') < header.index('data-column-name="score"')
     values_response = client.post('/api/workspace/preview/1/data', json={
         'page': 0, 'column_filters': {}, 'filter_column': 'operator',
     })
@@ -8769,7 +8769,7 @@ def test_dashboard_ignores_non_ready_dataset_id_in_selector_flow(client) -> None
     assert 'option value="2"' not in selector_fragment
 
 
-def test_reporting_preselects_two_latest_ready_cdrs_of_each_type(client, reporting_old) -> None:
+def test_reporting_preselects_two_latest_ready_cdrs_of_each_type(client, ppt_reporting_old) -> None:
     login_super(client)
     uploads = [
         ('old-data.csv', 'data', b'Mean_Data_Rate,RAT_A\n10,ENDC\n'),
@@ -8786,7 +8786,7 @@ def test_reporting_preselects_two_latest_ready_cdrs_of_each_type(client, reporti
         )
         assert response.status_code == 303
 
-    reporting = client.get('/reporting-old')
+    reporting = client.get('/ppt-reporting-old')
     data_select = reporting.text.split('name="data_dataset_id"', 1)[1].split('</select>', 1)[0]
     voice_select = reporting.text.split('name="voice_dataset_id"', 1)[1].split('</select>', 1)[0]
     speech_select = reporting.text.split('name="speech_dataset_id"', 1)[1].split('</select>', 1)[0]
@@ -9072,7 +9072,7 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert '>Documentation</h4>' in response.text
     assert '>Workspace Management</a>' in response.text
     assert '>CDR Analysis</a>' in response.text
-    assert '>E2E Dashboard</a>' in response.text
+    assert '>PPT Dashboard</a>' in response.text
     assert 'E2E Reporting' not in response.text
     assert '>Chart Builder</a>' in response.text
     assert '>Query Builder</a>' in response.text
@@ -9110,7 +9110,7 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert 'module-hero-datasets-analysis' in dashboard.text
     assert 'linear-gradient(135deg, #0c4c8c, #68b8ff)' in dashboard.text
 
-    reporting = client.get("/reporting-old")
+    reporting = client.get("/ppt-reporting-old")
     assert reporting.status_code == 403
 
     admin = client.get("/admin")
@@ -9302,7 +9302,7 @@ def test_admin_import_converts_a_legacy_catalogue_when_requested(client) -> None
     assert 'Legacy quality' in stored
 
 
-def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(client, reporting_old) -> None:
+def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(client, ppt_reporting_old) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
     import src.DriveTestAnalyzer as app_module
 
@@ -9334,7 +9334,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert app_module.repository.report_template_content('nsa', 'Baseline Q4') == first
 
     login_super(client)
-    reporting = client.get('/reporting-old')
+    reporting = client.get('/ppt-reporting-old')
     assert 'value="nsa:Updated Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
     assert 'data-report-charts-edit-template' in reporting.text
     assert 'data-report-chart-viewer-edit-template' in reporting.text
@@ -9454,7 +9454,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert protected_delete.status_code == 400
     assert 'The default template cannot be deleted.' in protected_delete.text
 
-    reporting_after_activation = client.get('/reporting-old')
+    reporting_after_activation = client.get('/ppt-reporting-old')
     assert 'value="nsa:Baseline Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting_after_activation.text
 
     exported = client.get('/workspace-config/report-templates/nsa/Updated%20Q4/export')
@@ -9467,11 +9467,11 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'filename="Updated Q4.csv"' in selected_export.headers['content-disposition']
 
 
-def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(client, reporting_old) -> None:
+def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(client, ppt_reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     login_super(client)
-    reporting = client.get('/reporting-old')
+    reporting = client.get('/ppt-reporting-old')
     assert reporting.status_code == 200
     controls = reporting.text.split('data-report-chart-viewer-canvas-controls', 1)[1].split('</div>', 2)[0]
     assert controls.index('data-report-chart-viewer-data') < controls.index('data-report-chart-zoom="in"')
@@ -9555,7 +9555,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
     )
     assert imported.status_code == 303
 
-    app_module.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({
+    app_module.repository.set_workspace_state('ppt_dashboards_v2', json.dumps({
         'template-rename-dashboard': {
             'name': 'Original catalogue · Validation', 'template': 'Original catalogue',
             'technology': 'nsa', 'template_technology': 'nsa',
@@ -9581,7 +9581,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
     assert all(str(row['name']) != 'Original catalogue' for row in app_module.repository.list_report_templates('nsa'))
     assert app_module.repository.report_template_content('nsa', 'Renamed catalogue') == content
     assert not next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'Renamed catalogue')['active']
-    renamed_dashboard = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))['template-rename-dashboard']
+    renamed_dashboard = json.loads(app_module.repository.get_workspace_state('ppt_dashboards_v2'))['template-rename-dashboard']
     assert renamed_dashboard['template'] == 'Renamed catalogue'
     assert renamed_dashboard['name'] == 'Renamed catalogue · Validation'
 
@@ -9735,7 +9735,7 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
         for item in help_documents
     )
     assert [item['relative_path'] for item in help_documents[8:]] == [
-        'e2e-dashboards.md',
+        'ppt-dashboards.md',
         'scoring-gap-analysis.md',
         'network-insights.md',
         'non-qualified-calls.md',
@@ -9757,18 +9757,18 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert '- [Chart Builder](chart-builder.md)' in help_api.json()['content']
     assert '- [Roadmap](roadmap.md)' in help_api.json()['content']
     assert client.get('/api/documents/help/12-docker-deployment.md').status_code == 404
-    assert client.get('/documents/view/help/reporting-old.md').status_code == 403
-    assert client.get('/api/documents/help/reporting-old.md').status_code == 403
-    assert 'reporting-old.md' not in client.get('/api/documents/readme').json()['content']
+    assert client.get('/documents/view/help/ppt-reporting-old.md').status_code == 403
+    assert client.get('/api/documents/help/ppt-reporting-old.md').status_code == 403
+    assert 'ppt-reporting-old.md' not in client.get('/api/documents/readme').json()['content']
     overview = client.get('/api/documents/help/overview.md').json()['content']
-    assert '## Reporting (old)' not in overview
+    assert '## PPT Reporting (old)' not in overview
     assert '## Reporting\n' in overview
     assert '## Query Builder' in overview
     assert '[Query Builder](query-builder.md)' in overview
     for document in help_documents[1:]:
         article = client.get(f"/api/documents/help/{document['relative_path']}")
         assert article.status_code == 200
-        assert 'reporting-old.md' not in article.json()['content']
+        assert 'ppt-reporting-old.md' not in article.json()['content']
     excluded_help_documents = {
         "arguments-description.md",
         "arguments-description-short.md",
@@ -9788,16 +9788,16 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert "document.getElementById(targetId)?.scrollIntoView" in help_article.text
 
 
-def test_reporting_old_help_follows_its_feature(client) -> None:
+def test_ppt_reporting_old_help_follows_its_feature(client) -> None:
     import src.DriveTestAnalyzer as app_module
 
-    # Reporting (old) is off for every role by default, super-admins included.
+    # PPT Reporting (old) is off for every role by default, super-admins included.
     token = 'help-reporting-off'
     app_module.SESSIONS[token] = app_module.SessionUser(username='someone', role='super-admin')
     client.cookies.set(app_module.SESSION_COOKIE, token)
-    assert client.get('/documents/view/help/reporting-old.md').status_code == 403
+    assert client.get('/documents/view/help/ppt-reporting-old.md').status_code == 403
     rules = app_module.feature_activation_settings()
-    rules['reporting-old'] = {'default': 'none', 'allow': {'roles': ['super-admin', 'user-viewer']}}
+    rules['ppt-reporting-old'] = {'default': 'none', 'allow': {'roles': ['super-admin', 'user-viewer']}}
     app_module.save_feature_activation_settings(rules)
     for username, role in [('someone', 'super-admin'), ('EJAITUR', 'user-viewer')]:
         token = f'help-reporting-{role}'
@@ -9805,13 +9805,13 @@ def test_reporting_old_help_follows_its_feature(client) -> None:
         client.cookies.set(app_module.SESSION_COOKIE, token)
 
         index = [item['relative_path'] for item in client.get('/api/documents/help-index').json()['documents']]
-        assert index[8:14] == ['e2e-dashboards.md', 'reporting-old.md', 'scoring-gap-analysis.md', 'network-insights.md', 'non-qualified-calls.md', 'reporting.md']
-        assert client.get('/documents/view/help/reporting-old.md').status_code == 200
-        assert client.get('/api/documents/help/reporting-old.md').status_code == 200
+        assert index[8:14] == ['ppt-dashboards.md', 'ppt-reporting-old.md', 'scoring-gap-analysis.md', 'network-insights.md', 'non-qualified-calls.md', 'reporting.md']
+        assert client.get('/documents/view/help/ppt-reporting-old.md').status_code == 200
+        assert client.get('/api/documents/help/ppt-reporting-old.md').status_code == 200
         home = client.get('/api/documents/help').json()['content']
-        assert '- [Reporting (old)](reporting-old.md)' in home
+        assert '- [PPT Reporting (old)](ppt-reporting-old.md)' in home
         assert '- [Chart Builder](chart-builder.md)' in home
-        assert 'reporting-old.md' in client.get('/api/documents/readme').json()['content']
+        assert 'ppt-reporting-old.md' in client.get('/api/documents/readme').json()['content']
 
 def test_help_navigation_groups_unnumbered_documents() -> None:
     node_binary = shutil.which('node')
@@ -10866,7 +10866,7 @@ def test_module_tabs_take_order_title_icon_and_colour_from_interface_settings(cl
     login_super(client)
     admin_page = client.get('/admin').text
     assert 'name="title__scoring" value="Scoring &amp; GAP Analysis"' in admin_page and 'data-module-tab-icons' in admin_page
-    order = ['workspace', 'network-insights', 'datasets-analysis', 'e2e-dashboards', 'reporting-old', 'scoring',
+    order = ['workspace', 'network-insights', 'datasets-analysis', 'ppt-dashboards', 'ppt-reporting-old', 'scoring',
              'non-qualified-calls', 'reporting', 'builders']
     form = {'show_module_stage_labels': 'true', **{f'position__{module}': str(index) for index, module in enumerate(order)}}
     form.update({'title__network-insights': 'Radio Insights', 'short_title__network-insights': 'Radio',

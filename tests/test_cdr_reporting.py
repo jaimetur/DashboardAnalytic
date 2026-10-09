@@ -254,14 +254,14 @@ from src.modules.repository import Repository
 
 
 def with_default_calculated_dimensions(entry: CatalogEntry) -> CatalogEntry:
-    payload = json.loads((Path(__file__).parents[1] / 'assets' / 'default-calculated-dimensions.json').read_text(encoding='utf-8'))
+    payload = json.loads((Path(__file__).parents[1] / 'assets' / 'autocalculated-fields' / 'default-autocalculated-fields.json').read_text(encoding='utf-8'))
     return replace(entry, calculated_dimensions=parse_calculated_dimensions(payload))
 
 
 def wait_for_report_job(client, job_id: int) -> dict:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        response = client.get('/api/reporting-old/jobs')
+        response = client.get('/api/ppt-reporting-old/jobs')
         assert response.status_code == 200
         job = next(item for item in response.json()['jobs'] if item['id'] == job_id)
         if job['status'] not in {'queued', 'processing'}:
@@ -273,7 +273,7 @@ def wait_for_report_job(client, job_id: int) -> dict:
 def wait_for_report_chart_job(client, job_id: int) -> dict:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        response = client.get('/api/reporting-old/chart-jobs')
+        response = client.get('/api/ppt-reporting-old/chart-jobs')
         assert response.status_code == 200
         job = next(item for item in response.json()['jobs'] if item['id'] == job_id)
         if job['status'] not in {'queued', 'processing'}:
@@ -2861,7 +2861,7 @@ def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() 
 
 
 def test_layout_chart_frames_are_always_ordered_by_visual_rows_then_columns() -> None:
-    presentation = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    presentation = Presentation('assets/powerpoint-templates/Template_01.pptx')
     layout = _named_slide_layout(presentation, 'Title and 2 columns and 2 rows + Comments right')
 
     frames = _layout_chart_frames(layout)
@@ -3218,7 +3218,7 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
 
     render_cdr_report(
         destination,
-        Path('assets/ppt-templates/Template_CDR_analysis.pptx'),
+        Path('assets/powerpoint-templates/Template_01.pptx'),
         frames,
         'nsa',
         False,
@@ -3264,7 +3264,7 @@ def test_grid_layout_without_comments_keeps_placeholder_ten_as_a_chart() -> None
         _set_commentary,
     )
 
-    presentation = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    presentation = Presentation('assets/powerpoint-templates/Template_01.pptx')
     layout = _named_slide_layout(presentation, 'Title + 1 rows + 1 columns')
     assert layout is not None
     slide = presentation.slides.add_slide(layout)
@@ -3281,7 +3281,7 @@ def test_grid_layout_without_comments_keeps_placeholder_ten_as_a_chart() -> None
 
 
 def test_layout_only_template_builds_one_new_slide_per_catalogue_number(tmp_path) -> None:
-    template = Path('assets/ppt-templates/Template_CDR_analysis.pptx')
+    template = Path('assets/powerpoint-templates/Template_01.pptx')
     assert len(Presentation(template).slides) == 0
     catalogue = (
         ','.join(TRAILING_DYNAMIC_CATALOG_HEADERS)
@@ -3319,7 +3319,7 @@ def test_powerpoint_report_can_disable_tooltip_sidecars(tmp_path) -> None:
 
     render_cdr_report(
         tmp_path / 'without-tooltips.pptx',
-        Path('assets/ppt-templates/Template_CDR_analysis.pptx'),
+        Path('assets/powerpoint-templates/Template_01.pptx'),
         {'data': pd.DataFrame(), 'speech': pd.DataFrame(), 'voice': pd.DataFrame({
             'Campaign': ['Q1'], 'Operator': ['EE'], 'Call_Status': ['Completed'],
         })},
@@ -3331,11 +3331,11 @@ def test_powerpoint_report_can_disable_tooltip_sidecars(tmp_path) -> None:
     assert not list(chart_directory.glob('*.hover.json'))
 
 
-def test_reporting_module_is_available_to_authenticated_users(client, reporting_old) -> None:
+def test_reporting_module_is_available_to_authenticated_users(client, ppt_reporting_old) -> None:
     response = client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     assert response.status_code == 303
 
-    page = client.get('/reporting-old')
+    page = client.get('/ppt-reporting-old')
 
     assert page.status_code == 200
     assert 'NetCheck CDR Reports' in page.text
@@ -3375,7 +3375,7 @@ def test_reporting_module_is_available_to_authenticated_users(client, reporting_
     assert 'data-report-chart-job-stop' in page.text
 
 
-def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client, reporting_old) -> None:
+def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client, ppt_reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3389,14 +3389,14 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client, re
     )
     assert app_module.repository.get_report_run(report_id)['generate_tooltips'] == 1
     app_module.repository.update_report_job(report_id, status='processing', progress=40)
-    stopped_report = client.post(f'/reporting-old/jobs/{report_id}/stop')
+    stopped_report = client.post(f'/ppt-reporting-old/jobs/{report_id}/stop')
     assert stopped_report.status_code == 200
-    report = next(item for item in client.get('/api/reporting-old/jobs').json()['jobs'] if item['id'] == report_id)
+    report = next(item for item in client.get('/api/ppt-reporting-old/jobs').json()['jobs'] if item['id'] == report_id)
     assert report['status'] == 'stopped'
     assert report['duration_seconds'] is not None
     assert report['duration_label'].endswith('s')
     assert report['stop_url'] is None
-    assert report['retry_url'] == f'/reporting-old/jobs/{report_id}/retry'
+    assert report['retry_url'] == f'/ppt-reporting-old/jobs/{report_id}/retry'
     assert client.post(report['delete_url']).status_code == 200
 
     chart_id = app_module.repository.create_report_chart_job(
@@ -3406,18 +3406,18 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client, re
     )
     assert app_module.repository.get_report_chart_job(chart_id)['generate_tooltips'] == 0
     app_module.repository.update_report_chart_job(chart_id, status='processing', progress=40)
-    stopped_chart = client.post(f'/reporting-old/chart-jobs/{chart_id}/stop')
+    stopped_chart = client.post(f'/ppt-reporting-old/chart-jobs/{chart_id}/stop')
     assert stopped_chart.status_code == 200
-    chart = next(item for item in client.get('/api/reporting-old/chart-jobs').json()['jobs'] if item['id'] == chart_id)
+    chart = next(item for item in client.get('/api/ppt-reporting-old/chart-jobs').json()['jobs'] if item['id'] == chart_id)
     assert chart['status'] == 'stopped'
     assert chart['duration_seconds'] is not None
     assert chart['duration_label'].endswith('s')
     assert chart['stop_url'] is None
-    assert chart['retry_url'] == f'/reporting-old/chart-jobs/{chart_id}/retry'
+    assert chart['retry_url'] == f'/ppt-reporting-old/chart-jobs/{chart_id}/retry'
     assert client.post(chart['delete_url']).status_code == 200
 
 
-def test_chart_set_selector_excludes_published_but_processing_job(client, reporting_old) -> None:
+def test_chart_set_selector_excludes_published_but_processing_job(client, ppt_reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3437,10 +3437,10 @@ def test_chart_set_selector_excludes_published_but_processing_job(client, report
     )
     app_module.repository.update_report_chart_job(job_id, status='processing', generation=chart_set['generation'])
     selector_value = f'value="standalone:{chart_set["generation"]}"'
-    assert selector_value not in client.get('/reporting-old').text
+    assert selector_value not in client.get('/ppt-reporting-old').text
 
     app_module.repository.update_report_chart_job(job_id, status='ready', progress=100, finished=True)
-    assert selector_value in client.get('/reporting-old').text
+    assert selector_value in client.get('/ppt-reporting-old').text
 
 
 def test_persisted_chart_set_keeps_template_order_when_rendered_by_cdr_source(client) -> None:
@@ -3555,7 +3555,7 @@ def test_interrupted_chart_set_reuses_only_verified_assets(tmp_path: Path) -> No
     assert not (directory / 'chart-002.png').exists()
 
 
-def test_retrying_a_failed_chart_job_reuses_its_row(client, reporting_old) -> None:
+def test_retrying_a_failed_chart_job_reuses_its_row(client, ppt_reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3566,14 +3566,14 @@ def test_retrying_a_failed_chart_job_reuses_its_row(client, reporting_old) -> No
     app_module.repository.update_report_chart_job(job_id, status='failed', progress=100, last_error='Synthetic failure', finished=True)
     before_ids = [row['id'] for row in app_module.repository.list_report_chart_jobs(limit=None)]
 
-    response = client.post(f'/reporting-old/chart-jobs/{job_id}/retry')
+    response = client.post(f'/ppt-reporting-old/chart-jobs/{job_id}/retry')
 
     assert response.status_code == 400
     assert response.json()['detail'] == 'The Chart Set job does not contain any selected CDR.'
     assert [row['id'] for row in app_module.repository.list_report_chart_jobs(limit=None)] == before_ids
 
 
-def test_deleting_a_ready_chart_job_removes_its_chart_set(client, reporting_old) -> None:
+def test_deleting_a_ready_chart_job_removes_its_chart_set(client, ppt_reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3590,14 +3590,14 @@ def test_deleting_a_ready_chart_job_removes_its_chart_set(client, reporting_old)
         job_id, status='ready', progress=100, generation=chart_set['generation'], finished=True,
     )
 
-    deleted = client.post(f'/reporting-old/chart-jobs/{job_id}/delete')
+    deleted = client.post(f'/ppt-reporting-old/chart-jobs/{job_id}/delete')
 
     assert deleted.status_code == 200
     assert deleted.json()['generation'] == chart_set['generation']
     assert not (app_module.report_charts_directory() / chart_set['generation']).exists()
 
 
-def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client, reporting_old) -> None:
+def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client, ppt_reporting_old) -> None:
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploads = [
         ('NetCheck_CDR_Data.csv', 'data', b'RAT,Operator,Mean_Data_Rate\nENDC,Vodafone UK,42\n'),
@@ -3612,10 +3612,10 @@ def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client,
         )
         assert response.status_code == 200
 
-    page = client.get('/reporting-old')
+    page = client.get('/ppt-reporting-old')
     assert page.status_code == 200
     assert 'data-vendor-mapped="false"' in page.text
-    report = client.post('/reporting-old/netcheck-cdr', data={
+    report = client.post('/ppt-reporting-old/netcheck-cdr', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'multivendor',
     })
@@ -3623,7 +3623,7 @@ def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client,
     assert 'requires every selected Data, Voice and Speech CDR to have a Workspace Vendor mapping' in report.text
 
 
-def test_netcheck_reporting_generates_template_backed_pptx(client, reporting_old) -> None:
+def test_netcheck_reporting_generates_template_backed_pptx(client, ppt_reporting_old) -> None:
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploads = [
         ('NetCheck_CDR_Data.csv', b'RAT,Operator,Mean_Data_Rate,Test_Result\nENDC,Vodafone UK,42,Success\n', 'text/csv'),
@@ -3634,7 +3634,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client, reporting_old
         response = client.post('/datasets-analysis/upload', files={'dataset_files': (filename, BytesIO(content), media_type)})
         assert response.status_code == 200
 
-    report = client.post('/reporting-old/netcheck-cdr', data={
+    report = client.post('/ppt-reporting-old/netcheck-cdr', data={
         'data_dataset_id': 1,
         'voice_dataset_id': 2,
         'speech_dataset_id': 3,
@@ -3666,7 +3666,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client, reporting_old
     rerun = wait_for_report_job(client, job['id'])
     assert rerun['status'] == 'ready'
     assert not stale_file.exists()
-    assert [item['id'] for item in client.get('/api/reporting-old/jobs').json()['jobs']] == [job['id']]
+    assert [item['id'] for item in client.get('/api/ppt-reporting-old/jobs').json()['jobs']] == [job['id']]
     deleted = client.post(job['delete_url'])
     assert deleted.status_code == 200
     assert client.get(job['download_url']).status_code == 404
@@ -3711,7 +3711,7 @@ def test_reporting_chart_dataset_reuses_one_source_frame_and_projects_chart_colu
     assert 'Metric_A' not in second_frame.columns
 
 
-def test_reporting_generates_template_chart_previews(client, reporting_old, monkeypatch) -> None:
+def test_reporting_generates_template_chart_previews(client, ppt_reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3735,7 +3735,7 @@ def test_reporting_generates_template_chart_previews(client, reporting_old, monk
 
     monkeypatch.setattr(app_module, 'render_catalog_chart_preview', render_preview)
     monkeypatch.setattr(app_module, 'report_chart_renderer_name', lambda: 'pil')
-    response = client.post('/reporting-old/netcheck-cdr/charts', data={
+    response = client.post('/ppt-reporting-old/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -3751,7 +3751,7 @@ def test_reporting_generates_template_chart_previews(client, reporting_old, monk
     assert job['date'] == payload['generated_at']
     assert payload['generation'] == datetime.strptime(payload['generated_at'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d-%H%M%S')
     assert payload['charts']
-    preview_context = client.get('/api/reporting-old/chart-preview/context', params={
+    preview_context = client.get('/api/ppt-reporting-old/chart-preview/context', params={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
     })
     assert preview_context.status_code == 200
@@ -3764,7 +3764,7 @@ def test_reporting_generates_template_chart_previews(client, reporting_old, monk
     assert context_payload['dataset_ids'] == [expected_id]
     assert context_payload['datasets_by_source']['cdr-data'] == [{'value': '1', 'label': 'NetCheck_CDR_Data.csv'}]
     assert context_payload['datasets_by_source']['cdr-voice'] == [{'value': '2', 'label': 'NetCheck_CDR_Voice.csv'}]
-    dataset_preview = client.post('/api/reporting-old/chart-preview/data', json={
+    dataset_preview = client.post('/api/ppt-reporting-old/chart-preview/data', json={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
         'definition': {}, 'page': 0, 'page_size': 100, 'column_filters': {},
     })
@@ -3774,14 +3774,14 @@ def test_reporting_generates_template_chart_previews(client, reporting_old, monk
     assert dataset_payload['filter_values'] == {}
     assert set(dataset_payload['column_metadata']) == set(dataset_payload['columns'])
     assert all({'label', 'kind', 'rule', 'pinned', 'class_name'} <= set(item) for item in dataset_payload['column_metadata'].values())
-    filter_values = client.post('/api/reporting-old/chart-preview/data', json={
+    filter_values = client.post('/api/ppt-reporting-old/chart-preview/data', json={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
         'definition': {}, 'page': 0, 'page_size': 100, 'column_filters': {},
         'filter_column': dataset_payload['columns'][0],
     })
     assert filter_values.status_code == 200, filter_values.text
     assert isinstance(filter_values.json()['filter_values'], list)
-    dataset_export = client.post('/api/reporting-old/chart-preview/data', json={
+    dataset_export = client.post('/api/ppt-reporting-old/chart-preview/data', json={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
         'definition': {}, 'column_filters': {}, 'download': True,
     })
@@ -3790,15 +3790,15 @@ def test_reporting_generates_template_chart_previews(client, reporting_old, monk
     assert 'attachment; filename="filtered-chart-dataset.csv"' == dataset_export.headers['content-disposition']
     assert dataset_payload['columns'][0] in dataset_export.text.splitlines()[0]
     wrong_id = next(value for value in ('1', '2', '3') if value != expected_id)
-    invalid_dataset_type = client.post('/api/reporting-old/chart-preview', json={
+    invalid_dataset_type = client.post('/api/ppt-reporting-old/chart-preview', json={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
         'definition': {'cdr_source': context_payload['cdr_source'], 'dataset_ids': [wrong_id]},
     })
     assert invalid_dataset_type.status_code == 400
     image_url = payload['charts'][0]['image_url']
-    assert re.match(r'/reporting-old/charts/\d{8}-\d{6}/chart-\d+\.png\?v=', image_url)
+    assert re.match(r'/ppt-reporting-old/charts/\d{8}-\d{6}/chart-\d+\.png\?v=', image_url)
     assert client.get(image_url).content == b'PNG'
-    second = client.post('/reporting-old/netcheck-cdr/charts', data={
+    second = client.post('/ppt-reporting-old/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -3807,12 +3807,12 @@ def test_reporting_generates_template_chart_previews(client, reporting_old, monk
     assert second_job['status'] == 'ready'
     second_payload = client.get(second_job['open_url']).json()
     assert second_payload['generation'] != payload['generation']
-    assert client.get(f"/api/reporting-old/chart-sets/{payload['generation']}").status_code == 200
-    deleted = client.post(f"/reporting-old/chart-sets/{second_payload['generation']}/delete")
+    assert client.get(f"/api/ppt-reporting-old/chart-sets/{payload['generation']}").status_code == 200
+    deleted = client.post(f"/ppt-reporting-old/chart-sets/{second_payload['generation']}/delete")
     assert deleted.status_code == 200
     assert [item['generation'] for item in deleted.json()['chart_sets']] == [payload['generation']]
     assert client.get(image_url).content == b'PNG'
-    page = client.get('/reporting-old')
+    page = client.get('/ppt-reporting-old')
     assert image_url in page.text
     assert 'Operator Comparison' in page.text
     assert '(Data:1 | Voice:1 | Speech:1)' in page.text
@@ -3829,12 +3829,12 @@ def test_reporting_generates_template_chart_previews(client, reporting_old, monk
     orphaned_directory = app_module.report_charts_directory() / '.incomplete-chart-set'
     orphaned_directory.mkdir(parents=True)
     (orphaned_directory / 'partial.png').write_bytes(b'partial')
-    cleared = client.post('/reporting-old/chart-sets/delete-all')
+    cleared = client.post('/ppt-reporting-old/chart-sets/delete-all')
     assert cleared.status_code == 202
     deletion_id = cleared.json()['job_id']
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        deletion = client.get(f'/api/reporting-old/bulk-deletions/{deletion_id}')
+        deletion = client.get(f'/api/ppt-reporting-old/bulk-deletions/{deletion_id}')
         assert deletion.status_code == 200
         if deletion.json()['status'] in {'ready', 'failed'}:
             break
@@ -3844,10 +3844,10 @@ def test_reporting_generates_template_chart_previews(client, reporting_old, monk
     assert app_module.repository.get_report_chart_job(orphaned_job) is None
     assert app_module.repository.list_report_chart_jobs(limit=None) == []
     assert list(app_module.report_charts_directory().iterdir()) == []
-    assert client.get(f"/api/reporting-old/chart-sets/{payload['generation']}").status_code == 404
+    assert client.get(f"/api/ppt-reporting-old/chart-sets/{payload['generation']}").status_code == 404
 
 
-def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(client, reporting_old, monkeypatch) -> None:
+def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(client, ppt_reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3864,7 +3864,7 @@ def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(c
 
     monkeypatch.setattr(app_module, 'render_catalog_chart_preview', render_preview)
     monkeypatch.setattr(app_module, 'report_chart_renderer_name', lambda: 'pil')
-    response = client.post('/reporting-old/netcheck-cdr/charts', data={
+    response = client.post('/ppt-reporting-old/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'technology': 'nsa', 'report_scope': 'single',
         'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -3879,7 +3879,7 @@ def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(c
     unavailable_image = client.get(payload['charts'][unavailable_index]['image_url'])
     assert unavailable_image.status_code == 200
     assert unavailable_image.content.startswith(b'\x89PNG')
-    context = client.get('/api/reporting-old/chart-preview/context', params={
+    context = client.get('/api/ppt-reporting-old/chart-preview/context', params={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': unavailable_index,
     })
     assert context.status_code == 200
@@ -3887,7 +3887,7 @@ def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(c
     assert context.json()['dataset_ids'] == []
 
 
-def test_chart_preview_focus_row_matches_the_editors_sorted_row(client, reporting_old) -> None:
+def test_chart_preview_focus_row_matches_the_editors_sorted_row(client, ppt_reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3908,7 +3908,7 @@ def test_chart_preview_focus_row_matches_the_editors_sorted_row(client, reportin
     )
     app_module.repository.update_report_chart_job(job_id, status='failed', generation='20260101-000000')
 
-    context = client.get('/api/reporting-old/chart-preview/context', params={
+    context = client.get('/api/ppt-reporting-old/chart-preview/context', params={
         'source': 'standalone', 'identifier': '20260101-000000', 'chart_index': 0,
     })
 
@@ -3981,17 +3981,17 @@ def test_template_chart_image_preview_uses_combined_reporting_rows(client, monke
     assert observed['multivendor'] is False
 
 
-def test_reporting_requires_at_least_one_cdr_source(client, reporting_old) -> None:
+def test_reporting_requires_at_least_one_cdr_source(client, ppt_reporting_old) -> None:
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     form = {'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template'}
-    report = client.post('/reporting-old/netcheck-cdr', data=form)
-    charts = client.post('/reporting-old/netcheck-cdr/charts', data=form)
+    report = client.post('/ppt-reporting-old/netcheck-cdr', data=form)
+    charts = client.post('/ppt-reporting-old/netcheck-cdr/charts', data=form)
     assert report.status_code == 400
     assert charts.status_code == 400
     assert report.json()['detail'] == 'Select at least one Data, Voice or Speech CDR.'
 
 
-def test_partial_cdr_report_worker_receives_unavailable_frames(client, reporting_old, monkeypatch) -> None:
+def test_partial_cdr_report_worker_receives_unavailable_frames(client, ppt_reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -4010,7 +4010,7 @@ def test_partial_cdr_report_worker_receives_unavailable_frames(client, reporting
         Path(destination).write_bytes(b'PK')
 
     monkeypatch.setattr(app_module, 'render_cdr_report', render_report)
-    response = client.post('/reporting-old/netcheck-cdr', data={
+    response = client.post('/ppt-reporting-old/netcheck-cdr', data={
         'data_dataset_id': 1, 'technology': 'nsa', 'report_scope': 'single',
         'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -4031,7 +4031,7 @@ def test_temporary_preview_accepts_dataset_ids_with_legacy_multiplication_separa
     assert app_module._temporary_preview_dataset_ids({'dataset_ids': '2 × 5'}, {}, 'voice') == [2, 5]
 
 
-def test_report_chart_generation_failures_return_json_and_are_logged(client, reporting_old, monkeypatch) -> None:
+def test_report_chart_generation_failures_return_json_and_are_logged(client, ppt_reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -4048,7 +4048,7 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, rep
 
     monkeypatch.setattr(app_module, 'render_catalog_chart_preview', fail_render)
     monkeypatch.setattr(app_module, 'report_chart_renderer_name', lambda: 'pil')
-    response = client.post('/reporting-old/netcheck-cdr/charts', data={
+    response = client.post('/ppt-reporting-old/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -4067,13 +4067,13 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, rep
     assert app_log['executed_by'] == 'system'
     assert re.match(r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Chart Set job 1 failed: Slide ', app_log['summary'])
     assert app_log['summary'].endswith(': Synthetic renderer failure')
-    assert 'Synthetic renderer failure' in client.get('/reporting-old').text
+    assert 'Synthetic renderer failure' in client.get('/ppt-reporting-old').text
     app_logs_page = client.get('/app-logs').text
     assert 'Chart Set job 1 failed: Slide ' in app_logs_page
     assert 'Synthetic renderer failure' in app_logs_page
 
 
-def test_report_generation_failures_show_the_error_and_are_logged(client, reporting_old, monkeypatch) -> None:
+def test_report_generation_failures_show_the_error_and_are_logged(client, ppt_reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -4090,7 +4090,7 @@ def test_report_generation_failures_show_the_error_and_are_logged(client, report
         raise RuntimeError('Synthetic PowerPoint failure')
 
     monkeypatch.setattr(app_module, 'render_cdr_report', fail_render)
-    response = client.post('/reporting-old/netcheck-cdr', data={
+    response = client.post('/ppt-reporting-old/netcheck-cdr', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -4104,11 +4104,11 @@ def test_report_generation_failures_show_the_error_and_are_logged(client, report
         r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Report job 1 failed: Synthetic PowerPoint failure$',
         app_log['summary'],
     )
-    assert 'Synthetic PowerPoint failure' in client.get('/reporting-old').text
+    assert 'Synthetic PowerPoint failure' in client.get('/ppt-reporting-old').text
     assert 'Report job 1 failed: Synthetic PowerPoint failure' in client.get('/app-logs').text
 
 
-def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, reporting_old, monkeypatch) -> None:
+def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, ppt_reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -4141,7 +4141,7 @@ def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, report
             ('technology', 'nsa'), ('report_scope', 'single'), ('slides_templates', 'nsa:NSA Slide Template'),
     ])
     response = client.post(
-        '/reporting-old/netcheck-cdr',
+        '/ppt-reporting-old/netcheck-cdr',
         content=payload,
         headers={'content-type': 'application/x-www-form-urlencoded'},
     )

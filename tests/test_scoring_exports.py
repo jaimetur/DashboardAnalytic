@@ -22,7 +22,7 @@ from tests.scoring_fixtures import scoring_configuration
 
 
 ROOT = Path(__file__).parents[1]
-TEMPLATE = ROOT / 'assets/ppt-templates/Template_CDR_analysis.pptx'
+TEMPLATE = ROOT / 'assets/powerpoint-templates/Template_01.pptx'
 METRICS = scoring_configuration()['metrics']
 OPERATORS = ('Vodafone UK', 'O2 UK', 'Three UK', 'EE')
 MAPPED_OPERATOR_ORDER = ('EE', 'Three UK', 'O2 UK', 'Vodafone UK')

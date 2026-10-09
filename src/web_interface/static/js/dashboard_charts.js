@@ -1,4 +1,4 @@
-/* Browser painter for report-faithful E2E Dashboard chart models. */
+/* Browser painter for report-faithful PPT Dashboard chart models. */
 (() => {
   'use strict';
 

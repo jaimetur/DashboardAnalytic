@@ -222,7 +222,8 @@
   .scoring-loss-map-grid.is-multiple > .scoring-loss-map-card { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 0; align-content: start; }
   /* Grid items do not collapse margins: the note keeps the same distance below the operator. */
   .scoring-loss-map-grid.is-multiple > .scoring-loss-map-card > .scoring-insight-note { margin-top: .25rem; }
-  .scoring-loss-map.is-compact { grid-template-columns: minmax(0, 1fr); }
+  /* Side by side, every map keeps its height and every ranking starts on the same line below it. */
+  .scoring-loss-map.is-compact { grid-template-columns: minmax(0, 1fr); align-content: start; }
   /* Map zoom: a rectangle dragged with the mouse, or the floating buttons shown while the pointer is over the map. */
   .scoring-loss-map-figure { position: relative; }
   .scoring-loss-map-figure > svg { cursor: crosshair; touch-action: none; user-select: none; }

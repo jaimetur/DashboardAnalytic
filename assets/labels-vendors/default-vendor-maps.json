@@ -1,0 +1,63 @@
+[
+  {
+    "canonical": "Ericsson",
+    "color": "#0255AD",
+    "aliases": []
+  },
+  {
+    "canonical": "Ericsson (Mixed)",
+    "color": "#002F61",
+    "aliases": [
+      "Ericsson Mixed",
+      "Ericsson-Mixed"
+    ]
+  },
+  {
+    "canonical": "Huawei",
+    "color": "#FBBD00",
+    "aliases": []
+  },
+  {
+    "canonical": "Samsung",
+    "color": "#008521",
+    "aliases": []
+  },
+  {
+    "canonical": "NSN",
+    "color": "#8C00FF",
+    "aliases": [
+      "NNS",
+      "Nokia"
+    ]
+  },
+  {
+    "canonical": "SCW",
+    "color": "#6F42C1",
+    "aliases": []
+  },
+  {
+    "canonical": "Mixed (non-Ericsson)",
+    "color": "#5E4F2E",
+    "aliases": [
+      "Mixed",
+      "Non Ericsson Mixed",
+      "Non-Ericsson Mixed"
+    ]
+  },
+  {
+    "canonical": "Other Vendor",
+    "color": "#5E4F26",
+    "aliases": [
+      "Other"
+    ]
+  },
+  {
+    "canonical": "(blank)",
+    "color": "#7A8791",
+    "aliases": [
+      "Blank",
+      "nan",
+      "none"
+    ]
+  }
+]

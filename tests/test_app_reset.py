@@ -37,7 +37,7 @@ def test_reset_application_starts_as_a_new_deployment(client):
     (data_dir / 'scheduled-backups').mkdir(exist_ok=True)
     (data_dir / 'scheduled-backups' / 'drivetest-analyzer-backup-20260101-000000.zip').write_bytes(b'zip')
     (app_module.active_workspace.input_dir / 'UK_Voice.csv').write_text('x\n1\n', encoding='utf-8')
-    templates = settings.ppt_templates_dir / 'Template_CDR_analysis.pptx'
+    templates = settings.powerpoint_templates_dir / 'Template_01.pptx'
 
     response = client.post('/admin/reset-application', data={'confirmation': 'RESET APPLICATION'}, follow_redirects=False)
     assert response.status_code == 303 and response.headers['location'] == '/login?reset=1'

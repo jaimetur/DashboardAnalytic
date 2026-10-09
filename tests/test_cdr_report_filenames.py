@@ -14,7 +14,7 @@ def test_build_cdr_report_filename_uses_the_shared_dashboard_format():
     )
 
     assert filename == (
-        '20260930_123456 - E2E Dashboards - NSA - Scoring & GAP Analysis - Operator Comparison - North '
+        '20260930_123456 - PPT Dashboards - NSA - Scoring & GAP Analysis - Operator Comparison - North '
         '- UK_Q2_2026_vs_UK_Q3_2026.pptx'
     )
 

@@ -12,7 +12,7 @@ from PIL import Image
 
 from src.modules.network_insights_export import export_network_insights_powerpoint, export_network_insights_word, rf_quality_table
 
-TEMPLATE = Path(__file__).resolve().parents[1] / 'assets/ppt-templates/Template_CDR_analysis.pptx'
+TEMPLATE = Path(__file__).resolve().parents[1] / 'assets/powerpoint-templates/Template_01.pptx'
 
 
 def _png(*_args) -> bytes:

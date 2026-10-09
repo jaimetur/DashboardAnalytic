@@ -1,0 +1,5 @@
+{
+  "name": "Failed and dropped calls per Operator and City",
+  "description": "Where each Operator fails or drops calls.",
+  "query_sql": "SELECT Operator, City, Call_Status, COUNT(*) AS Calls\nFROM selected_voice\nWHERE Call_Status IN ('Failed', 'Dropped')\nGROUP BY Operator, City, Call_Status\nORDER BY Calls DESC"
+}

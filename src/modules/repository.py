@@ -416,6 +416,19 @@ def _invalidates_chart_mappings(method):
     return wrapper
 
 
+def _default_vendor_maps() -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    """The Vendor Maps (label, colour and CDR spellings) a new workspace starts with, in their order."""
+    from src.config import PROJECT_ROOT
+
+    path = PROJECT_ROOT / 'assets' / 'labels-vendors' / 'default-vendor-maps.json'
+    try:
+        entries = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return ()
+    return tuple((str(item['canonical']), str(item.get('color') or '#6F42C1'), tuple(str(alias) for alias in item.get('aliases') or []))
+                 for item in entries if isinstance(item, dict) and str(item.get('canonical') or '').strip())
+
+
 class Repository:
     def __init__(self, db_path: Path, global_db_path: Path | None = None, workspace_registry_db_path: Path | None = None) -> None:
         self.db_path = db_path
@@ -714,17 +727,8 @@ class Repository:
                 ('O2', '#69B4EC', ('O2 (UK)', 'O2 UK', 'O2_UK', 'O2(UK)', 'Telefonica', 'Telefónica', 'Telefonica O2')),
                 ('Lebara', '#6F42C1', ('LEB', 'Lebara_UK', 'LUK')),
             ),
-            'vendor': (
-                ('Ericsson', '#0255AD', ()),
-                ('Ericsson (Mixed)', '#002F61', ('Ericsson Mixed', 'Ericsson-Mixed')),
-                ('Huawei', '#FBBD00', ()),
-                ('Samsung', '#008521', ()),
-                ('NSN', '#8C00FF', ('NNS', 'Nokia')),
-                ('SCW', '#6F42C1', ()),
-                ('Mixed (non-Ericsson)', '#5E4F2E', ('Mixed', 'Non Ericsson Mixed', 'Non-Ericsson Mixed')),
-                ('Other Vendor', '#5E4F26', ('Other',)),
-                ('(blank)', '#7A8791', ('Blank', 'nan', 'none')),
-            ),
+            # The Vendor Maps a new workspace starts with: assets/labels-vendors/default-vendor-maps.json.
+            'vendor': _default_vendor_maps(),
         }
         defaults_seeded = conn.execute(
             "SELECT 1 FROM workspace_state WHERE key = 'chart_mapping_defaults_v1'"

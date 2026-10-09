@@ -1,0 +1,130 @@
+{
+  "name": "National per Vendor",
+  "configuration": {
+    "scenarios": [
+      {
+        "name": "National",
+        "context_filters": {},
+        "main_cities": false,
+        "aggregation_levels": [
+          "Operator",
+          "Campaign"
+        ],
+        "scorings": {
+          "best_network": {
+            "enabled": true,
+            "environments": "all",
+            "charts": {
+              "service": true,
+              "category": true,
+              "breakdown": true,
+              "location_cards": true,
+              "trend": true
+            },
+            "tables": {
+              "summary": true,
+              "breakdown": true,
+              "kpi_values": false,
+              "gap_values": false,
+              "campaign_comparison": true
+            },
+            "gap": {
+              "operators": [],
+              "all_operators": true,
+              "individual": true,
+              "profile": true,
+              "points_loss_map": true
+            }
+          },
+          "most_reliable": {
+            "enabled": true,
+            "environments": "all",
+            "charts": {
+              "service": true,
+              "category": true,
+              "breakdown": true,
+              "location_cards": true,
+              "trend": true
+            },
+            "tables": {
+              "summary": true,
+              "breakdown": true,
+              "kpi_values": false,
+              "gap_values": false,
+              "campaign_comparison": true
+            },
+            "gap": {
+              "operators": [],
+              "all_operators": true,
+              "individual": true,
+              "profile": true,
+              "points_loss_map": true
+            }
+          }
+        }
+      },
+      {
+        "name": "National per Vendor",
+        "context_filters": {},
+        "main_cities": false,
+        "aggregation_levels": [
+          "Operator",
+          "Vendor",
+          "Campaign"
+        ],
+        "scorings": {
+          "best_network": {
+            "enabled": true,
+            "environments": "all",
+            "charts": {
+              "service": true,
+              "category": true,
+              "breakdown": true,
+              "location_cards": true,
+              "trend": true
+            },
+            "tables": {
+              "summary": true,
+              "breakdown": true,
+              "kpi_values": false,
+              "gap_values": false,
+              "campaign_comparison": true
+            },
+            "gap": {
+              "operators": [],
+              "all_operators": true,
+              "individual": true,
+              "profile": true,
+              "points_loss_map": true
+            }
+          },
+          "most_reliable": {
+            "enabled": true,
+            "environments": "all",
+            "charts": {
+              "service": true,
+              "category": true,
+              "breakdown": true,
+              "location_cards": true,
+              "trend": true
+            },
+            "tables": {
+              "summary": true,
+              "breakdown": true,
+              "kpi_values": false,
+              "gap_values": false,
+              "campaign_comparison": true
+            },
+            "gap": {
+              "operators": [],
+              "all_operators": true,
+              "individual": true,
+              "profile": true,
+              "points_loss_map": true
+            }
+          }
+        }
+      }
+    ]
+  }
+}

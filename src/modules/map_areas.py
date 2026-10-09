@@ -1,10 +1,11 @@
 """Map Areas of a workspace: the administrative areas the Points Lost Map colours, per country.
 
 The tests of the CDRs are placed in the administrative area of their country that contains them:
-the bundled ITL3 areas for the United Kingdom, and for any other country a layer stored with the
-workspace (for example municipalities in Spain or counties in the USA), downloaded from
-geoBoundaries (https://www.geoboundaries.org) or imported from a GeoJSON or a zipped Shapefile.
-The countries of the tests come from the bundled Natural Earth country polygons (public domain).
+a layer stored with the workspace (for example municipalities in Spain or counties in the USA),
+downloaded from geoBoundaries (https://www.geoboundaries.org) or imported from a GeoJSON or a zipped
+Shapefile, or else the layer shipped with the application in ``assets/map-areas`` (such as the ITL3
+areas of the United Kingdom). The countries of the tests come from the Natural Earth country polygons
+(public domain) of the same folder; a country without areas is one area, the whole country.
 Layers travel with the Mappings & Reference Data in Import / Export, transfers and backups.
 """
 from __future__ import annotations
@@ -27,10 +28,10 @@ from src.config import PROJECT_ROOT
 TABLE = 'map_area_layers'
 TABLE_TITLE = 'Map Area Layers'
 DOCUMENT_FORMAT = 'drivetest-analyzer-map-area-layers'
-WORLD_FILE = PROJECT_ROOT / 'assets' / 'geo' / 'world-countries-50m.geojson'
-ITL3_FILE = PROJECT_ROOT / 'assets' / 'geo' / 'uk-itl3-2025.geojson'
-UK = 'GBR'
-UK_LABEL = 'ITL3 area'
+BUNDLED_DIR = PROJECT_ROOT / 'assets' / 'map-areas'
+WORLD_FILE = BUNDLED_DIR / 'world-countries-50m.geojson.gz'
+# The area label of a country without Map Areas, coloured as a whole.
+COUNTRY_LABEL = 'country'
 GEOBOUNDARIES_API = 'https://www.geoboundaries.org/api/current/gbOpen/{code}/ALL/'
 GEOBOUNDARIES_ATTRIBUTION = 'geoBoundaries (William & Mary geoLab), www.geoboundaries.org'
 # Layers finer than this would be too heavy to store and draw.
@@ -69,11 +70,14 @@ def _now() -> str:
 @lru_cache(maxsize=1)
 def _world():
     """Polygons, ISO 3166 alpha-3 codes, names and spatial index of the bundled countries."""
+    import gzip
+
     from shapely import STRtree
     from shapely.geometry import shape
 
     try:
-        features = json.loads(WORLD_FILE.read_text(encoding='utf-8')).get('features', [])
+        with gzip.open(WORLD_FILE) as handle:
+            features = json.loads(handle.read()).get('features', [])
     except (OSError, ValueError):
         return None
     features = [feature for feature in features if feature.get('geometry') and feature['properties'].get('code')]
@@ -102,12 +106,18 @@ def country_codes(latitude: pd.Series, longitude: pd.Series) -> pd.Series:
     if world is None or not located.any():
         return codes
     _geometries, country_list, _names, tree = world
+    positions = np.flatnonzero(located.to_numpy())
     spots = points(longitude[located].to_numpy(), latitude[located].to_numpy())
-    nearest, distances = tree.query_nearest(spots, return_distance=True, all_matches=False)
-    rows, polygons = nearest
-    positions = np.flatnonzero(located.to_numpy())[rows]
-    close = distances <= COAST_DEGREES
-    codes.iloc[positions[close]] = [country_list[polygon] for polygon in polygons[close]]
+    # Inside a country first; the tests a little off its coast belong to the nearest one.
+    rows, polygons = tree.query(spots, predicate='intersects')
+    if len(rows):
+        first = pd.Series(polygons, index=rows).groupby(level=0).first()
+        codes.iloc[positions[first.index.to_numpy()]] = [country_list[polygon] for polygon in first.to_numpy()]
+    outside = np.setdiff1d(np.arange(len(positions)), rows)
+    if len(outside):
+        (near_rows, near_polygons) = tree.query_nearest(spots[outside], max_distance=COAST_DEGREES, all_matches=False)
+        if len(near_rows):
+            codes.iloc[positions[outside[near_rows]]] = [country_list[polygon] for polygon in near_polygons]
     return codes
 
 
@@ -154,8 +164,9 @@ def detect_countries(repository: Any) -> list[dict[str, Any]]:
         for code, count in found.value_counts().items():
             counts[str(code)] = counts.get(str(code), 0) + int(count)
     layers = {layer['country_code']: layer for layer in list_layers(repository)}
+    shipped = bundled_layers()
     return [{'code': code, 'name': country_name(code), 'tests': count, 'share': count / total if total else 0,
-             'bundled': code == UK, 'layer': layers.get(code)}
+             'bundled': shipped.get(code), 'layer': layers.get(code)}
             for code, count in sorted(counts.items(), key=lambda item: -item[1])]
 
 
@@ -204,8 +215,6 @@ def save_layer(repository: Any, *, country_code: str, level: str, level_label: s
     code = str(country_code or '').strip().upper()
     if not re.fullmatch(r'[A-Z]{3}', code):
         raise ValueError('Choose the country of the map areas (ISO 3166 alpha-3 code, for example ESP).')
-    if code == UK:
-        raise ValueError('The United Kingdom uses the bundled ITL3 areas.')
     if not boundaries:
         raise ValueError('The map areas have no polygons.')
     ensure_table(repository)
@@ -237,22 +246,60 @@ def _label(text: Any, level: str) -> str:
     return value
 
 
-def _features_boundaries(features: Iterable[tuple[str, Any]], tolerance: float) -> dict[str, list]:
-    """Simplified rings of each named polygon; repeated names get a number."""
-    boundaries: dict[str, list] = {}
-    seen: dict[str, int] = {}
-    named = [(str(name).strip(), geometry) for name, geometry in features
+def _clean_name(value: Any) -> str:
+    """An area name, repairing UTF-8 text that some sources publish read as Latin-1 (BRAGANÃ\x87A → BRAGANÇA)."""
+    text = str(value or '').strip()
+    if any(marker in text for marker in ('Ã', 'Â', 'Å')):
+        try:
+            return text.encode('latin-1').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return text
+    return text
+
+
+def _features_boundaries(features: Iterable[tuple[str, Any]], tolerance: float, parent_of=None) -> dict[str, list]:
+    """Simplified rings of each named area.
+
+    Polygons with the same name in the same region (``parent_of``, such as the state of a county) are
+    the parts of one area; a name found in several regions takes the name of each (Washington (Ohio)).
+    """
+    named = [(_clean_name(name), geometry) for name, geometry in features
              if str(name or '').strip() and geometry is not None and not geometry.is_empty
              and geometry.geom_type in {'Polygon', 'MultiPolygon'}]
     totals: dict[str, int] = {}
     for name, _geometry in named:
         totals[name] = totals.get(name, 0) + 1
-    for name, geometry in named:
-        if totals[name] > 1:
-            seen[name] = seen.get(name, 0) + 1
-            name = f'{name} ({seen[name]})'
-        boundaries[name] = _rings(geometry.simplify(tolerance, preserve_topology=True), 4)
+    regions = [(parent_of(geometry) if totals[name] > 1 and parent_of else '') for name, geometry in named]
+    spread: dict[str, set] = {}
+    for (name, _geometry), region in zip(named, regions):
+        spread.setdefault(name, set()).add(region)
+    boundaries: dict[str, list] = {}
+    for (name, geometry), region in zip(named, regions):
+        label = f'{name} ({region})' if len(spread[name]) > 1 and region and region != name else name
+        boundaries.setdefault(label, []).extend(_rings(geometry.simplify(tolerance, preserve_topology=True), 4))
     return boundaries
+
+
+def _regions_of(country_code: str, level: str):
+    """The region (first administrative level) of a polygon of a finer level, from geoBoundaries."""
+    from shapely import STRtree
+    from shapely.geometry import shape
+
+    if level in {'ADM0', 'ADM1'}:
+        return None
+    region = next((item for item in geoboundaries_levels(country_code) if item['level'] == 'ADM1' and item['url']), None)
+    if region is None:
+        return None
+    features = [(_clean_name(feature.get('properties', {}).get('shapeName')), shape(feature['geometry']))
+                for feature in json.loads(_fetch(region['url'], timeout=300)).get('features', []) if feature.get('geometry')]
+    names, geometries = [name for name, _geometry in features], [geometry for _name, geometry in features]
+    tree = STRtree(geometries)
+
+    def parent_of(geometry) -> str:
+        point = geometry.representative_point()
+        found = tree.query(point, predicate='intersects')
+        return names[int(found[0])] if len(found) else ''
+    return parent_of
 
 
 def _tolerance(count: int) -> float:
@@ -316,7 +363,14 @@ def download_geoboundaries(repository: Any, country_code: str, level: str, usern
         raise ValueError(f'The map areas could not be downloaded ({exc}).') from exc
     features = [(feature.get('properties', {}).get('shapeName'), shape(feature['geometry']))
                 for feature in document.get('features', []) if feature.get('geometry')]
-    boundaries = _features_boundaries(features, _tolerance(len(features)))
+    names = [str(name or '').strip() for name, _geometry in features]
+    parent_of = None
+    if len(set(names)) < len(names):
+        try:
+            parent_of = _regions_of(str(country_code).strip().upper(), level)
+        except Exception:  # noqa: BLE001 - without regions, repeated names are numbered
+            parent_of = None
+    boundaries = _features_boundaries(features, _tolerance(len(features)), parent_of)
     return save_layer(
         repository, country_code=country_code, level=level, level_label=choice['label'], origin='geoBoundaries',
         source=choice['source'] or 'geoBoundaries', license_text=choice['license'],
@@ -363,36 +417,72 @@ def _forget(repository: Any) -> None:
 
 
 @lru_cache(maxsize=1)
-def _uk_areas() -> list[tuple[str, Any]]:
-    from shapely.geometry import shape
-
+def bundled_layers() -> dict[str, dict[str, Any]]:
+    """The Map Areas shipped with the application in ``assets/map-areas``, by country (its ``manifest.json``)."""
     try:
-        features = json.loads(ITL3_FILE.read_text(encoding='utf-8')).get('features', [])
+        return json.loads((BUNDLED_DIR / 'manifest.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
+        return {}
+
+
+@lru_cache(maxsize=16)
+def bundled_rings(country_code: str) -> dict[str, list]:
+    """The polygons of the Map Areas shipped for a country; without them, the whole country as one area."""
+    import gzip
+
+    item = bundled_layers().get(country_code)
+    if not item:
+        outline = country_outline(country_code)
+        return {country_name(country_code): outline} if outline else {}
+    try:
+        with gzip.open(BUNDLED_DIR / item['file']) as handle:
+            return json.loads(handle.read()).get('boundaries') or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _valid_polygons(ring: list) -> list:
+    """The polygons of a stored ring, repaired when simplifying it made its edges cross."""
+    from shapely import make_valid
+    from shapely.geometry import Polygon
+
+    if len(ring) < 4:
         return []
-    return [(str(feature['properties']['ITL325NM']), shape(feature['geometry']))
-            for feature in features if feature.get('geometry')]
+    polygon = Polygon(ring)
+    if polygon.is_valid:
+        return [] if polygon.is_empty else [polygon]
+    repaired = make_valid(polygon)
+    parts = getattr(repaired, 'geoms', [repaired])
+    return [part for part in parts if part.geom_type == 'Polygon' and not part.is_empty]
 
 
 class AreaIndex:
-    """The areas of every country of a workspace, to name the area of each test."""
+    """The areas of every country of a workspace, to name the area of each test.
 
-    def __init__(self, layers: list[tuple[str, str, list[tuple[str, Any]]]]) -> None:
-        from shapely import STRtree
+    ``sources`` gives, for each country, its area label, a function returning its polygons and whether
+    they are shipped with the application. The polygons of a country are only read when tests fall in it,
+    and each polygon of an area is a separate entry: areas are never merged, so a polygon whose edges
+    cross after simplifying (repaired here) cannot break the placing of the tests.
+    """
 
-        # (country code, area label, [(name, geometry)]); the UK uses the bundled ITL3 areas.
-        self.layers = [(UK, UK_LABEL, _uk_areas()), *layers]
-        self.names: list[str] = []
-        self.countries: list[str] = []
-        geometries = []
-        for code, _label_text, areas in self.layers:
-            for name, geometry in areas:
-                self.names.append(name)
-                self.countries.append(code)
-                geometries.append(geometry)
-        self.labels = {code: label for code, label, _areas in self.layers}
-        self.tree = STRtree(geometries) if geometries else None
-        self.geometries = geometries
+    def __init__(self, sources: dict[str, tuple[str, Any, bool]]) -> None:
+        self.sources = sources
+        self.codes = set(sources)
+        self._trees: dict[str, tuple[list[str], Any]] = {}
+        self._lock = Lock()
+
+    def _tree(self, code: str):
+        with self._lock:
+            if code not in self._trees:
+                from shapely import STRtree
+                names, geometries = [], []
+                for name, rings in (self.sources[code][1]() or {}).items():
+                    for ring in rings:
+                        for polygon in _valid_polygons(ring):
+                            names.append(name)
+                            geometries.append(polygon)
+                self._trees[code] = (names, STRtree(geometries) if geometries else None)
+            return self._trees[code]
 
     def names_of(self, latitude: pd.Series, longitude: pd.Series) -> pd.Series:
         """Name of the area containing each coordinate (missing outside every area)."""
@@ -401,42 +491,57 @@ class AreaIndex:
 
         names = pd.Series(pd.NA, index=latitude.index, dtype='string')
         located = latitude.notna() & longitude.notna() & ~((latitude == 0) & (longitude == 0))
-        if self.tree is None or not located.any():
+        if not located.any() or not self.codes:
             return names
-        rows, polygons = self.tree.query(points(longitude[located].to_numpy(), latitude[located].to_numpy()),
-                                         predicate='intersects')
-        if len(rows):
-            first = pd.Series(polygons, index=rows).groupby(level=0).first()
-            positions = np.flatnonzero(located.to_numpy())[first.index.to_numpy()]
-            names.iloc[positions] = [self.names[polygon] for polygon in first.to_numpy()]
+        countries = country_codes(latitude.where(located), longitude.where(located))
+
+        def place(mask: pd.Series, code: str) -> None:
+            area_names, tree = self._tree(code)
+            if tree is None or not mask.any():
+                return
+            rows, polygons = tree.query(points(longitude[mask].to_numpy(), latitude[mask].to_numpy()), predicate='intersects')
+            if len(rows):
+                first = pd.Series(polygons, index=rows).groupby(level=0).first()
+                positions = np.flatnonzero(mask.to_numpy())[first.index.to_numpy()]
+                names.iloc[positions] = [area_names[polygon] for polygon in first.to_numpy()]
+
+        for code in countries.dropna().unique():
+            if code in self.codes:
+                place(located & (countries == code), str(code))
+        # Tests by a border can lie in the areas of the neighbouring country.
+        for code in list(self._trees):
+            place(located & names.isna(), code)
         return names
 
-    def document(self, used: Iterable[str], unplaced_countries: Iterable[str]) -> dict[str, Any]:
-        """The polygons of the used areas of each country (the UK's are bundled) and the country outlines."""
+    def document(self, used: Iterable[str]) -> dict[str, Any]:
+        """The countries of the used areas, the polygons of those not shipped with the application, the
+        outlines of the countries and the countries without Map Areas (coloured as a whole)."""
         used = set(used)
         boundaries: dict[str, list] = {}
         countries = []
-        for code, label, areas in self.layers:
-            names = [name for name, _geometry in areas if name in used]
-            if not names:
+        for code, (names, _tree) in self._trees.items():
+            if not used.intersection(names):
                 continue
-            countries.append({'code': code, 'name': country_name(code), 'label': label})
-            if code != UK:
-                for name, geometry in areas:
-                    if name in used:
-                        boundaries[name] = _rings(geometry, 4)
-        background = [ring for item in countries if item['code'] != UK for ring in country_outline(item['code'])]
+            label, rings_of, bundled = self.sources[code]
+            countries.append({'code': code, 'name': country_name(code), 'label': label, 'bundled': bundled})
+            if not bundled:
+                boundaries.update({name: rings for name, rings in rings_of().items() if name in used})
+        whole = [item for item in countries if item['bundled'] and item['label'] == COUNTRY_LABEL]
+        background = [ring for item in countries if item not in whole for ring in country_outline(item['code'])]
         return {'countries': countries, 'boundaries': boundaries, 'background': background,
-                'unmapped_countries': [{'code': code, 'name': country_name(code)} for code in unplaced_countries]}
+                'unmapped_countries': [{'code': item['code'], 'name': item['name']} for item in whole]}
 
 
 def area_index(repository: Any | None) -> AreaIndex:
-    """The workspace's areas (cached until a layer changes); without a workspace, the UK's alone."""
-    from shapely.geometry import Polygon
-    from shapely.ops import unary_union
-
+    """The areas of a workspace (cached until a layer changes): its own layers, else the ones shipped, else
+    the whole country."""
+    world = _world()
+    shipped = bundled_layers()
+    sources: dict[str, tuple[str, Any, bool]] = {
+        code: ((shipped.get(code) or {}).get('level_label') or COUNTRY_LABEL, (lambda code=code: bundled_rings(code)), True)
+        for code in dict.fromkeys([*(world[1] if world else []), *shipped])}
     if repository is None:
-        return AreaIndex([])
+        return AreaIndex(sources)
     layers = list_layers(repository)
     signature = json.dumps([(layer['country_code'], layer['updated_at']) for layer in layers])
     key = str(getattr(repository, 'db_path', ''))
@@ -444,15 +549,10 @@ def area_index(repository: Any | None) -> AreaIndex:
         cached = _index_cache.get(key)
         if cached and cached[0] == signature:
             return cached[1]
-    built = []
     for layer in layers:
-        areas = []
-        for name, rings in layer_boundaries(repository, layer['country_code']).items():
-            polygons = [Polygon(ring) for ring in rings if len(ring) > 3]
-            if polygons:
-                areas.append((name, polygons[0] if len(polygons) == 1 else unary_union(polygons)))
-        built.append((layer['country_code'], layer['level_label'], areas))
-    index = AreaIndex(built)
+        code = layer['country_code']
+        sources[code] = (layer['level_label'], (lambda code=code: layer_boundaries(repository, code)), False)
+    index = AreaIndex(sources)
     with _index_lock:
         _index_cache[key] = (signature, index)
     return index

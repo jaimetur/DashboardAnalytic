@@ -1,14 +1,14 @@
-# Reporting (old)
+# PPT Reporting (old)
 
-Use **Reporting (old) → NetCheck CDR Reports** to create a persistent PowerPoint Report or standalone Chart Set from processed CDR-Data, CDR-Voice and CDR-Speech datasets.
+Use **PPT Reporting (old) → NetCheck CDR Reports** to create a persistent PowerPoint Report or standalone Chart Set from processed CDR-Data, CDR-Voice and CDR-Speech datasets.
 
 > [!NOTE]
-> **Restricted classic workflow.** Reporting (old) is available only to the users, roles and groups it is activated for in Admin → Features Activation (off for everyone on a new deployment). E2E Dashboards and the scheduled [Reporting](reporting.md) jobs are the main workflows.
+> **Restricted classic workflow.** PPT Reporting (old) is available only to the users, roles and groups it is activated for in Admin → Features Activation (off for everyone on a new deployment). PPT Dashboards and the scheduled [Reporting](reporting.md) jobs are the main workflows.
 
 > [!WARNING]
 > **Missing CDR types.** A non-empty CDR selection is enough to generate a job, but charts requiring an unselected source type show an unavailable placeholder.
 
-Reporting (old) is available to the users, roles and groups it is activated for in Admin → Features Activation (off for everyone on a new deployment) when a workspace is active. The module menu and this Help chapter are hidden from other users. The route is `/reporting-old` and the API uses `/api/reporting-old`; bookmarks to the former `/e2e-reporting` routes redirect there.
+PPT Reporting (old) is available to the users, roles and groups it is activated for in Admin → Features Activation (off for everyone on a new deployment) when a workspace is active. The module menu and this Help chapter are hidden from other users. The route is `/ppt-reporting-old` and the API uses `/api/ppt-reporting-old`; bookmarks to the former `/e2e-reporting` routes redirect there.
 
 ## In this guide
 
@@ -59,7 +59,7 @@ output/reports/reports-old/<report-name>/
   report-charts/
 ```
 
-The PPTX uses `Template_CDR_analysis.pptx` masters/layouts and the selected Report Template definition. Commentary placeholders remain available to the analyst.
+The PPTX uses `Template_01.pptx` masters/layouts and the selected Report Template definition. Commentary placeholders remain available to the analyst.
 
 ## Generate Report Charts
 

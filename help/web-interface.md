@@ -32,8 +32,8 @@ Primary tabs, in their default order (super-admins change their order, titles, i
 
 - **Workspace**
 - CDR Analysis
-- E2E Dashboards
-- Reporting (old)
+- PPT Dashboards
+- PPT Reporting (old)
 - Scoring & GAP Analysis
 - Network Insights
 - Non-Qualified Calls (in development, hidden until activated)
@@ -57,11 +57,11 @@ Move the pointer near a viewport edge to reveal a collapsed Modules, Sections, N
 
 Modules uses nearly the full viewport height when needed and scrolls if the window is too short for every entry. In Help, Sections lists the current document's headings.
 
-Open **Config** and choose **Application Config** for application-wide runtime settings or **Workspace Config** for Report Templates Management, Operator Mappings, Vendor Mappings, Spectrum Holdings, Main Cities and the Scoring hierarchy/KPI/GAP settings in the active workspace. Workspace Config's Page Sections navigator jumps between the panels.
+Open **Config** and choose **Application Config** for application-wide runtime settings or **Workspace Config** for PPT Templates Management, Operator Mappings, Vendor Mappings, Spectrum Holdings, Main Cities and the Scoring hierarchy/KPI/GAP settings in the active workspace. Workspace Config's Page Sections navigator jumps between the panels.
 
-Help Navigation lists unnumbered documents under General, Main Modules, Administrative Modules and Reference. Main Modules follow the order of the main tabs, by default: [Workspace Management](workspace-management.md), CDR Analysis, E2E Dashboards, Reporting (old), Scoring & GAP Analysis, Network Insights, Non-Qualified Calls, [Reporting](reporting.md), Chart Builder and Query Builder. Docker Deployment follows Deployment Configuration in General. App Logs is the first administrative document and Administrator Config is the last. Readme and Changelog open Reference before Project Structure and Roadmap.
+Help Navigation lists unnumbered documents under General, Main Modules, Administrative Modules and Reference. Main Modules follow the order of the main tabs, by default: [Workspace Management](workspace-management.md), CDR Analysis, PPT Dashboards, PPT Reporting (old), Scoring & GAP Analysis, Network Insights, Non-Qualified Calls, [Reporting](reporting.md), Chart Builder and Query Builder. Docker Deployment follows Deployment Configuration in General. App Logs is the first administrative document and Administrator Config is the last. Readme and Changelog open Reference before Project Structure and Roadmap.
 
-The Help Home link stays above the groups. Every chapter is available to every reader except Reporting (old), which only users with that feature see.
+The Help Home link stays above the groups. Every chapter is available to every reader except PPT Reporting (old), which only users with that feature see.
 
 The Changelog adds a **Releases** list that jumps to each release; it highlights the release being read, as Help Navigation highlights the open document. Both lists grow down to the end of the document and only scroll beyond it.
 
@@ -90,7 +90,7 @@ Single-select and multi-select controls share a compact searchable style.
 
 ## Filter Builder
 
-The shared Filter Builder is used by Chart Builder, Reporting (old) Chart Preview and Report Template Chart Preview.
+The shared Filter Builder is used by Chart Builder, PPT Reporting (old) Chart Preview and Report Template Chart Preview.
 
 - The field selector is searchable.
 - Operators adapt to list, text and numeric conditions.
@@ -148,8 +148,8 @@ On a phone, use portrait orientation for forms and landscape orientation when in
 
 ## Dashboard navigation and overlays
 
-By default the analytical tabs are ordered **CDR Analysis** → **E2E Dashboards** → **Reporting (old)** → **Scoring & GAP Analysis** → **Network Insights** → **Non-Qualified Calls** → **Reporting** for users with each feature. CDR Analysis uses blue, Network Insights electric indigo, E2E Dashboards muted violet, Scoring & GAP Analysis the navy-to-green gradient of its header, Non-Qualified Calls raspberry, **Reporting** green and Reporting (old) brighter purple; Network Insights and Non-Qualified Calls also use their colour for their header, buttons, tables and dialogs. Once a super-admin turns them on in **Admin → Interface Settings** (they are off on a new deployment), module tabs show their stage in a small label in the top-right corner, without taking space from their name: a red **ALPHA** while in development (Network Insights and Non-Qualified Calls), a yellow **BETA** while being validated (**Reporting** and **Builders**) and a blue **NEW** with a star once consolidated (Scoring & GAP Analysis); established modules (Workspace, CDR Analysis and E2E Dashboards) have no label. Super-admins choose in Interface Settings the order of the main tabs, the title of each one and its short title for narrow windows, its icon and its colour, and the label of each module with its colour and optional icon, or hide every label. Each module header shows a subtle decoration that represents the module (for example CDF curves in CDR Analysis or an antenna with radio waves in Network Insights) and is only as tall as its content; the controls of the module, such as the workspace or dataset selectors, follow in their own panel. The administrative tabs (Help, App Logs, Config and Admin) show an icon too, and the main tabs cover their lower part so both rows show the same tab height. Scoring offers NR Mode and CDR selection, aggregation controls, saved background jobs and tables/charts/GAP exports. Network Insights analyses RSRP/SINR, coverage and interference maps, sites, spectrum and network deployment. Each main tab shows a representative icon before its name. On narrower windows the main tabs switch to their short names (Analysis, Dashboards, Reporting, Scoring, Network) and then drop their icons, so the tab rows never overlap.
+By default the analytical tabs are ordered **CDR Analysis** → **PPT Dashboards** → **PPT Reporting (old)** → **Scoring & GAP Analysis** → **Network Insights** → **Non-Qualified Calls** → **Reporting** for users with each feature. CDR Analysis uses blue, Network Insights electric indigo, PPT Dashboards muted violet, Scoring & GAP Analysis the navy-to-green gradient of its header, Non-Qualified Calls raspberry, **Reporting** green and PPT Reporting (old) brighter purple; Network Insights and Non-Qualified Calls also use their colour for their header, buttons, tables and dialogs. Once a super-admin turns them on in **Admin → Interface Settings** (they are off on a new deployment), module tabs show their stage in a small label in the top-right corner, without taking space from their name: a red **ALPHA** while in development (Network Insights and Non-Qualified Calls), a yellow **BETA** while being validated (**Reporting** and **Builders**) and a blue **NEW** with a star once consolidated (Scoring & GAP Analysis); established modules (Workspace, CDR Analysis and PPT Dashboards) have no label. Super-admins choose in Interface Settings the order of the main tabs, the title of each one and its short title for narrow windows, its icon and its colour, and the label of each module with its colour and optional icon, or hide every label. Each module header shows a subtle decoration that represents the module (for example CDF curves in CDR Analysis or an antenna with radio waves in Network Insights) and is only as tall as its content; the controls of the module, such as the workspace or dataset selectors, follow in their own panel. The administrative tabs (Help, App Logs, Config and Admin) show an icon too, and the main tabs cover their lower part so both rows show the same tab height. Scoring offers NR Mode and CDR selection, aggregation controls, saved background jobs and tables/charts/GAP exports. Network Insights analyses RSRP/SINR, coverage and interference maps, sites, spectrum and network deployment. Each main tab shows a representative icon before its name. On narrower windows the main tabs switch to their short names (Analysis, Dashboards, Reporting, Scoring, Network) and then drop their icons, so the tab rows never overlap.
 
-**Reporting** and Reporting (old) are shown only to the users, roles and groups they are activated for in Admin → Features Activation; a new deployment activates **Reporting** for everyone and Reporting (old) for nobody. The dashboard viewer groups charts by Slide and opens the same Dashboard Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.
+**Reporting** and PPT Reporting (old) are shown only to the users, roles and groups they are activated for in Admin → Features Activation; a new deployment activates **Reporting** for everyone and PPT Reporting (old) for nobody. The dashboard viewer groups charts by Slide and opens the same Dashboard Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.
 
 App Logs is available from the utility navigation and includes App Events for the active workspace plus the live Execution Log for the running server. See [App Logs](app-logs.md).

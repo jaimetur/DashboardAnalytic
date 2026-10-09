@@ -1,0 +1,5 @@
+{
+  "name": "Call setup time per Operator and Campaign",
+  "description": "Average and maximum call setup time of the completed calls.",
+  "query_sql": "SELECT Operator, Campaign,\n  COUNT(*) AS Calls,\n  ROUND(AVG(setup_time_seconds), 2) AS Avg_Setup_Time_s,\n  ROUND(MAX(setup_time_seconds), 2) AS Max_Setup_Time_s\nFROM selected_voice\nWHERE Call_Status = 'Completed' AND setup_time_seconds IS NOT NULL\nGROUP BY Operator, Campaign\nORDER BY Operator, Campaign"
+}

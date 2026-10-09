@@ -1000,3 +1000,19 @@ def test_historical_jobs_use_current_environment_labels_without_rewriting_snapsh
     new, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
     assert not reused
     assert 'Drive - City' in new['configuration']['scope']['environments']
+
+
+def test_failed_calculations_are_written_to_the_app_logs(repository, scoring_engine):
+    engine, _calls = scoring_engine
+
+    def failing(*_args, **_kwargs):
+        raise ValueError('side location conflict')
+
+    engine.calculate_scoring = failing
+    dataset_id = add_dataset(repository)
+    job, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA')
+    assert scoring_jobs.run_scoring_job(repository, job['id'])['status'] == 'failed'
+    entry = next(row for row in repository.list_logs() if row['action'] == 'scoring_job_failed')
+    details = json.loads(entry['details'])
+    assert details['job_id'] == job['id'] and details['error'] == 'ValueError: side location conflict'
+    assert 'failing' in details['location']

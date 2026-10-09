@@ -30,7 +30,7 @@ def test_complete_unicode_values_and_filename_budget():
 
 
 def test_template_lines_never_wrap_and_share_retained_values():
-    template = Path('assets/ppt-templates/Template_CDR_analysis.pptx')
+    template = Path('assets/powerpoint-templates/Template_01.pptx')
     job = {'context_filters': {'city': [f'City {index} long complete value' for index in range(20)]},
            'aggregation_levels': ['Operator', 'Vendor', 'Region', 'City']}
     result = {}

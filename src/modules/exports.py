@@ -669,7 +669,7 @@ def _build_powerpoint_payload(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-CDR_ANALYSIS_TEMPLATE = "Template_CDR_analysis.pptx"
+CDR_ANALYSIS_TEMPLATE = "Template_01.pptx"
 # Content slides of the template keep their title area: content starts this much lower.
 TEMPLATE_CONTENT_SHIFT = 0.6
 
@@ -677,7 +677,7 @@ TEMPLATE_CONTENT_SHIFT = 0.6
 def _cdr_analysis_template() -> Path | None:
     from src.config import settings
 
-    path = settings.ppt_templates_dir / CDR_ANALYSIS_TEMPLATE
+    path = settings.powerpoint_templates_dir / CDR_ANALYSIS_TEMPLATE
     return path if path.is_file() else None
 
 

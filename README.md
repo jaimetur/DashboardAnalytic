@@ -40,7 +40,7 @@ After login, the application opens **Help Home** by default.
 - Analyse one processed CDR in CDR Analysis.
 - Calculate and revisit NetCheck scoring and operator GAP comparisons in Scoring & GAP Analysis, with CSV and PowerPoint exports.
 - Compare RSRP/SINR, map weak-coverage and high-interference areas, and review observed sites, spectrum and network deployment in Network Insights.
-- Explore template-driven Dashboards with synchronized adaptive filters in E2E Dashboards.
+- Explore template-driven Dashboards with synchronized adaptive filters in PPT Dashboards.
 - Create temporary ad-hoc charts in Chart Builder.
 - Generate NSA/SA PowerPoint reports and standalone Chart Sets.
 - Create workspace-owned Auto-calculated Fields and apply them asynchronously to the applicable CDR tables.
@@ -72,7 +72,7 @@ CDR Analysis analyses one ready Data, Voice or Speech CDR.
 - **Charts and Scorecards**: CDF curves and grouped comparisons.
 - **Processed Metrics**: filtered/aggregated results and Word/PowerPoint exports.
 
-### E2E Dashboards
+### PPT Dashboards
 
 Create, save, duplicate, import and export workspace Dashboards from an NSA/SA Report Template. The editor separates **Select Dataset Universe** from **Select Dataset Filters**: Scope, CDRs and dates can be applied temporarily or saved as the Dashboard universe, while default, aliased and custom Auto-calculated Field filters can be applied, saved, reloaded or discarded independently.
 
@@ -82,15 +82,15 @@ View Dashboard opens immediately and shows centred preparation progress until it
 
 Dashboard queries read the workspace's combined CDR tables directly; reusable selection manifests and chart models avoid recalculating unchanged work, and a low-priority background worker pre-caches each Dashboard's standard universes (all CDRs and the newest one to four per type) without blocking opening or exporting.
 
-See [E2E Dashboards Help](help/e2e-dashboards.md) for the operational workflow and [Workspace Config → Report Template reference](help/workspace-config.md#report-template-reference) for template authoring, supported chart types and examples.
+See [PPT Dashboards Help](help/ppt-dashboards.md) for the operational workflow and [Workspace Config → Report Template reference](help/workspace-config.md#report-template-reference) for template authoring, supported chart types and examples.
 
 ### Reporting
 
 Reporting schedules **Reporting Jobs** that collect a Summary CDR Analysis, a Summary Network Insights, Dashboard PPTs and Scoring PPTs, each configured with the options of its own module, run them once or daily, weekly or monthly and email the artifacts with a description of each one and its filters. SMTP delivery is configured in Application Config → Email Delivery. Reporting is available to every user; restrict it for roles, user groups or users in Admin → Features Activation.
 
-### Reporting (old)
+### PPT Reporting (old)
 
-Reporting (old) combines ready CDRs with a Report Template from the active workspace. It is available only to the users, roles and groups it is activated for in Admin → Features Activation (by default super-admins and EJAITUR).
+PPT Reporting (old) combines ready CDRs with a Report Template from the active workspace. It is available only to the users, roles and groups it is activated for in Admin → Features Activation (by default super-admins and EJAITUR).
 
 - **Reporting module**: choose NetCheck CDR Reports or the future Smart Orchestrator Logs workflow.
 - **NetCheck CDR Reports**: select Data, Voice and Speech campaigns, NSA/SA, template and Operator/Vendor Comparison.
@@ -140,7 +140,7 @@ Build read-only SQL in Assistance Mode or SQL Mode, inspect paginated results an
 
 - **Application Config** stores runtime settings that apply across all workspaces. `user-editor`, `admin` and `super-admin` can use Config → Application Config; `user-viewer` cannot.
 - **`user-viewer`** is read-only for the workspace: it explores datasets and generates jobs (Dashboard PPTs, Scoring, Network Insights, queries and reports) but cannot upload, delete, reprocess, map or clear datasets, or save, rename or delete Dashboards, saved queries and Scoring jobs.
-- **Workspace Config** is selected from the Config dropdown and groups Report Templates Management, Operator Mappings, Vendor Mappings and Spectrum Holdings for the active workspace. Its Help chapter contains the Report Template Editor guide and complete Report Template reference. It uses Application Config's teal/navy palette and a Page Sections navigator. `user-editor`, `admin` and `super-admin` can manage these panels when a workspace is open; `user-viewer` cannot.
+- **Workspace Config** is selected from the Config dropdown and groups PPT Templates Management, Operator Mappings, Vendor Mappings and Spectrum Holdings for the active workspace. Its Help chapter contains the PPT Templates Editor guide and complete Report Template reference. It uses Application Config's teal/navy palette and a Page Sections navigator. `user-editor`, `admin` and `super-admin` can manage these panels when a workspace is open; `user-viewer` cannot.
 - These scopes remain separate: Application Config values are global, while templates and chart mappings stay with their workspace and use the existing portable package formats.
 
 ### Administrator Config (Admin tab)
@@ -164,7 +164,7 @@ See [Product overview](help/overview.md) for a detailed tour of every module and
 2. Upload the required source files in Workspace.
 3. Confirm their types and wait for **Processed**.
 4. Optionally map VFUK/3UK vendor data.
-5. Use CDR Analysis, E2E Dashboards, Chart Builder or Reporting.
+5. Use CDR Analysis, PPT Dashboards, Chart Builder or Reporting.
 6. Review long-running work in the floating task cards and **Reports and Charts Jobs**.
 7. Check App Logs if an operation fails.
 
@@ -263,7 +263,7 @@ Key behaviour:
 - Uses `${IMAGE_REPOSITORY}:${IMAGE_TAG}`.
 - Pulls the selected tag on start.
 - Supports native `linux/amd64` and `linux/arm64` images.
-- Includes `assets/ppt-templates/Template_CDR_analysis.pptx` in the image.
+- Includes `assets/powerpoint-templates/Template_01.pptx` in the image.
 - Mounts configuration and workspace data outside the container.
 - Exposes port `7278` by default.
 
@@ -317,12 +317,12 @@ CONTAINER_NAME=drivetest-analyzer
             ├── input/
             └── output/
                 └── reports/
-                    ├── dashboards/          # E2E Dashboards PowerPoint jobs
+                    ├── dashboards/          # PPT Dashboards PowerPoint jobs
                     ├── cdr-analysis/        # CDR Analysis exports
                     ├── network-insights/    # Network Insights exports
                     ├── reporting-jobs/      # Reporting Job runs and their artifacts
-                    ├── reports-old/         # Reporting (old) reports
-                    └── reports-charts-old/  # Reporting (old) Chart Sets
+                    ├── reports-old/         # PPT Reporting (old) reports
+                    └── reports-charts-old/  # PPT Reporting (old) Chart Sets
 ```
 
 In this example `<deployment-root>` is `/volume1/docker/data/drivetest-analyzer`; the Compose files and `.env` live in a separate stack folder such as `/volume1/docker/stacks/drivetest-analyzer`.
@@ -367,8 +367,17 @@ DriveTestAnalyzer/
 ├── tests/                                     # Unit and integration tests
 ├── tools/                                     # Release helper (CreateUpdateRelease.py)
 ├── docker/                                    # Dockerfile, Compose files and environment settings
-├── assets/ppt-templates/                      # PowerPoint master/layout file
-├── assets/default-calculated-dimensions.json  # Auto-calculated Fields added to new workspaces
+├── assets/powerpoint-templates/               # PowerPoint master/layout file (Template_01.pptx)
+├── assets/autocalculated-fields/             # Auto-calculated Fields every new workspace starts with
+├── assets/scoring-methodologies/             # Scoring methodologies added to every workspace
+├── assets/ppt-templates/                     # Report Templates (nsa/, sa/) added to every workspace
+├── assets/ppt-dashboards/                    # Dashboards added to every workspace
+├── assets/scoring-report-configurations/     # Scoring report configurations added to every workspace
+├── assets/query-builder-queries/             # Query Builder queries added to every workspace
+├── assets/reporting-jobs/                    # Reporting Jobs added to every workspace (disabled)
+├── assets/labels-vendors/                    # Vendor Maps of a new workspace
+├── assets/labels-campaigns/                  # Default Campaign Maps of every workspace
+├── assets/map-areas/                         # Map Areas per country and world countries for the Points Lost Map
 ├── macos-launcher/                            # DriveTest Analyzer.app native launcher
 ├── macos-installer/                           # Installer build script and .pkg
 ├── help/                                      # Detailed in-app documentation
@@ -381,7 +390,7 @@ DriveTestAnalyzer/
 
 ## Current limitations
 
-- General analysis caches remain process-local; E2E Dashboard preview manifests and report-faithful compact chart models persist beside each workspace database and survive application restarts. Dashboard data itself is queried directly from the combined CDR tables.
+- General analysis caches remain process-local; PPT Dashboard preview manifests and report-faithful compact chart models persist beside each workspace database and survive application restarts. Dashboard data itself is queried directly from the combined CDR tables.
 - SQLite is the current persistence model and may not suit very large concurrent deployments.
 - Smart Orchestrator Logs reporting is visible but not implemented.
 - Scoring starts from NetCheck 2026 Q2 Drive City/Road rules. Walk is supported at zero initial points with City-derived thresholds that require validation before allocation; custom environments can be configured using supported CDR fields and formula operations.
@@ -398,10 +407,10 @@ DriveTestAnalyzer/
 - [CDR Analysis](help/datasets-analysis.md)
 - [Network Insights](help/network-insights.md)
 - [Non-Qualified Calls](help/non-qualified-calls.md)
-- [E2E Dashboards](help/e2e-dashboards.md)
+- [PPT Dashboards](help/ppt-dashboards.md)
 - [Scoring & GAP Analysis](help/scoring-gap-analysis.md)
 - [Reporting](help/reporting.md)
-- [Reporting (old)](help/reporting-old.md)
+- [PPT Reporting (old)](help/ppt-reporting-old.md)
 - [Chart Builder](help/chart-builder.md)
 - [Query Builder](help/query-builder.md)
 - [App Logs](help/app-logs.md)

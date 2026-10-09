@@ -533,7 +533,7 @@
       const selected = Object.fromEntries(pickers.map(([name, picker]) => [name, picker.getValue()]));
       filterNote.textContent = 'Loading filter values of the selected CDRs…';
       try {
-        const result = await api('/api/e2e-dashboards/filter-options/batch', {
+        const result = await api('/api/ppt-dashboards/filter-options/batch', {
           method: 'POST', body: JSON.stringify({definition: definitionFor(), fields: current.fields}),
         });
         if (request !== loadRequest) return;
@@ -585,7 +585,7 @@
   // Artifact lists: the module in bold on the first level and, when it has several entries,
   // its entries indented below it. Items are texts or elements (download links).
   const ARTIFACT_MODULE_LABELS = {
-    dataset_analysis: 'CDR Analysis', network_insights: 'Network Insights', dashboards: 'E2E Dashboards',
+    dataset_analysis: 'CDR Analysis', network_insights: 'Network Insights', dashboards: 'PPT Dashboards',
     scoring: 'Scoring & GAP Analysis', non_qualified_calls: 'Non-Qualified Calls',
   };
   function artifactEntryTitle(title, module) {
@@ -832,7 +832,7 @@
   let activeArtifact = (() => { try { return localStorage.getItem(ARTIFACT_TAB_KEY) || ''; } catch { return ''; } })();
   const ARTIFACT_TAB_ICONS = {
     dataset_analysis: '.module-tab-datasets-analysis', network_insights: '.module-tab-network-insights',
-    dashboards: '.module-tab-e2e-dashboards', scoring: '.module-tab-scoring', non_qualified_calls: '.module-tab-non-qualified-calls',
+    dashboards: '.module-tab-ppt-dashboards', scoring: '.module-tab-scoring', non_qualified_calls: '.module-tab-non-qualified-calls',
   };
   function syncArtifactTabs() {
     const host = $('rj-artifact-tabs');
@@ -913,7 +913,7 @@
     $('rj-dashboards-enabled').checked = (definition.dashboards || []).length > 0;
     $('rj-scoring-enabled').checked = (definition.scoring || []).length > 0;
     // Only the modules the user can use offer artifacts.
-    const labels = {dataset_analysis: 'CDR Analysis', network_insights: 'Network Insights', dashboards: 'E2E Dashboards', scoring: 'Scoring & GAP Analysis'};
+    const labels = {dataset_analysis: 'CDR Analysis', network_insights: 'Network Insights', dashboards: 'PPT Dashboards', scoring: 'Scoring & GAP Analysis'};
     const unavailable = Object.entries(options.allowed_modules).filter(([, allowed]) => !allowed).map(([module]) => module);
     document.querySelectorAll('[data-rj-module]').forEach((section) => { section.hidden = unavailable.includes(section.dataset.rjModule); });
     $('rj-modules-note').hidden = !unavailable.length;

@@ -46,10 +46,10 @@ def _ready_cdr(tmp_path):
     ('post', '/api/query-builder/save', {'json': {'name': 'q', 'query': 'SELECT 1'}}),
     ('delete', '/api/query-builder/saved/1', {}),
     ('delete', '/api/scoring/jobs/1', {}),
-    ('put', '/api/e2e-dashboards/d1', {'json': {'name': 'D'}}),
-    ('delete', '/api/e2e-dashboards/d1', {}),
-    ('patch', '/api/e2e-dashboards/d1/name', {'json': {'name': 'D'}}),
-    ('patch', '/api/e2e-dashboards/d1/comments', {'json': {'slide_comments': {}}}),
+    ('put', '/api/ppt-dashboards/d1', {'json': {'name': 'D'}}),
+    ('delete', '/api/ppt-dashboards/d1', {}),
+    ('patch', '/api/ppt-dashboards/d1/name', {'json': {'name': 'D'}}),
+    ('patch', '/api/ppt-dashboards/d1/comments', {'json': {'slide_comments': {}}}),
 ])
 def test_user_viewer_cannot_change_the_workspace(client, tmp_path, method, path, kwargs):
     dataset_id = _ready_cdr(tmp_path)
@@ -66,7 +66,7 @@ def test_user_viewer_still_explores_and_generates_jobs(client, tmp_path):
     _ready_cdr(tmp_path)
     _viewer(client)
     assert client.get('/workspace').status_code == 200
-    page = client.get('/e2e-dashboards')
+    page = client.get('/ppt-dashboards')
     assert page.status_code == 200 and 'data-ds-manage-only' in page.text
     assert 'data-authenticated-role="user-viewer"' in page.text
     assert client.post('/api/scoring/jobs/match', json={}).status_code != 403

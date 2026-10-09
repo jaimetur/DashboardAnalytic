@@ -1,0 +1,5 @@
+{
+  "name": "Voice quality (POLQA) per Operator and Campaign",
+  "description": "Average listening quality of the completed calls and the share below 1.6.",
+  "query_sql": "SELECT Operator, Campaign,\n  COUNT(POLQA_LQ_Avg) AS Samples,\n  ROUND(AVG(POLQA_LQ_Avg), 2) AS Avg_POLQA,\n  ROUND(100.0 * SUM(POLQA_LQ_Avg < 1.6) / COUNT(POLQA_LQ_Avg), 2) AS Below_1_6_Percent\nFROM selected_voice\nWHERE Call_Status = 'Completed' AND POLQA_LQ_Avg IS NOT NULL\nGROUP BY Operator, Campaign\nORDER BY Operator, Campaign"
+}

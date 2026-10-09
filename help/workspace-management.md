@@ -20,6 +20,7 @@ Workspace Management is the first operational module. It controls isolated works
 - Create, open, close, rename, duplicate and delete workspaces. **Create and open** asks for the name, the **CDR type** (NetCheck CDR by default; Umlaut CDR is coming soon) and, for super-admins, the **Access**, all in one row.
 - Review workspace size, CDR type and access. The workspaces table changes the **CDR Type** of a workspace, and super-admins grant each workspace in its **Access** selector to roles, user groups and users; **✓** saves the row. Admins also grant workspaces in [Admin → Workspace Access](administrator-config.md#workspace-access).
 - Keep databases, uploaded files and generated output isolated.
+- A new workspace (and every existing workspace, once, the first time it opens after an update) starts with the starter content shipped with the application that it does not have yet, matched by name so nothing of its own is replaced: the **NetCheck 2026** Scoring methodology, the Report Templates *NSA - NetCheck CDR Report*, *SA - NetCheck CDR Report* and *NSA - RF Quality (RSRP & SINR)*, the Dashboards *NetCheck CDR Report* (NSA and SA) and *RF Quality (RSRP & SINR)* (NSA), the Auto-calculated Fields they use (`Call_Family`, `Test_Family`, `Test_Result_Group` and `RAT_Group`), the Scoring report configurations *National*, *National & Main Cities* and *National per Vendor*, six Query Builder queries (calls, failures, setup time, POLQA, data tests and tests per city) and the disabled Reporting Job *Weekly NetCheck Report* (the three Dashboards and the Scoring report of the newest complete CDRs, every Monday at 08:00 once enabled). They filter no Operator or Vendor, so they fit any market and show charts as soon as the workspace has CDRs. A new workspace also starts with the Vendor Maps of `assets/labels-vendors/default-vendor-maps.json`, and the workspaces without their own Campaign Maps use `assets/labels-campaigns/default-campaign-map.json`. Deleted or renamed starter content is not added again.
 - Open a workspace before using Dashboard, Reporting or Chart Builder.
 
 ## Data Ingestion
@@ -90,7 +91,7 @@ Every CDR (Data, Voice or Speech) belongs to one NR Mode, **NSA** or **SA**; oth
 - `SA`, `5G SA`, `5GSA` or `Standalone` in the name (for example `UK_Q2_2026_SA_Data.xlsx`) → SA
 - `NSA`, `Non-Standalone` or no NR indication (for example `NetCheck_CDR_Data_2026_Q2.xlsx`) → NSA
 
-The **NR Mode** column follows Input Type in the Datasets table. Its selector corrects the NR Mode of an existing CDR without reprocessing it, and the change is recorded in App Logs. CDRs created before this column existed receive the filename proposal automatically. E2E Dashboards only use CDRs of their own NR Mode.
+The **NR Mode** column follows Input Type in the Datasets table. Its selector corrects the NR Mode of an existing CDR without reprocessing it, and the change is recorded in App Logs. CDRs created before this column existed receive the filename proposal automatically. PPT Dashboards only use CDRs of their own NR Mode.
 
 ### CDR Type: Final and Daily
 
@@ -132,7 +133,7 @@ When the Final CDR of the campaign arrives:
 | `UK_Voice_20260922.xlsx` | Daily | Auto | No | *Replaced by the Final CDR UK_Voice_Q3_Final.xlsx* |
 | `UK_Voice_20260923.xlsx` | Daily | Yes | Yes | *Included manually* |
 
-**Yes** and **No** include or exclude the CDR by hand. The rows of the CDRs that the combined tables include have a light green background and the others a light grey one. The **Yes**/**No** answer and the colour change at once and the combined tables follow every change in a background job listed in [CDR Tables Updates](#cdr-tables-updates) — a new CDR, a CDR Type, NR Mode or In Combined? choice, or a deleted CDR (deleting a Final CDR brings back the Daily CDRs it replaced) — so E2E Dashboards, Network Insights, Scoring & GAP Analysis and Reporting can use the Daily CDRs while the campaign runs and the Final CDRs when they arrive. Scoring & GAP Analysis, E2E Dashboards and the CDRs chosen automatically by Reporting Jobs offer the CDRs that the combined tables include. CDR Analysis opens any CDR, and [Non-Qualified Calls](non-qualified-calls.md#daily-and-final-cdrs) reads every CDR and lists each call once.
+**Yes** and **No** include or exclude the CDR by hand. The rows of the CDRs that the combined tables include have a light green background and the others a light grey one. The **Yes**/**No** answer and the colour change at once and the combined tables follow every change in a background job listed in [CDR Tables Updates](#cdr-tables-updates) — a new CDR, a CDR Type, NR Mode or In Combined? choice, or a deleted CDR (deleting a Final CDR brings back the Daily CDRs it replaced) — so PPT Dashboards, Network Insights, Scoring & GAP Analysis and Reporting can use the Daily CDRs while the campaign runs and the Final CDRs when they arrive. Scoring & GAP Analysis, PPT Dashboards and the CDRs chosen automatically by Reporting Jobs offer the CDRs that the combined tables include. CDR Analysis opens any CDR, and [Non-Qualified Calls](non-qualified-calls.md#daily-and-final-cdrs) reads every CDR and lists each call once.
 
 ### Background Processing
 
@@ -249,7 +250,7 @@ The following ingestion fields are part of the current analytics model. They pro
 | `Technology_Secondary` | First available `L2_Call_Mode_B`, `RAT_B`, `Recording_Technology` or `RAT_Timeline`. |
 | `Attempt_Count` | Integer `1` per row, used to count categorical attempts when no numeric KPI exists. |
 
-Analytics uses the success/failure/call-quality flags and the normalized time, quality, throughput, latency, loss, jitter and handover metrics directly. Reporting (old) also uses these normalized metrics as fallbacks for heterogeneous CDR layouts. `Technology_Primary` drives filters and grouping, `Vendor` drives multivendor comparisons, and `Attempt_Count` supplies a stable row-count metric.
+Analytics uses the success/failure/call-quality flags and the normalized time, quality, throughput, latency, loss, jitter and handover metrics directly. PPT Reporting (old) also uses these normalized metrics as fallbacks for heterogeneous CDR layouts. `Technology_Primary` drives filters and grouping, `Vendor` drives multivendor comparisons, and `Attempt_Count` supplies a stable row-count metric.
 
 `Technology_Secondary` and `Unsustainable_Call` have fewer built-in consumers but remain addressable by templates, filters and Auto-calculated Fields, so they must not be removed without checking workspace definitions and migrating the model.
 

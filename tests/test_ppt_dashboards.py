@@ -18,7 +18,7 @@ from pptx.enum.dml import MSO_THEME_COLOR
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 import src.DriveTestAnalyzer as core
-from src.modules.e2e_dashboards import DashboardDefinition, filter_frame
+from src.modules.ppt_dashboards import DashboardDefinition, filter_frame
 
 
 def definition(**changes):
@@ -26,7 +26,7 @@ def definition(**changes):
 
 
 def test_dashboard_uses_combined_tables_without_projection_or_warmup_queue():
-    source = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
+    source = (Path(__file__).parents[1] / 'src/modules/ppt_dashboards.py').read_text(encoding='utf-8')
     assert 'drivetest-analyzers.sqlite3' not in source
     assert 'def ensure_projection' not in source
     assert 'def enqueue_prefetch' not in source
@@ -45,7 +45,7 @@ def test_dashboard_ppt_chart_filters_use_complete_job_geography_and_cross_filter
     node_binary = shutil.which('node')
     if node_binary is None:
         pytest.skip('Node.js is required for this browser filter test')
-    script_path = Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js'
+    script_path = Path(__file__).parents[1] / 'src/web_interface/static/js/ppt_dashboards.js'
     harness = r"""
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -92,8 +92,8 @@ eval(source.slice(start, end) + `
 
 
 def test_dashboard_library_can_change_nr_mode_and_template_with_confirmation_controls():
-    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
-    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/ppt_dashboards.js').read_text(encoding='utf-8')
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/ppt_dashboards.css').read_text(encoding='utf-8')
 
     assert "technologySelect.className = 'ds-dashboard-definition-select ds-dashboard-nr-mode-select'" in script
     assert "templateSelect.className = 'ds-dashboard-definition-select ds-dashboard-template-select'" in script
@@ -108,7 +108,7 @@ def test_dashboard_library_can_change_nr_mode_and_template_with_confirmation_con
     assert "const sessionMarker = document.body.dataset.authenticatedSession || 'anonymous';" in app_script
     assert "${sessionScoped ? `:${sessionMarker}` : ''}" in app_script
 
-    dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/ppt_dashboards.js').read_text(encoding='utf-8')
     assert "const authenticatedSession = document.body.dataset.authenticatedSession || 'anonymous';" in dashboard_script
     assert ':open:${authenticatedSession}`' in dashboard_script
     assert ':filters-open:${authenticatedSession}`' in dashboard_script
@@ -146,7 +146,7 @@ def test_template_visual_controls_are_available_for_every_chart_type():
 
 
 def test_saving_the_embedded_template_rebuilds_the_dashboard_immediately():
-    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/ppt_dashboards.js').read_text(encoding='utf-8')
 
     assert 'const rebuildDashboardAfterTemplateSave = async () =>' in script
     assert "const expandedChartIndex = !$('ds-chart-expanded-overlay').hidden" in script
@@ -158,7 +158,7 @@ def test_saving_the_embedded_template_rebuilds_the_dashboard_immediately():
 
 
 def test_compact_landscape_dashboard_comments_are_docked_to_the_bottom():
-    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/ppt_dashboards.css').read_text(encoding='utf-8')
 
     assert '@media (orientation:landscape) and (max-height:600px) {' in stylesheet
     assert '#ds-viewer.ds-overlay {' in stylesheet
@@ -181,15 +181,15 @@ def test_compact_landscape_dashboard_comments_are_docked_to_the_bottom():
 
 
 def test_dashboard_job_panels_use_the_stack_spacing_without_an_empty_filter_row():
-    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/ppt_dashboards.css').read_text(encoding='utf-8')
 
     assert '#ds-filter-home:not(:has(> #ds-filter-panel:not([hidden]))) {' in stylesheet
-    assert '.e2e-dashboards :is(.ds-ppt-jobs-panel,.ds-ppt-charts-panel) {' in stylesheet
+    assert '.ppt-dashboards :is(.ds-ppt-jobs-panel,.ds-ppt-charts-panel) {' in stylesheet
     assert 'margin-top:0;' in stylesheet
 
 
 def test_dashboard_discard_restores_saved_filters_and_universe_before_navigation():
-    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/ppt_dashboards.js').read_text(encoding='utf-8')
 
     assert "const discardPart = (part) => {" in script
     assert "copyDefinitionFields(definition, savedDashboardDefinition(), fields);" in script
@@ -199,7 +199,7 @@ def test_dashboard_discard_restores_saved_filters_and_universe_before_navigation
 
 
 def test_dashboard_prepare_retries_one_transient_proxy_501_response():
-    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/ppt_dashboards.js').read_text(encoding='utf-8')
 
     assert "path.startsWith('/prepare?') && response.status === 501" in script
     assert "await new Promise(resolve => window.setTimeout(resolve, 250));" in script
@@ -248,9 +248,9 @@ def test_auto_calculated_field_editor_uses_wide_content_aware_dialog_geometry():
 
 
 def test_dashboard_warmup_retries_contention_and_compact_panel_headers_stay_aligned():
-    dashboard_module = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
+    dashboard_module = (Path(__file__).parents[1] / 'src/modules/ppt_dashboards.py').read_text(encoding='utf-8')
     app_stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
-    dashboard_stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    dashboard_stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/ppt_dashboards.css').read_text(encoding='utf-8')
 
     # Pre-caching runs on its own thread and pauses for foreground work instead
     # of re-submitting itself to the shared application scheduler.
@@ -267,7 +267,7 @@ def test_dashboard_warmup_retries_contention_and_compact_panel_headers_stay_alig
 
 
 def test_compact_landscape_presentation_settings_are_vertically_scrollable():
-    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/ppt_dashboards.css').read_text(encoding='utf-8')
 
     assert '#ds-presentation-overlay.ds-overlay {' in stylesheet
     assert '#ds-presentation-overlay .ds-presentation-dialog {' in stylesheet
@@ -282,7 +282,7 @@ def test_compact_landscape_presentation_settings_are_vertically_scrollable():
 
 
 def test_compact_portrait_dashboard_fills_the_available_viewport():
-    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/ppt_dashboards.css').read_text(encoding='utf-8')
 
     assert '@media (orientation:portrait) and (max-width:640px) {' in stylesheet
     assert '#ds-viewer:not(.ds-presentation-active) .ds-slide-content {' in stylesheet
@@ -304,7 +304,7 @@ def test_compact_portrait_dashboard_fills_the_available_viewport():
 
 
 def test_dashboard_end_navigation_controls_use_line_svgs():
-    template = (Path(__file__).parents[1] / 'src/web_interface/templates/e2e_dashboards.html').read_text(encoding='utf-8')
+    template = (Path(__file__).parents[1] / 'src/web_interface/templates/ppt_dashboards.html').read_text(encoding='utf-8')
 
     assert 'id="ds-first" class="ds-slide-nav-button" title="First slide" aria-label="First slide"><svg class="ds-slide-arrow-icon"' in template
     assert 'id="ds-last" class="ds-slide-nav-button" title="Last slide" aria-label="Last slide"><svg class="ds-slide-arrow-icon"' in template
@@ -367,7 +367,7 @@ def test_dashboard_page_exposes_disabled_event_time_filtering(client, monkeypatc
     monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'true')
     setup_dashboard(client)
 
-    response = client.get('/e2e-dashboards')
+    response = client.get('/ppt-dashboards')
 
     assert response.status_code == 200
     assert '"ignore_event_time_filtering": true' in response.text
@@ -377,9 +377,9 @@ def test_dashboard_page_exposes_disabled_event_time_filtering(client, monkeypatc
 def test_dashboard_export_uses_the_admin_import_archive_format(client):
     payload = setup_dashboard(client)
     dashboard_id = 'portable-dashboard'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
 
-    exported = client.get(f'/api/e2e-dashboards/{dashboard_id}/export')
+    exported = client.get(f'/api/ppt-dashboards/{dashboard_id}/export')
 
     assert exported.status_code == 200
     with zipfile.ZipFile(BytesIO(exported.content)) as archive:
@@ -396,17 +396,17 @@ def test_dashboard_persists_dataset_universe_separately_from_filters(client):
     payload = setup_dashboard(client)
     payload['date_from'], payload['date_to'] = 'Oldest', 'Newest'
 
-    saved = client.put('/api/e2e-dashboards/symbolic-dates', json=payload)
+    saved = client.put('/api/ppt-dashboards/symbolic-dates', json=payload)
 
     assert saved.status_code == 200, saved.text
     assert {key: saved.json()['definition'][key] for key in ('scope', 'datasets', 'date_from', 'date_to')} == {
         key: payload[key] for key in ('scope', 'datasets', 'date_from', 'date_to')
     }
-    stored = client.get('/api/e2e-dashboards').json()['symbolic-dates']
+    stored = client.get('/api/ppt-dashboards').json()['symbolic-dates']
     assert {key: stored[key] for key in ('scope', 'datasets', 'date_from', 'date_to')} == {
         key: payload[key] for key in ('scope', 'datasets', 'date_from', 'date_to')
     }
-    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    prepared = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert prepared.status_code == 200, prepared.text
     assert prepared.json()['date_bounds'] == {'min': '2026-09-01', 'max': '2026-09-03'}
     assert prepared.json()['rows']['data'] == 3
@@ -421,11 +421,11 @@ def test_dashboard_all_values_expands_when_saved_universe_gains_a_new_value(clie
     payload['custom_fields'] = ['Test_Name']
     payload['filters'] = {}
     dashboard_id = 'expand-all-values'
-    saved = client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload)
+    saved = client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload)
     assert saved.status_code == 200, saved.text
     assert 'Test_Name' not in saved.json()['definition']['filters']
 
-    initial = client.post('/api/e2e-dashboards/prepare', json=payload)
+    initial = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert initial.status_code == 200, initial.text
     assert initial.json()['options']['Test_Name'] == ['HTTP DL']
     assert initial.json()['rows']['data'] == 3
@@ -442,12 +442,12 @@ def test_dashboard_all_values_expands_when_saved_universe_gains_a_new_value(clie
         time.sleep(0.05)
     assert core.repository.get_dataset(2)['status'] == 'ready'
 
-    expanded = client.get('/api/e2e-dashboards').json()[dashboard_id]
+    expanded = client.get('/api/ppt-dashboards').json()[dashboard_id]
     expanded['datasets']['data'] = [1, 2]
-    updated = client.put(f'/api/e2e-dashboards/{dashboard_id}', json=expanded)
+    updated = client.put(f'/api/ppt-dashboards/{dashboard_id}', json=expanded)
     assert updated.status_code == 200, updated.text
     assert 'Test_Name' not in updated.json()['definition']['filters']
-    prepared = client.post('/api/e2e-dashboards/prepare', json=updated.json()['definition'])
+    prepared = client.post('/api/ppt-dashboards/prepare', json=updated.json()['definition'])
     assert prepared.status_code == 200, prepared.text
     assert prepared.json()['options']['Test_Name'] == ['HTTP DL', 'HTTP UL']
     assert prepared.json()['rows']['data'] == 4
@@ -475,12 +475,12 @@ def test_dashboard_background_warmup_prepares_the_five_automatic_date_universes(
     assert response.status_code == 200
     assert core.repository.get_dataset(6)['nr_mode'] == 'SA'
     dashboard_id = 'five-universes'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
 
     deadline = time.monotonic() + 15
     dashboard_status = {}
     while time.monotonic() < deadline:
-        dashboard_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
+        dashboard_status = client.get('/api/ppt-dashboards/statuses').json()[dashboard_id]
         if dashboard_status['state'] != 'loading-data':
             break
         assert dashboard_status['label'].startswith('Pre-Caching Universe ')
@@ -524,10 +524,10 @@ def test_dashboard_template_change_preserves_saved_universe_and_filters(client):
         'date_to': '2026-09-03',
         'slide_comments': {'1': ['Keep this note']},
     })
-    assert client.put('/api/e2e-dashboards/change-template', json=payload).status_code == 200
-    saved_before_change = client.get('/api/e2e-dashboards').json()['change-template']
+    assert client.put('/api/ppt-dashboards/change-template', json=payload).status_code == 200
+    saved_before_change = client.get('/api/ppt-dashboards').json()['change-template']
 
-    changed = client.patch('/api/e2e-dashboards/change-template/template', json={
+    changed = client.patch('/api/ppt-dashboards/change-template/template', json={
         'technology': 'sa', 'template': 'Dashboard SA test',
     })
 
@@ -545,12 +545,12 @@ def test_dashboard_template_change_preserves_saved_universe_and_filters(client):
         'nsa', 'Dashboard test',
     ), is_default=False)
     core.repository.update_dataset_profile(1, nr_mode='SA')
-    reselected = client.patch('/api/e2e-dashboards/change-template/template', json={
+    reselected = client.patch('/api/ppt-dashboards/change-template/template', json={
         'technology': 'sa', 'template': 'Dashboard SA test',
     }).json()['definition']
     assert reselected['datasets'] == {'data': [], 'voice': [], 'speech': []}
-    client.put('/api/e2e-dashboards/change-template', json={**reselected, 'datasets': {'data': [1], 'voice': [], 'speech': []}})
-    same_mode = client.patch('/api/e2e-dashboards/change-template/template', json={
+    client.put('/api/ppt-dashboards/change-template', json={**reselected, 'datasets': {'data': [1], 'voice': [], 'speech': []}})
+    same_mode = client.patch('/api/ppt-dashboards/change-template/template', json={
         'technology': 'sa', 'template': 'Dashboard SA copy',
     }).json()['definition']
     # Changing only the template keeps the saved universe.
@@ -562,17 +562,17 @@ def test_dashboard_vendor_comparison_defaults_and_persists_vendor_only(client):
     assert payload['vendor_comparison'] == 'operator_vendor'
     payload.update(scope='multivendor', vendor_comparison='vendor_only')
 
-    response = client.put('/api/e2e-dashboards/vendor-pooling', json=payload)
+    response = client.put('/api/ppt-dashboards/vendor-pooling', json=payload)
 
     assert response.status_code == 200, response.text
     assert response.json()['definition']['vendor_comparison'] == 'vendor_only'
-    saved = json.loads(core.repository.get_workspace_state('e2e_dashboards_v2'))
+    saved = json.loads(core.repository.get_workspace_state('ppt_dashboards_v2'))
     assert saved['vendor-pooling']['vendor_comparison'] == 'vendor_only'
 
 
 def test_vendor_comparison_prompt_uses_confirm_and_secondary_choices():
     root = Path(__file__).parents[1]
-    dashboard_script = (root / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    dashboard_script = (root / 'src/web_interface/static/js/ppt_dashboards.js').read_text(encoding='utf-8')
     app_script = (root / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
 
     assert "confirmLabel: 'Vendor (All Operators Combined)', secondaryLabel: 'Operator_Vendor'" in dashboard_script
@@ -590,10 +590,10 @@ def test_dashboard_ppt_job_vendor_comparison_survives_retry_without_manifest(cli
     assert core.repository.get_dataset(1)['status'] == 'ready'
     payload.update(scope='multivendor', vendor_comparison='vendor_only')
     dashboard_id = 'vendor-only-ppt-retry'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
     monkeypatch.setattr(core, 'submit_background_task', lambda *_args, **_kwargs: None)
 
-    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={'definition': payload})
+    queued = client.post(f'/api/ppt-dashboards/{dashboard_id}/export-ppt', json={'definition': payload})
     assert queued.status_code == 202, queued.text
     job_id = queued.json()['job_id']
     with core.repository.connection() as connection:
@@ -604,7 +604,7 @@ def test_dashboard_ppt_job_vendor_comparison_survives_retry_without_manifest(cli
     assert row['vendor_comparison'] == 'vendor_only'
     assert not (Path(row['output_path']).parent / 'dashboard-charts' / 'manifest.json').exists()
 
-    retried = client.post(f'/api/e2e-dashboards/ppt-jobs/{job_id}/retry')
+    retried = client.post(f'/api/ppt-dashboards/ppt-jobs/{job_id}/retry')
     assert retried.status_code == 202, retried.text
     with core.repository.connection() as connection:
         restored = connection.execute(
@@ -627,11 +627,11 @@ def test_dashboard_library_ppt_scope_builds_its_automatic_dataset_universe(clien
         'Event_Start_Time': ['2026-09-01', '2026-09-02', '2026-09-03'],
     }))
     dashboard_id = 'library-ppt-scope'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
 
     scope_only = {**payload, 'scope': 'single', 'datasets': {}, 'date_from': None, 'date_to': None}
     prepared = client.post(
-        f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}&use_scope_universe=1', json=scope_only,
+        f'/api/ppt-dashboards/prepare?dashboard_id={dashboard_id}&use_scope_universe=1', json=scope_only,
     )
 
     assert prepared.status_code == 200, prepared.text
@@ -646,7 +646,7 @@ def test_dashboard_library_geography_options_are_loaded_in_one_request(client):
         time.sleep(0.05)
     assert core.repository.get_dataset(1)['status'] == 'ready'
 
-    response = client.post('/api/e2e-dashboards/geography-options', json=payload)
+    response = client.post('/api/ppt-dashboards/geography-options', json=payload)
 
     assert response.status_code == 200, response.text
     assert response.json() == {
@@ -663,7 +663,7 @@ def test_dashboard_filter_options_batch_returns_every_requested_field(client):
     # Saved filters never restrict the values offered for the selected CDRs.
     payload['filters'] = {'City': ['Leeds']}
 
-    response = client.post('/api/e2e-dashboards/filter-options/batch', json={
+    response = client.post('/api/ppt-dashboards/filter-options/batch', json={
         'definition': payload, 'fields': ['Operator', 'City'],
     })
 
@@ -690,13 +690,13 @@ def test_dashboard_campaigns_keep_their_nr_mode_suffix(client):
         time.sleep(0.05)
     payload = definition().model_dump(mode='json')
 
-    options = client.post('/api/e2e-dashboards/geography-options', json=payload)
+    options = client.post('/api/ppt-dashboards/geography-options', json=payload)
 
     assert options.status_code == 200, options.text
     # Compact labels keep an SA/NSA suffix; a Campaign filter limits them.
     assert options.json()['campaigns'] == ['2026-Q1', '2026-Q2-SA']
     payload['filters'] = {'Campaign': ['NetCheck_UK_2026_Q2_SA']}
-    filtered = client.post('/api/e2e-dashboards/geography-options', json=payload)
+    filtered = client.post('/api/ppt-dashboards/geography-options', json=payload)
     assert filtered.json()['campaigns'] == ['2026-Q2-SA']
 
     # The PPT cover lists the Campaigns above the Scope in a larger font.
@@ -705,13 +705,13 @@ def test_dashboard_campaigns_keep_their_nr_mode_suffix(client):
         '1,Quarterly review,Template subtitle,Title Page,,,,Title Slide,,,,,Top\n'
     ).encode(), is_default=False)
     payload = {**definition().model_dump(mode='json'), 'template': 'Campaign cover'}
-    assert client.put('/api/e2e-dashboards/campaign-cover', json=payload).status_code == 200
-    queued = client.post('/api/e2e-dashboards/campaign-cover/export-ppt', json={'definition': payload})
+    assert client.put('/api/ppt-dashboards/campaign-cover', json=payload).status_code == 200
+    queued = client.post('/api/ppt-dashboards/campaign-cover/export-ppt', json={'definition': payload})
     assert queued.status_code == 202, queued.text
     job_id = queued.json()['job_id']
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+        job = next(item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
         if job['status'] in {'ready', 'failed'}:
             break
         time.sleep(0.05)
@@ -766,11 +766,11 @@ def test_dashboard_filter_catalogue_includes_values_beyond_legacy_profile_limit(
             'UPDATE dataset_profiles SET filter_options_json = ? WHERE dataset_id = 2',
             (json.dumps({'city': cities[:50]}),),
         )
-    monkeypatch.setattr('src.modules.e2e_dashboards.DASHBOARD_PROFILE_SELECTION_THRESHOLD', 1)
+    monkeypatch.setattr('src.modules.ppt_dashboards.DASHBOARD_PROFILE_SELECTION_THRESHOLD', 1)
     payload = definition().model_dump(mode='json')
     payload['datasets'] = {'data': [2]}
 
-    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    prepared = client.post('/api/ppt-dashboards/prepare', json=payload)
 
     assert prepared.status_code == 200, prepared.text
     assert prepared.json()['options']['City'] == cities
@@ -785,7 +785,7 @@ def test_dashboard_ppt_filename_summarizes_complete_geography_selections(client,
         time.sleep(0.05)
     assert core.repository.get_dataset(1)['status'] == 'ready'
     dashboard_id = 'geography-ppt-name'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
     core.repository.replace_cdr_catalogue(
         1, vendors=['Vendor A', 'Vendor B'], regions=['North', 'South'], cities=['Leeds', 'London'],
     )
@@ -797,7 +797,7 @@ def test_dashboard_ppt_filename_summarizes_complete_geography_selections(client,
         if operators is not None:
             filters['Operator'] = operators
         export_definition = {**payload, 'filters': filters}
-        response = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+        response = client.post(f'/api/ppt-dashboards/{dashboard_id}/export-ppt', json={
             'definition': export_definition,
             'selected_regions': regions,
             'selected_cities': cities,
@@ -811,17 +811,17 @@ def test_dashboard_ppt_filename_summarizes_complete_geography_selections(client,
         return row['output_file']
 
     assert re.fullmatch(
-        r'\d{8}_\d{6} - E2E Dashboards - NSA - Comparison - Operator Comparison - All Regions\.pptx',
+        r'\d{8}_\d{6} - PPT Dashboards - NSA - Comparison - Operator Comparison - All Regions\.pptx',
         queued_name(['South', 'North'], ['London', 'Leeds']),
     )
     first_north_export = queued_name(['North'], ['London'])
     assert re.fullmatch(
-        r'\d{8}_\d{6} - E2E Dashboards - NSA - Comparison - Operator Comparison - North\.pptx',
+        r'\d{8}_\d{6} - PPT Dashboards - NSA - Comparison - Operator Comparison - North\.pptx',
         first_north_export,
     )
     second_north_export = queued_name(['North'], ['London'], ['A'])
     assert re.fullmatch(
-        r'\d{8}_\d{6} - E2E Dashboards - NSA - Comparison - Operator Comparison - North\.pptx',
+        r'\d{8}_\d{6} - PPT Dashboards - NSA - Comparison - Operator Comparison - North\.pptx',
         second_north_export,
     )
     assert second_north_export != first_north_export
@@ -835,7 +835,7 @@ def test_dashboard_ppt_filename_summarizes_partial_selections_and_fits_filesyste
     assert core.repository.get_dataset(1)['status'] == 'ready'
     payload['name'] = 'Validation Dashboard ' + 'Long Name ' * 9
     dashboard_id = 'compact-ppt-name'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
     core.repository.replace_cdr_catalogue(
         1,
         vendors=['Vendor A', 'Vendor B', 'Vendor C'],
@@ -849,7 +849,7 @@ def test_dashboard_ppt_filename_summarizes_partial_selections_and_fits_filesyste
         'selected_regions': ['North', 'South'],
         'selected_cities': ['Belfast', 'Bristol', 'Cardiff', 'Edinburgh', 'Leeds', 'London', 'Sheffield'],
     }
-    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+    queued = client.post(f'/api/ppt-dashboards/{dashboard_id}/export-ppt', json={
         'definition': payload, **selections,
     })
     assert queued.status_code == 202, queued.text
@@ -871,7 +871,7 @@ def test_dashboard_ppt_filename_summarizes_partial_selections_and_fits_filesyste
 
     with core.repository.connection() as connection:
         connection.execute('UPDATE dashboard_ppt_jobs SET status = ? WHERE id = ?', ('failed', job_id))
-    relaunched = client.post(f'/api/e2e-dashboards/ppt-jobs/{job_id}/retry')
+    relaunched = client.post(f'/api/ppt-dashboards/ppt-jobs/{job_id}/retry')
     assert relaunched.status_code == 202, relaunched.text
     with core.repository.connection() as connection:
         retried = connection.execute(
@@ -883,7 +883,7 @@ def test_dashboard_ppt_filename_summarizes_partial_selections_and_fits_filesyste
     assert 'City: Belfast, Bristol, Cardiff, Edinburgh, Leeds, London, Sheffield' in json.loads(retried['filters_json'])
 
     unicode_definition = {**payload, 'name': 'É' * 120}
-    unicode_job = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+    unicode_job = client.post(f'/api/ppt-dashboards/{dashboard_id}/export-ppt', json={
         'definition': unicode_definition, **selections,
     })
     assert unicode_job.status_code == 202, unicode_job.text
@@ -907,7 +907,7 @@ def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client
         'Operator': ['A'], 'Vendor': ['Vendor A'],
         'Region': ['North'], 'City': ['London'],
     }
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
     core.repository.replace_cdr_catalogue(
         1, vendors=['Vendor A', 'Vendor B'], regions=['North', 'South'], cities=['Leeds', 'London'],
     )
@@ -919,7 +919,7 @@ def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client
 
     monkeypatch.setattr(core, 'submit_background_task', run_inline)
 
-    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+    queued = client.post(f'/api/ppt-dashboards/{dashboard_id}/export-ppt', json={
         'definition': payload,
         'selected_operators': ['B'],
         'selected_vendors': ['Vendor B'],
@@ -928,7 +928,7 @@ def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client
     })
 
     assert queued.status_code == 202, queued.text
-    job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == queued.json()['job_id'])
+    job = next(item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] if item['id'] == queued.json()['job_id'])
     assert job['filters'][-4:] == [
         'Operator: B', 'Vendor: Vendor B', 'Region: South', 'City: Leeds',
     ]
@@ -943,7 +943,7 @@ def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client
     assert submitted[0][6] == {
         'Operator': ['B'], 'Vendor': ['Vendor B'], 'Region': ['South'], 'City': ['Leeds'],
     }
-    assert client.get('/api/e2e-dashboards').json()[dashboard_id]['filters'] == payload['filters']
+    assert client.get('/api/ppt-dashboards').json()[dashboard_id]['filters'] == payload['filters']
 
 
 def test_dashboard_ppt_all_labels_only_consider_the_selected_cdrs(client):
@@ -961,19 +961,19 @@ def test_dashboard_ppt_all_labels_only_consider_the_selected_cdrs(client):
         time.sleep(0.05)
     payload['filters'] = {'Operator': ['A', 'B', 'C'], 'City': ['Leeds', 'London', 'York']}
     dashboard_id = 'selected-cdr-labels'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
 
-    options = client.post('/api/e2e-dashboards/geography-options', json=payload).json()
+    options = client.post('/api/ppt-dashboards/geography-options', json=payload).json()
     assert options['operators'] == ['A', 'B']
     # Selecting every value the selected CDRs offer reads as "All", whether
     # the export uses the saved filters or the dialog's explicit selection.
     for selections in ({}, {'selected_operators': ['A', 'B'], 'selected_cities': ['Leeds', 'London']}):
-        queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={'definition': payload, **selections})
+        queued = client.post(f'/api/ppt-dashboards/{dashboard_id}/export-ppt', json={'definition': payload, **selections})
         assert queued.status_code == 202, queued.text
         job_id = queued.json()['job_id']
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
-            job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+            job = next(item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
             if job['status'] in {'ready', 'failed'}:
                 break
             time.sleep(0.05)
@@ -989,7 +989,7 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
     ).encode(), is_default=False)
     payload['template'] = 'Structural dashboard'
     dashboard_id = 'structural-ppt-cover'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
         time.sleep(0.05)
@@ -998,11 +998,11 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
         1, vendors=['Vendor A', 'Vendor B'], regions=['North', 'South'], cities=['Leeds', 'London'],
     )
 
-    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={'definition': payload})
+    queued = client.post(f'/api/ppt-dashboards/{dashboard_id}/export-ppt', json={'definition': payload})
     assert queued.status_code == 202, queued.text
     job_id = queued.json()['job_id']
     while time.monotonic() < deadline:
-        job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+        job = next(item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
         if job['status'] in {'ready', 'failed'}:
             break
         time.sleep(0.05)
@@ -1017,7 +1017,7 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
         connection.execute(
             'UPDATE dashboard_ppt_jobs SET filters_json = ? WHERE id = ?', (json.dumps(stored), job_id),
         )
-    legacy = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+    legacy = next(item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
     assert legacy['filters'].index('Operator: All Operators') < legacy['filters'].index('Vendor: All Vendors')
     assert legacy['filters'].index('Vendor: All Vendors') < legacy['filters'].index('Region: All Regions')
     with core.repository.connection() as connection:
@@ -1040,16 +1040,16 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
     # This CDR has no Campaign column, so no Campaigns line is drawn.
     assert 'dashboard-ppt-campaigns' not in details
     expected_cover = {'campaigns': '', 'scope': 'Operator Comparison', 'regions': 'All Regions', 'cities': 'All Cities'}
-    assert client.get(f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover'] == expected_cover
-    listed_job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+    assert client.get(f'/api/ppt-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover'] == expected_cover
+    listed_job = next(item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
     assert listed_job['cover'] == expected_cover
     manifest_path = Path(row['output_path']).parent / 'dashboard-charts' / 'manifest.json'
     legacy = json.loads(manifest_path.read_text(encoding='utf-8'))
     legacy.pop('cover')
     manifest_path.write_text(json.dumps(legacy), encoding='utf-8')
     # Jobs exported before the cover was stored rebuild it from their Filters.
-    assert client.get(f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover'] == expected_cover
-    assert next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)['cover'] == expected_cover
+    assert client.get(f'/api/ppt-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover'] == expected_cover
+    assert next(item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)['cover'] == expected_cover
     # Like the viewer, the details follow the subtitle (below the template line).
     assert details['dashboard-ppt-scope'].top > placeholders[4].top + placeholders[4].height
     assert placeholders[4].text_frame.paragraphs[0].runs[0].font.color.theme_color == MSO_THEME_COLOR.ACCENT_4
@@ -1062,21 +1062,21 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
 
 def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
     payload = setup_dashboard(client)
-    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    prepared = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert prepared.status_code == 200, prepared.text
     token = prepared.json()['token']
 
-    original = client.get(f'/api/e2e-dashboards/chart/{token}/0')
+    original = client.get(f'/api/ppt-dashboards/chart/{token}/0')
     assert original.status_code == 200, original.text
     assert original.headers['cache-control'] == 'no-store'
     assert len(original.json()['series']) == 2
-    context = client.get(f'/api/e2e-dashboards/chart/{token}/0/filter-context')
+    context = client.get(f'/api/ppt-dashboards/chart/{token}/0/filter-context')
     assert context.status_code == 200, context.text
     assert context.json()['kpi'] == 'Mean_Data_Rate'
     assert context.json()['exclude_null_empty'] is False
     assert context.json()['exclude_zero'] is False
 
-    preview = client.post(f'/api/e2e-dashboards/chart/{token}/0/filter-preview', json={
+    preview = client.post(f'/api/ppt-dashboards/chart/{token}/0/filter-preview', json={
         'chart_title': 'Filtered operator preview',
         'filters': 'Operator = A',
         'grouping_rows': 'Test_Name × City × Operator',
@@ -1090,13 +1090,13 @@ def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
     assert preview.json()['series'][0]['name'] == 'HTTP DL · London · A'
     assert preview.json()['legend']['position'] == 'right'
 
-    retained_kpi = client.post(f'/api/e2e-dashboards/chart/{token}/0/filter-preview', json={
+    retained_kpi = client.post(f'/api/ppt-dashboards/chart/{token}/0/filter-preview', json={
         'kpi': '', 'grouping_rows': 'Operator', 'grouping_columns': '',
     })
     assert retained_kpi.status_code == 200, retained_kpi.text
     assert retained_kpi.json()['metric'] == 'Mean Data Rate'
 
-    updated = client.post(f'/api/e2e-dashboards/chart/{token}/0/update-template', json={
+    updated = client.post(f'/api/ppt-dashboards/chart/{token}/0/update-template', json={
         'chart_title': 'Updated template chart', 'grouping_rows': 'Test_Name × Operator',
         'grouping_columns': 'City', 'legend_position': 'Right',
         'exclude_null_empty': 'Yes', 'exclude_zero': 'Yes',
@@ -1108,7 +1108,7 @@ def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
     )
     assert entry.exclude_null_empty is True
     assert entry.exclude_zero is True
-    refreshed_context = client.get(f'/api/e2e-dashboards/chart/{token}/0/filter-context')
+    refreshed_context = client.get(f'/api/ppt-dashboards/chart/{token}/0/filter-context')
     assert refreshed_context.status_code == 200, refreshed_context.text
     assert refreshed_context.json()['chart_title'] == 'Updated template chart'
     assert refreshed_context.json()['grouping_rows'] == 'Test_Name × Operator'
@@ -1119,19 +1119,19 @@ def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
 
 def test_expanded_dashboard_chart_apply_can_render_outside_the_proxy_request(client):
     payload = setup_dashboard(client)
-    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    prepared = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert prepared.status_code == 200, prepared.text
     token = prepared.json()['token']
 
     queued = client.post(
-        f'/api/e2e-dashboards/chart/{token}/0/filter-preview?background=true',
+        f'/api/ppt-dashboards/chart/{token}/0/filter-preview?background=true',
         json={'filters': 'Operator = A', 'grouping_rows': 'Operator'},
     )
 
     assert queued.status_code == 202, queued.text
     assert queued.json()['state'] == 'processing'
     completed = client.get(
-        f"/api/e2e-dashboards/chart-preview-jobs/{queued.json()['job_id']}"
+        f"/api/ppt-dashboards/chart-preview-jobs/{queued.json()['job_id']}"
     )
     assert completed.status_code == 200, completed.text
     assert completed.json()['series'][0]['name'] == 'A'
@@ -1149,31 +1149,31 @@ def test_update_template_synchronizes_chart_definition_across_live_snapshots(cli
         'Test_Start_Time': ['2026-09-01', '2026-09-02', '2026-09-03'],
         'Event_Start_Time': ['2026-09-01', '2026-09-02', '2026-09-03'],
     }))
-    first = client.post('/api/e2e-dashboards/prepare', json=payload)
-    second = client.post('/api/e2e-dashboards/prepare', json=payload)
+    first = client.post('/api/ppt-dashboards/prepare', json=payload)
+    second = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert first.status_code == second.status_code == 200
     first_token = first.json()['token']
     second_token = second.json()['token']
 
     filtered = client.post(
-        f'/api/e2e-dashboards/chart/{first_token}/0/update-template',
+        f'/api/ppt-dashboards/chart/{first_token}/0/update-template',
         json={'filters': 'Operator = A'},
     )
     assert filtered.status_code == 200, filtered.text
     assert filtered.json()['synced_snapshots'] == 2
     second_context = client.get(
-        f'/api/e2e-dashboards/chart/{second_token}/0/filter-context'
+        f'/api/ppt-dashboards/chart/{second_token}/0/filter-context'
     )
     assert second_context.status_code == 200, second_context.text
     assert second_context.json()['filters'] == 'Operator = A'
 
     cleared = client.post(
-        f'/api/e2e-dashboards/chart/{first_token}/0/update-template',
+        f'/api/ppt-dashboards/chart/{first_token}/0/update-template',
         json={'filters': ''},
     )
     assert cleared.status_code == 200, cleared.text
     reopened_context = client.get(
-        f'/api/e2e-dashboards/chart/{second_token}/0/filter-context'
+        f'/api/ppt-dashboards/chart/{second_token}/0/filter-context'
     )
     assert reopened_context.status_code == 200, reopened_context.text
     assert reopened_context.json()['filters'] == ''
@@ -1181,7 +1181,7 @@ def test_update_template_synchronizes_chart_definition_across_live_snapshots(cli
 
 def test_dashboard_refresh_rebuilds_all_models_and_chart_refresh_rebuilds_only_one(client, monkeypatch):
     payload = setup_dashboard(client)
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload).json()
     token = preview['token']
     indexes = [
         chart['index']
@@ -1190,9 +1190,9 @@ def test_dashboard_refresh_rebuilds_all_models_and_chart_refresh_rebuilds_only_o
         if chart['available']
     ]
     for index in indexes:
-        assert client.get(f'/api/e2e-dashboards/chart/{token}/{index}').status_code == 200
+        assert client.get(f'/api/ppt-dashboards/chart/{token}/{index}').status_code == 200
 
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
     original = dashboards_module.catalog_chart_payload
     calls = []
 
@@ -1206,18 +1206,18 @@ def test_dashboard_refresh_rebuilds_all_models_and_chart_refresh_rebuilds_only_o
     core.repository.replace_operator_mapping_group(None, 'Alpha', ['A'], '#123456')
     core.repository.replace_operator_mapping_group(None, 'Beta', ['B'], '#654321')
     core.repository.move_chart_mapping_group('operator', 'Beta', 'up')
-    refreshed_chart = client.post(f'/api/e2e-dashboards/chart/{token}/{current}/refresh')
+    refreshed_chart = client.post(f'/api/ppt-dashboards/chart/{token}/{current}/refresh')
     assert refreshed_chart.status_code == 200, refreshed_chart.text
     assert len(calls) == 1
     assert [series['name'] for series in refreshed_chart.json()['series']] == ['Beta', 'Alpha']
     assert {
         series['name']: series['colour'] for series in refreshed_chart.json()['series']
     } == {'Alpha': '#123456', 'Beta': '#654321'}
-    assert client.get(f'/api/e2e-dashboards/chart/{token}/{indexes[0]}').status_code == 200
+    assert client.get(f'/api/ppt-dashboards/chart/{token}/{indexes[0]}').status_code == 200
     assert len(calls) == 1
 
     calls.clear()
-    refreshed_dashboard = client.post(f'/api/e2e-dashboards/charts/{token}/refresh')
+    refreshed_dashboard = client.post(f'/api/ppt-dashboards/charts/{token}/refresh')
     assert refreshed_dashboard.status_code == 200, refreshed_dashboard.text
     assert refreshed_dashboard.json() == {'refreshed': len(indexes)}
     assert len(calls) == len(indexes)
@@ -1238,33 +1238,33 @@ def test_dashboard_editing_controls_match_workspace_editor_roles(client):
             core.repository.set_user_workspace_access(int(account['id']), [core.active_workspace.id])
         core.SESSIONS[session_id] = core.SessionUser(username=session_id, role=role)
         client.cookies.set(core.SESSION_COOKIE, session_id)
-        page = client.get('/e2e-dashboards')
+        page = client.get('/ppt-dashboards')
         assert page.status_code == 200
         for control in controls:
             assert (control in page.text) == (role != 'user-viewer')
         assert ('id="ds-ppt-jobs-delete-all"' in page.text) == (role != 'user-viewer')
         assert ('"can_manage": true' in page.text) == (role != 'user-viewer')
         expected_status = 403 if role == 'user-viewer' else 404
-        assert client.post('/api/e2e-dashboards/ppt-jobs/999999/delete').status_code == expected_status
+        assert client.post('/api/ppt-dashboards/ppt-jobs/999999/delete').status_code == expected_status
         expected_chart_status = 403 if role == 'user-viewer' else 410
-        assert client.post('/api/e2e-dashboards/chart/missing/0/update-template', json={}).status_code == expected_chart_status
+        assert client.post('/api/ppt-dashboards/chart/missing/0/update-template', json={}).status_code == expected_chart_status
         if role != 'user-viewer':
-            assert client.post('/api/e2e-dashboards/ppt-jobs/delete-all').status_code == 200
+            assert client.post('/api/ppt-dashboards/ppt-jobs/delete-all').status_code == 200
 
 
-def test_dashboards_lifecycle_and_layout(client, reporting_old):
+def test_dashboards_lifecycle_and_layout(client, ppt_reporting_old):
     payload = setup_dashboard(client)
-    page = client.get('/e2e-dashboards')
+    page = client.get('/ppt-dashboards')
     assert page.status_code == 200
     assert re.search(r'data-authenticated-session="[^"]+"', page.text)
     assert 'id="page-panel-navigator"' in page.text
     assert 'data-page-panel-navigator-list' in page.text
-    assert page.text.index('>CDR Analysis<') < page.text.index('>E2E Dashboards<') < page.text.index('>Reporting (old)<') < page.text.index('>Network Insights<')
-    assert client.get('/reporting-old').status_code == 200
-    # Bookmarks from earlier versions keep opening the module now called Reporting (old).
+    assert page.text.index('>CDR Analysis<') < page.text.index('>PPT Dashboards<') < page.text.index('>PPT Reporting (old)<') < page.text.index('>Network Insights<')
+    assert client.get('/ppt-reporting-old').status_code == 200
+    # Bookmarks from earlier versions keep opening the module now called PPT Reporting (old).
     legacy_reporting = client.get('/e2e-reporting/jobs?x=1', follow_redirects=False)
     assert legacy_reporting.status_code == 307
-    assert legacy_reporting.headers['location'] == '/reporting-old/jobs?x=1'
+    assert legacy_reporting.headers['location'] == '/ppt-reporting-old/jobs?x=1'
     assert 'id="ds-nr-mode"' in page.text
     assert 'id="ds-dashboards-body"' in page.text
     assert '>PPT Generation Jobs<' in page.text
@@ -1316,7 +1316,7 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     # Save Universe and Save Filters sit between Cancel and Generate PPT.
     actions = [page.text.index(f'id="{name}"') for name in ('ds-ppt-dataset-cancel', 'ds-ppt-save-universe', 'ds-ppt-save-filters', 'ds-ppt-dataset-confirm')]
     assert actions == sorted(actions)
-    dialog_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    dialog_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/ppt_dashboards.js').read_text(encoding='utf-8')
     assert "return [key, saved?.length ? {values: saved, all: false} : {values: [], all: true}];" in dialog_script
     assert "options = (await api('/filter-options/batch', 'POST', {definition: exportUniverse(), fields: [...extraFilters.keys()]})).options || {};" in dialog_script
     assert "for (const [field, values] of Object.entries(universeChoice.extra_filters || {})) withPptSelection(exportDefinition, field, values);" in dialog_script
@@ -1423,7 +1423,7 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     assert '>Use Selected Datasets</button>' not in page.text
     assert '>Use Latest Datasets</button>' not in page.text
     assert 'ds-viewer-refresh-action' in page.text
-    dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/ppt_dashboards.js').read_text(encoding='utf-8')
     assert "controls.append(data, expand, zoom)" in dashboard_script
     assert "savedDefinition = definitionFingerprint(savedRuntimeDashboardDefinition(dashboards[id])); dirty = false;" in dashboard_script
     assert "await warmDashboardModels();" not in dashboard_script
@@ -1440,14 +1440,14 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     assert 'const restoreOpenDashboard = restorePageState;' not in dashboard_script
     assert "if (dashboards[last]) await openDashboard(last, {showFilters: rememberedFiltersOpen()});" in dashboard_script
     assert dashboard_script.index("action('View Dashboard', 'View Dashboard'") < dashboard_script.index("filtersAreOpen ? 'Close Filters' : 'Open Filters'")
-    assert "preview_snapshot = replace(" in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
-    assert "The template owns these required chart attributes." in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
+    assert "preview_snapshot = replace(" in (Path(__file__).parents[1] / 'src/modules/ppt_dashboards.py').read_text(encoding='utf-8')
+    assert "The template owns these required chart attributes." in (Path(__file__).parents[1] / 'src/modules/ppt_dashboards.py').read_text(encoding='utf-8')
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     assert 'function setupPagePanelNavigator()' in app_script
     assert "mainMenuLabel.textContent = 'Main Menu';" in app_script
     assert "mainMenuPath.setAttribute('d', 'M3 11.5 12 4l9 7.5M5.5 10v10h13V10M9.5 20v-6h5v6');" in app_script
     assert "window.scrollTo({top: 0, left: 0, behavior: 'smooth'});" in app_script
-    assert "'module-tab-e2e-dashboards': 'dashboards'" in app_script
+    assert "'module-tab-ppt-dashboards': 'dashboards'" in app_script
     assert "panel.scrollIntoView({behavior: 'smooth', block: 'start'});" in app_script
     assert "const topLevelPanels = Array.from(main.querySelectorAll('article.panel, details.panel, section.panel'))" in app_script
     assert 'const visiblePanels = topLevelPanels.filter((panel) => (' in app_script
@@ -1464,9 +1464,9 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     reporting_template = (Path(__file__).parents[1] / 'src/web_interface/templates/reporting.html').read_text(encoding='utf-8')
     assert 'id="report-charts-panel"' in reporting_template
     assert "document.dispatchEvent(new CustomEvent('page-panel-navigation:update'));" in reporting_template
-    dashboard_template = (Path(__file__).parents[1] / 'src/web_interface/templates/e2e_dashboards.html').read_text(encoding='utf-8')
+    dashboard_template = (Path(__file__).parents[1] / 'src/web_interface/templates/ppt_dashboards.html').read_text(encoding='utf-8')
     assert dashboard_template.index('id="ds-apply-filters"') < dashboard_template.index('id="ds-generate-ppt"')
-    assert 'id="ds-ppt-charts-panel" open data-panel-state-key="e2e-dashboards:ppt-charts" hidden' in dashboard_template
+    assert 'id="ds-ppt-charts-panel" open data-panel-state-key="ppt-dashboards:ppt-charts" hidden' in dashboard_template
     assert "$('ds-ppt-charts-panel').hidden = false;" in dashboard_script
     assert "$('ds-ppt-charts-panel').hidden = true;" in dashboard_script
     assert "dashboardFiltersOpen = true;" in dashboard_script
@@ -1511,7 +1511,7 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     reporting_source = (Path(__file__).parents[1] / 'src/modules/cdr_reporting.py').read_text(encoding='utf-8')
     assert 'This chart type has no interactive renderer' not in reporting_source
     app_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
-    dashboard_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    dashboard_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/ppt_dashboards.css').read_text(encoding='utf-8')
     assert '.ds-chart-expanded-canvas.ds-hover .ds-chart-filter-panel' in dashboard_styles
     assert '#ds-data-overlay .ds-data-dialog { position: absolute; inset: 5%;' in dashboard_styles
     assert '.ds-chart-filter-panel.is-open {' in dashboard_styles
@@ -1519,25 +1519,25 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     assert '#ds-viewer.ds-overlay{z-index:8800}' in dashboard_styles
     assert '#ds-data-overlay.ds-overlay, #ds-filter-overlay.ds-overlay, #ds-presentation-overlay.ds-overlay { z-index: 9100 !important; }' in dashboard_styles
     assert '#ds-editor-overlay.ds-overlay { z-index: 9200 !important; }' in dashboard_styles
-    assert '.e2e-dashboards .ds-chart-expanded-navigation { gap: 0.65rem; }' in dashboard_styles
-    assert '.e2e-dashboards .ds-chart-expanded-arrow-icon {' in dashboard_styles
-    assert '.e2e-dashboards .ds-slide-navigation { gap: 0.65rem; }' in dashboard_styles
-    assert '.e2e-dashboards .ds-slide-arrow-icon {' in dashboard_styles
+    assert '.ppt-dashboards .ds-chart-expanded-navigation { gap: 0.65rem; }' in dashboard_styles
+    assert '.ppt-dashboards .ds-chart-expanded-arrow-icon {' in dashboard_styles
+    assert '.ppt-dashboards .ds-slide-navigation { gap: 0.65rem; }' in dashboard_styles
+    assert '.ppt-dashboards .ds-slide-arrow-icon {' in dashboard_styles
     assert '.ds-viewer-tool-actions { display: flex;' in dashboard_styles
-    assert '.e2e-dashboards .ds-viewer-tool-actions .ds-viewer-icon-action {' in dashboard_styles
-    assert '#ds-viewer.e2e-dashboards .ds-viewer-top-action::before {' in dashboard_styles
-    assert '#ds-viewer.e2e-dashboards .ds-viewer-top-filters::before {' in dashboard_styles
-    assert '#ds-viewer.e2e-dashboards .ds-viewer-top-auto-fields::before {' in dashboard_styles
-    assert '#ds-viewer.e2e-dashboards .ds-viewer-top-edit::before {' in dashboard_styles
+    assert '.ppt-dashboards .ds-viewer-tool-actions .ds-viewer-icon-action {' in dashboard_styles
+    assert '#ds-viewer.ppt-dashboards .ds-viewer-top-action::before {' in dashboard_styles
+    assert '#ds-viewer.ppt-dashboards .ds-viewer-top-filters::before {' in dashboard_styles
+    assert '#ds-viewer.ppt-dashboards .ds-viewer-top-auto-fields::before {' in dashboard_styles
+    assert '#ds-viewer.ppt-dashboards .ds-viewer-top-edit::before {' in dashboard_styles
     assert 'class="ds-presentation-navigation-separator"' in page.text
-    assert '#ds-viewer.e2e-dashboards:not(.ds-presentation-active) .ds-presentation-navigation-separator {' in dashboard_styles
+    assert '#ds-viewer.ppt-dashboards:not(.ds-presentation-active) .ds-presentation-navigation-separator {' in dashboard_styles
     assert 'border-right:1px solid #b8a8ca;' in dashboard_styles
-    assert '.e2e-dashboards .ds-chart-expanded-pan-up {' in dashboard_styles
-    assert '.e2e-dashboards .ds-chart-expanded-pan-down {' in dashboard_styles
-    assert '.e2e-dashboards .ds-chart-pan-button {' in dashboard_styles
+    assert '.ppt-dashboards .ds-chart-expanded-pan-up {' in dashboard_styles
+    assert '.ppt-dashboards .ds-chart-expanded-pan-down {' in dashboard_styles
+    assert '.ppt-dashboards .ds-chart-pan-button {' in dashboard_styles
     assert '.ds-chart-expanded-overlay .ds-chart-expanded-dialog { position: relative;' in dashboard_styles
     assert '.ds-chart-expanded-overlay .ds-chart-expanded-canvas { border:' in dashboard_styles
-    assert '#ds-chart-expanded-close.report-chart-viewer-close, .e2e-dashboards .ds-viewer-header #ds-viewer-close.report-chart-viewer-close {' in dashboard_styles
+    assert '#ds-chart-expanded-close.report-chart-viewer-close, .ppt-dashboards .ds-viewer-header #ds-viewer-close.report-chart-viewer-close {' in dashboard_styles
     assert '#ds-subtitle{min-height:1.4em}.ds-viewer-panel>.ds-actions{display:grid;' in dashboard_styles
     assert '#ds-subtitle:empty{display:none}' not in dashboard_styles
     assert 'text-transform: uppercase;' in dashboard_styles
@@ -1751,7 +1751,7 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     assert "facetOptionRequests.has(field) ? 'Loading values…'" in dashboard_script
     assert "const filterAliases = config.filter_aliases || {};" in dashboard_script
     assert "facet.dataset.aliasTooltip = aliasTooltip;" in dashboard_script
-    dashboard_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    dashboard_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/ppt_dashboards.css').read_text(encoding='utf-8')
     assert '.ds-facet[data-alias-tooltip]::after' in dashboard_styles
     assert 'const preparedPayloadKey = (id, fingerprint) =>' in dashboard_script
     assert 'const preparedStateFingerprint = value =>' in dashboard_script
@@ -1786,12 +1786,12 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     assert "previous.status !== 'ready'" in dashboard_script
     assert "renderDashboardPptJobs(jobs, newlyReady[0]?.id || '');" in dashboard_script
     assert "const previous = String(preferredJobId || select.value);" in dashboard_script
-    dashboard_module = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
+    dashboard_module = (Path(__file__).parents[1] / 'src/modules/ppt_dashboards.py').read_text(encoding='utf-8')
     assert 'for saved_id, saved_definition in read_dashboards(task_repository).items()' not in dashboard_module
     assert "'dashboard_name': task['name']," in dashboard_module
     assert "'Waiting to prepare Dashboard dataset'" in dashboard_module
     assert "'progress': task.get('progress', 0)," in dashboard_module
-    assert "@app.get('/api/e2e-dashboards/preparation-progress/{preparation_id}')" in dashboard_module
+    assert "@app.get('/api/ppt-dashboards/preparation-progress/{preparation_id}')" in dashboard_module
     assert "'Counting reduced and filtered Universe rows in the combined CDR tables'" in dashboard_module
     assert "f'Counting Filtered Universe CDR-{kind.title()} rows in the combined table'" in dashboard_module
     assert "progress(78, 'Restoring cached row counts and filter options')" in dashboard_module
@@ -1856,7 +1856,7 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     assert 'use_profile_options=use_profile_options,' in dashboard_module
     assert 'DASHBOARD_CHART_RENDER_WORKERS = max(1, min(2, (os.cpu_count() or 2) - 1))' in dashboard_module
     assert 'DASHBOARD_PREVIEW_MANIFEST_VERSION = 8' in dashboard_module
-    assert "thread_name_prefix='e2e-dashboard-chart'," not in dashboard_module
+    assert "thread_name_prefix='ppt-dashboard-chart'," not in dashboard_module
     assert 'def schedule_next_prefetch() -> None:' not in dashboard_module
     assert 'def enqueue_prefetch(' not in dashboard_module
     assert "void api(`/prefetched/${encodeURIComponent(activeId)}/priority`" not in dashboard_script
@@ -1877,17 +1877,17 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     assert 'ATTACH DATABASE' not in dashboard_module
     assert 'sqlite3.connect(database_path, timeout=120.0)' in dashboard_module
     assert 'aggregation_columns = chart_aggregation_columns(' in dashboard_module
-    assert "thread_name_prefix='e2e-dashboard-data'," not in dashboard_module
-    dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
-    assert '.e2e-dashboards :is(.ds-unsaved-filters-badge,.ds-unsaved-universe-badge)' in dashboard_css
-    assert '.e2e-dashboards :is(.ds-unapplied-filters-badge,.ds-unapplied-universe-badge)' in dashboard_css
+    assert "thread_name_prefix='ppt-dashboard-data'," not in dashboard_module
+    dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/ppt_dashboards.css').read_text(encoding='utf-8')
+    assert '.ppt-dashboards :is(.ds-unsaved-filters-badge,.ds-unsaved-universe-badge)' in dashboard_css
+    assert '.ppt-dashboards :is(.ds-unapplied-filters-badge,.ds-unapplied-universe-badge)' in dashboard_css
     assert '.ds-scope-control.ds-filter-applied-unsaved select' in dashboard_css
     assert '.ds-date-picker.ds-date-picker-applied-unsaved .ds-date-picker-control>input' in dashboard_css
-    assert '.e2e-dashboards .ds-dashboard-close::after' in dashboard_css
-    assert '.e2e-dashboards .ds-active-dashboard-name{color:#12664f;font-family:inherit;font-size:1.12em;font-weight:900}' in dashboard_css
-    assert '.e2e-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#a9273a,#dc5361)' in dashboard_css
-    assert '.e2e-dashboards .ds-dashboard-open{background:linear-gradient(145deg,#e87912,#ffad2f)' in dashboard_css
-    assert '.e2e-dashboards .ds-dashboard-view{background:linear-gradient(145deg,#167957,#29ae7d)' in dashboard_css
+    assert '.ppt-dashboards .ds-dashboard-close::after' in dashboard_css
+    assert '.ppt-dashboards .ds-active-dashboard-name{color:#12664f;font-family:inherit;font-size:1.12em;font-weight:900}' in dashboard_css
+    assert '.ppt-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#a9273a,#dc5361)' in dashboard_css
+    assert '.ppt-dashboards .ds-dashboard-open{background:linear-gradient(145deg,#e87912,#ffad2f)' in dashboard_css
+    assert '.ppt-dashboards .ds-dashboard-view{background:linear-gradient(145deg,#167957,#29ae7d)' in dashboard_css
     assert '.ds-dashboard-status-loading-data{border-color:#d3aa45;background:#fff1c9;color:#77570a}' in dashboard_css
     assert '.ds-dashboard-status-data-queued,.ds-dashboard-status-charts-queued{border-color:#aaa3b2;background:#f0edf2;color:#655e6c}' in dashboard_css
     assert '.ds-filter-groups{display:grid;grid-template-rows:max-content max-content minmax(0,1fr);gap:14px}' in dashboard_css
@@ -1960,18 +1960,18 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     assert "definition.filters = structuredClone(saved.filters || {});" in dashboard_script
     assert "definition.custom_fields = structuredClone(saved.custom_fields || []);" in dashboard_script
     assert "definition.hidden_filters = structuredClone(saved.hidden_filters || []);" in dashboard_script
-    dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/ppt_dashboards.css').read_text(encoding='utf-8')
     assert '.ds-dashboard-status-ready{' in dashboard_css
     assert '.ds-dashboard-status-rendering{' in dashboard_css
     assert '.ds-chart-controls button:not(:disabled){cursor:pointer!important}' in dashboard_css
     assert '.ds-preparing .ds-preparing-universe-label{color:#60408d}' in dashboard_css
     assert '.ds-preparing .ds-preparing-filtered-label{color:#d7a921}' in dashboard_css
-    assert '.e2e-dashboards .ds-chart-zoom-reset svg' in dashboard_css
-    assert '.e2e-dashboards .ds-chart-data{width:2rem;min-width:2rem;height:2rem;min-height:2rem}' in dashboard_css
+    assert '.ppt-dashboards .ds-chart-zoom-reset svg' in dashboard_css
+    assert '.ppt-dashboards .ds-chart-data{width:2rem;min-width:2rem;height:2rem;min-height:2rem}' in dashboard_css
     assert '.ds-source-filter.ds-filter-unsaved select,.ds-source-filter.ds-filter-unsaved .multiselect-trigger' in dashboard_css
     assert '.ds-date-picker.ds-date-picker-unsaved .ds-date-picker-control>input,.ds-facet.ds-filter-unsaved .multiselect-trigger' in dashboard_css
-    assert '.e2e-dashboards .ds-date-auto-action{position:absolute;right:.32rem;top:50%' in dashboard_css
-    assert '.e2e-dashboards .ds-generate-ppt-action{' in dashboard_css
+    assert '.ppt-dashboards .ds-date-auto-action{position:absolute;right:.32rem;top:50%' in dashboard_css
+    assert '.ppt-dashboards .ds-generate-ppt-action{' in dashboard_css
     assert ':is(.ds-view-dashboard-action,.ds-generate-ppt-action)::before{width:1.35rem' in dashboard_css
     assert '#ds-apply-filters::before' in dashboard_css
     assert '#ds-save::before' in dashboard_css
@@ -2051,27 +2051,27 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     assert "panel.hidden = !dashboardFiltersOpen;" in dashboard_script
     assert '#ds-add-filter::before' in dashboard_css
     assert '#ds-ppt-jobs-delete-all::before' in dashboard_css
-    assert '.e2e-dashboards .ds-ppt-charts-filters::before{' in dashboard_css
+    assert '.ppt-dashboards .ds-ppt-charts-filters::before{' in dashboard_css
     assert '#ds-filter-float .ds-filter-help{margin:26px 0 5px}' in dashboard_css
     assert '#ds-filter-float .ds-data-panel>summary{pointer-events:none;cursor:default}' in dashboard_css
     assert "panel.querySelector('summary').tabIndex = -1;" in dashboard_script
     assert '.ds-chart-expanded-canvas.ds-hover .ds-chart-controls,.ds-chart-expanded-canvas:focus-within .ds-chart-controls{opacity:1;visibility:visible;transform:translateY(0);transition-delay:0s;pointer-events:auto}' in dashboard_css
-    saved = client.put('/api/e2e-dashboards/test', json=payload)
+    saved = client.put('/api/ppt-dashboards/test', json=payload)
     assert saved.status_code == 200
     assert saved.json()['definition']['hidden_filters'] == []
     assert saved.json()['definition']['slide_comments'] == {}
-    listed = client.get('/api/e2e-dashboards')
+    listed = client.get('/api/ppt-dashboards')
     assert listed.json()['test']['name'] == 'Comparison'
     assert listed.headers['cache-control'] == 'no-store, max-age=0, must-revalidate'
-    renamed = client.patch('/api/e2e-dashboards/test/name', json={'name': 'Renamed comparison'})
+    renamed = client.patch('/api/ppt-dashboards/test/name', json={'name': 'Renamed comparison'})
     assert renamed.status_code == 200
     assert renamed.json()['name'] == 'Renamed comparison'
-    assert client.get('/api/e2e-dashboards').json()['test']['name'] == 'Renamed comparison'
-    comments = client.patch('/api/e2e-dashboards/test/comments', json={'slide_comments': {'1': ['Review city outliers']}})
+    assert client.get('/api/ppt-dashboards').json()['test']['name'] == 'Renamed comparison'
+    comments = client.patch('/api/ppt-dashboards/test/comments', json={'slide_comments': {'1': ['Review city outliers']}})
     assert comments.status_code == 200
     assert comments.json()['slide_comments'] == {'1': ['Review city outliers']}
-    assert client.get('/api/e2e-dashboards').json()['test']['slide_comments'] == {'1': ['Review city outliers']}
-    result = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert client.get('/api/ppt-dashboards').json()['test']['slide_comments'] == {'1': ['Review city outliers']}
+    result = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert result.status_code == 200, result.text
     preview = result.json()
     assert preview['filter_fields'] == ['Operator', 'Operator_Vendor', 'Vendor_Operator', 'Vendor', 'Market', 'Region', 'Cluster', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status']
@@ -2087,13 +2087,13 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     assert preview['slides'][0]['charts'][1]['focus_row'] == 1
     assert preview['slides'][0]['charts'][0]['position'][0] < preview['slides'][0]['charts'][1]['position'][0]
     token = preview['token']
-    restored = client.get(f'/api/e2e-dashboards/prepared/{token}')
+    restored = client.get(f'/api/ppt-dashboards/prepared/{token}')
     assert restored.status_code == 200
     assert restored.json() == preview
-    image = client.get(f'/api/e2e-dashboards/preview/{token}/0.png')
+    image = client.get(f'/api/ppt-dashboards/preview/{token}/0.png')
     assert image.status_code == 200, image.text if image.status_code != 200 else ''
     assert image.content.startswith(b'\x89PNG')
-    interactive = client.get(f'/api/e2e-dashboards/chart/{token}/0')
+    interactive = client.get(f'/api/ppt-dashboards/chart/{token}/0')
     assert interactive.status_code == 200, interactive.text
     assert interactive.json()['type'] == 'cdf'
     assert interactive.json()['renderer'] == 'catalog-v2'
@@ -2101,71 +2101,71 @@ def test_dashboards_lifecycle_and_layout(client, reporting_old):
     assert list((Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'charts-pil').glob('*.png'))
     entry = core.load_template_catalogue(next(row['content'] for row in core.repository.list_report_templates('nsa') if row['name'] == 'Dashboard test'), 'nsa')[0]
     assert not core.is_empty_catalog_chart(image.content, entry)
-    data = client.get(f'/api/e2e-dashboards/data/{token}/0').json()
+    data = client.get(f'/api/ppt-dashboards/data/{token}/0').json()
     assert data['total'] == 3
     assert data['page_size'] == 100
     assert data['unfiltered_total'] == 3
     assert set(data['column_metadata']) == set(data['columns'])
     assert all({'label', 'kind', 'rule', 'pinned', 'class_name'} <= set(item) for item in data['column_metadata'].values())
-    city_values = client.get(f'/api/e2e-dashboards/data/{token}/0', params={
+    city_values = client.get(f'/api/ppt-dashboards/data/{token}/0', params={
         'column_filters': json.dumps({'Operator': ['A']}), 'filter_column': 'City',
     }).json()
     assert city_values['filter_values'] == ['London']
-    assert client.get(f'/api/e2e-dashboards/data/{token}/0?download=true').headers['content-type'].startswith('text/csv')
-    assert client.delete('/api/e2e-dashboards/test').status_code == 200
-    assert client.get('/api/e2e-dashboards').json() == {}
+    assert client.get(f'/api/ppt-dashboards/data/{token}/0?download=true').headers['content-type'].startswith('text/csv')
+    assert client.delete('/api/ppt-dashboards/test').status_code == 200
+    assert client.get('/api/ppt-dashboards').json() == {}
 
 
-def test_reporting_old_is_off_for_every_role_and_user_by_default(client):
+def test_ppt_reporting_old_is_off_for_every_role_and_user_by_default(client):
     client.post('/login', data={'username': 'admin', 'password': 'admin123'})
     workspace_page = client.get('/workspace')
     assert workspace_page.status_code == 200
-    assert 'href="/reporting-old"' not in workspace_page.text
-    assert 'Reporting (old)' not in workspace_page.text
-    assert client.get('/reporting-old').status_code == 403
-    assert client.get('/api/reporting-old/jobs').status_code == 403
+    assert 'href="/ppt-reporting-old"' not in workspace_page.text
+    assert 'PPT Reporting (old)' not in workspace_page.text
+    assert client.get('/ppt-reporting-old').status_code == 403
+    assert client.get('/api/ppt-reporting-old/jobs').status_code == 403
 
     for token, username, role in (('e2e-reporting-super-admin', 'someone', 'super-admin'),
                                   ('e2e-reporting-former-user', 'EJAITUR', 'user')):
         core.SESSIONS[token] = core.SessionUser(username=username, role=role)
         client.cookies.set(core.SESSION_COOKIE, token)
-        assert client.get('/reporting-old').status_code == 403
-        assert 'href="/reporting-old"' not in client.get('/workspace').text
-        assert client.get('/api/reporting-old/jobs').status_code == 403
+        assert client.get('/ppt-reporting-old').status_code == 403
+        assert 'href="/ppt-reporting-old"' not in client.get('/workspace').text
+        assert client.get('/api/ppt-reporting-old/jobs').status_code == 403
 
 
 
-def test_reporting_old_access_follows_features_activation(client):
+def test_ppt_reporting_old_access_follows_features_activation(client):
     core.repository.create_user('analyst', 'analyst123', 'user-viewer')
     analyst_id = next(int(row['id']) for row in core.repository.list_users() if row['username'] == 'analyst')
     core.repository.set_user_workspace_access(analyst_id, [core.active_workspace.id])
     client.post('/login', data={'username': 'analyst', 'password': 'analyst123'})
-    assert client.get('/reporting-old').status_code == 403
-    assert 'href="/reporting-old"' not in client.get('/workspace').text
+    assert client.get('/ppt-reporting-old').status_code == 403
+    assert 'href="/ppt-reporting-old"' not in client.get('/workspace').text
     client.cookies.clear()
     client.post('/login', data={'username': 'super', 'password': 'super123'})
     form = {f'default__{key}': 'all' for key in core.FEATURE_KEYS}
-    form.update({'default__reporting-old': 'none', 'allow__reporting-old': [f'user:{analyst_id}']})
+    form.update({'default__ppt-reporting-old': 'none', 'allow__ppt-reporting-old': [f'user:{analyst_id}']})
     assert client.post('/admin/features', data=form, follow_redirects=False).status_code == 303
     # Super-admins are only included when selected.
-    assert client.get('/reporting-old').status_code == 403
+    assert client.get('/ppt-reporting-old').status_code == 403
     client.cookies.clear()
     client.post('/login', data={'username': 'analyst', 'password': 'analyst123'})
-    assert client.get('/reporting-old').status_code == 200
-    assert 'href="/reporting-old"' in client.get('/workspace').text
+    assert client.get('/ppt-reporting-old').status_code == 200
+    assert 'href="/ppt-reporting-old"' in client.get('/workspace').text
 
 def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypatch):
     payload = setup_dashboard(client)
     payload['slide_comments'] = {'1': ['Review city outliers', 'Validate campaign coverage']}
     payload['filters'] = {'City': ['London']}
     dashboard_id = 'ppt-dashboard'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
 
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
         time.sleep(0.05)
     assert core.repository.get_dataset(1)['status'] == 'ready'
-    initial_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
+    initial_status = client.get('/api/ppt-dashboards/statuses').json()[dashboard_id]
     assert initial_status['state'] in {'loading-data', 'ready'}
     assert initial_status['label'] == 'Ready' or initial_status['label'].startswith('Pre-Caching Universe ')
 
@@ -2188,17 +2188,17 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     export_payload = json.loads(json.dumps(payload))
     export_payload['scope'] = 'multivendor'
     prepared = client.post(
-        f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=export_payload,
+        f'/api/ppt-dashboards/prepare?dashboard_id={dashboard_id}', json=export_payload,
     )
     assert prepared.status_code == 200, prepared.text
     prepared_payload = prepared.json()
     for slide in prepared_payload['slides']:
         for chart in slide['charts']:
             if chart['available']:
-                rendered = client.get(f"/api/e2e-dashboards/chart/{prepared_payload['token']}/{chart['index']}")
+                rendered = client.get(f"/api/ppt-dashboards/chart/{prepared_payload['token']}/{chart['index']}")
                 assert rendered.status_code == 200, rendered.text
 
-    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+    queued = client.post(f'/api/ppt-dashboards/{dashboard_id}/export-ppt', json={
         'definition': export_payload,
         'preparation_token': prepared_payload['token'],
     })
@@ -2206,7 +2206,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     job_id = queued.json()['job_id']
     job = None
     while time.monotonic() < deadline:
-        jobs = client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs']
+        jobs = client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs']
         job = next(item for item in jobs if item['id'] == job_id)
         if job['status'] in {'ready', 'failed'}:
             break
@@ -2240,7 +2240,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     charts_dir = output_path.parent / 'dashboard-charts'
     assert output_path.is_file()
     assert re.fullmatch(
-        r'\d{8}_\d{6} - E2E Dashboards - NSA - Comparison - Multivendor Comparison\.pptx',
+        r'\d{8}_\d{6} - PPT Dashboards - NSA - Comparison - Multivendor Comparison\.pptx',
         output_path.name,
     )
     assert output_path.parent.name == output_path.stem
@@ -2293,11 +2293,11 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     chart_model = client.get(charts_payload['charts'][0]['payload_url'])
     assert chart_model.status_code == 200
     # Charts read only their own columns; a dataset page reads every field.
-    chart_data = client.get(f"/api/e2e-dashboards{charts_payload['charts'][0]['data_url']}")
+    chart_data = client.get(f"/api/ppt-dashboards{charts_payload['charts'][0]['data_url']}")
     assert chart_data.status_code == 200
     assert chart_data.json()['total'] == 2
     filtered_data = client.get(
-        f"/api/e2e-dashboards{charts_payload['charts'][0]['data_url']}",
+        f"/api/ppt-dashboards{charts_payload['charts'][0]['data_url']}",
         params={
             'column_filters': json.dumps({'Operator': ['A']}),
             'include_filter_values': 'true',
@@ -2308,7 +2308,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert filtered_data.json()['total'] == 2
     assert filtered_data.json()['filter_values']['Operator'] == ['A']
     empty_data = client.get(
-        f"/api/e2e-dashboards{charts_payload['charts'][0]['data_url']}",
+        f"/api/ppt-dashboards{charts_payload['charts'][0]['data_url']}",
         params={'column_filters': json.dumps({'Operator': ['B']})},
     )
     assert empty_data.status_code == 200
@@ -2321,17 +2321,17 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     with zipfile.ZipFile(BytesIO(archive.content)) as bundle:
         assert len([name for name in bundle.namelist() if name.endswith('.png')]) == 3
 
-    deleted = client.post('/api/e2e-dashboards/ppt-jobs/delete-all')
+    deleted = client.post('/api/ppt-dashboards/ppt-jobs/delete-all')
     assert deleted.status_code == 200
     assert deleted.json()['deleted'] == 1
-    assert client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] == []
+    assert client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] == []
     assert not output_path.parent.exists()
 
 
 def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
     payload = setup_dashboard(client)
     dashboard_id = 'updated-template-ppt'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
 
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
@@ -2350,7 +2350,7 @@ def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
     }))
     export_payload = {**payload, 'scope': 'multivendor'}
     prepared = client.post(
-        f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=export_payload,
+        f'/api/ppt-dashboards/prepare?dashboard_id={dashboard_id}', json=export_payload,
     )
     assert prepared.status_code == 200, prepared.text
     prepared_payload = prepared.json()
@@ -2358,9 +2358,9 @@ def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
         for chart in slide['charts']:
             if chart['available']:
                 assert client.get(
-                    f"/api/e2e-dashboards/chart/{prepared_payload['token']}/{chart['index']}"
+                    f"/api/ppt-dashboards/chart/{prepared_payload['token']}/{chart['index']}"
                 ).status_code == 200
-    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+    queued = client.post(f'/api/ppt-dashboards/{dashboard_id}/export-ppt', json={
         'definition': export_payload,
         'preparation_token': prepared_payload['token'],
     })
@@ -2370,7 +2370,7 @@ def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
     def wait_for_job():
         while time.monotonic() < deadline:
             job = next(
-                item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs']
+                item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs']
                 if item['id'] == job_id
             )
             if job['status'] in {'ready', 'failed'}:
@@ -2382,7 +2382,7 @@ def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
     assert original_job['status'] == 'ready'
     assert original_job['scope'] == 'Multivendor Comparison'
     original_charts = client.get(
-        f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json'
+        f'/api/ppt-dashboards/ppt-jobs/{job_id}/charts.json'
     ).json()['charts']
     assert original_charts[0]['title'] == 'Rate'
 
@@ -2391,7 +2391,7 @@ def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
         'nsa', 'Dashboard test', template.replace(b',Rate,CDR-Data,', b',Updated rate,CDR-Data,', 1),
     )
 
-    relaunched = client.post(f'/api/e2e-dashboards/ppt-jobs/{job_id}/retry')
+    relaunched = client.post(f'/api/ppt-dashboards/ppt-jobs/{job_id}/retry')
     assert relaunched.status_code == 202, relaunched.text
     deadline = time.monotonic() + 15
     job = wait_for_job()
@@ -2414,10 +2414,10 @@ def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
 def test_dashboard_is_prepared_only_when_opened_and_then_reuses_manifest(client):
     payload = setup_dashboard(client)
     dashboard_id = 'on-demand-dashboard'
-    saved = client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload)
+    saved = client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload)
     assert saved.status_code == 200
 
-    response = client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}')
+    response = client.get(f'/api/ppt-dashboards/prefetched/{dashboard_id}')
     assert response.status_code == 409
     assert not any(
         task.get('dashboard_name') == payload['name']
@@ -2425,9 +2425,9 @@ def test_dashboard_is_prepared_only_when_opened_and_then_reuses_manifest(client)
         for task in group['tasks']
     )
 
-    prepared = client.post(f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=payload)
+    prepared = client.post(f'/api/ppt-dashboards/prepare?dashboard_id={dashboard_id}', json=payload)
     assert prepared.status_code == 200, prepared.text
-    response = client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}')
+    response = client.get(f'/api/ppt-dashboards/prefetched/{dashboard_id}')
     assert response.status_code == 200, response.text
     assert response.json()['slides']
     manifests = list(
@@ -2436,26 +2436,26 @@ def test_dashboard_is_prepared_only_when_opened_and_then_reuses_manifest(client)
     assert manifests
     token = prepared.json()['token']
     for _ in range(130):
-        assert client.get('/api/e2e-dashboards/statuses').status_code == 200
-    assert client.get(f'/api/e2e-dashboards/prepared/{token}').status_code == 200
+        assert client.get('/api/ppt-dashboards/statuses').status_code == 200
+    assert client.get(f'/api/ppt-dashboards/prepared/{token}').status_code == 200
 
 
 def test_closed_dashboard_status_uses_its_remembered_session_universe(client):
     payload = setup_dashboard(client)
     dashboard_id = 'session-universe-dashboard'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
 
     session_definition = json.loads(json.dumps(payload))
     session_definition['date_from'] = '2026-09-02'
     session_definition['date_to'] = '2026-09-03'
     prepared = client.post(
-        f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=session_definition,
+        f'/api/ppt-dashboards/prepare?dashboard_id={dashboard_id}', json=session_definition,
     )
     assert prepared.status_code == 200, prepared.text
 
-    background_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
+    background_status = client.get('/api/ppt-dashboards/statuses').json()[dashboard_id]
     assert background_status['state'] in {'loading-data', 'ready'}
-    session_status = client.post('/api/e2e-dashboards/statuses', json={
+    session_status = client.post('/api/ppt-dashboards/statuses', json={
         dashboard_id: session_definition,
     }).json()[dashboard_id]
     assert session_status['state'] in {'loading-data', 'ready'}
@@ -2463,16 +2463,16 @@ def test_closed_dashboard_status_uses_its_remembered_session_universe(client):
 
 def test_saving_dashboard_prepares_data_in_background_without_rendering_charts(client, monkeypatch):
     payload = setup_dashboard(client)
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
     monkeypatch.setattr(
         dashboards_module,
         'catalog_chart_payload',
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('Saving must not render charts.')),
     )
     dashboard_id = 'saved-dashboard'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
-    assert client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}').status_code == 409
-    saved_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert client.get(f'/api/ppt-dashboards/prefetched/{dashboard_id}').status_code == 409
+    saved_status = client.get('/api/ppt-dashboards/statuses').json()[dashboard_id]
     assert saved_status['state'] in {'loading-data', 'ready'}
     assert saved_status['label'] == 'Ready' or saved_status['label'].startswith('Pre-Caching Universe ')
 
@@ -2497,12 +2497,12 @@ def test_direct_dashboard_preparation_separates_queue_and_execution_timestamps(c
     responses = {}
     running = Thread(target=lambda: responses.setdefault(
         'running', client.post(
-            '/api/e2e-dashboards/prepare?preparation_id=direct-running', json=payload,
+            '/api/ppt-dashboards/prepare?preparation_id=direct-running', json=payload,
         ),
     ))
     queued = Thread(target=lambda: responses.setdefault(
         'queued', client.post(
-            '/api/e2e-dashboards/prepare?preparation_id=direct-queued', json=payload,
+            '/api/ppt-dashboards/prepare?preparation_id=direct-queued', json=payload,
         ),
     ))
     try:
@@ -2542,17 +2542,17 @@ def test_direct_dashboard_preparation_separates_queue_and_execution_timestamps(c
 
 def test_applying_filters_prepares_only_data_and_renders_charts_on_demand(client, monkeypatch):
     payload = setup_dashboard(client)
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
 
-    core.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({'filtered-dashboard': payload}))
-    uncached = client.get('/api/e2e-dashboards/statuses')
+    core.repository.set_workspace_state('ppt_dashboards_v2', json.dumps({'filtered-dashboard': payload}))
+    uncached = client.get('/api/ppt-dashboards/statuses')
     assert uncached.status_code == 200
     assert uncached.json()['filtered-dashboard']['state'] in {'loading-data', 'charts-queued', 'ready'}
     # That status request queues the background pre-caching of the Dashboard.
     # Let it finish, so it cannot replace the prepared universe while the
     # charts below are rendered and counted.
     deadline = time.monotonic() + 30
-    while client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard']['state'] == 'loading-data':
+    while client.get('/api/ppt-dashboards/statuses').json()['filtered-dashboard']['state'] == 'loading-data':
         assert time.monotonic() < deadline, 'The Dashboard pre-caching did not finish.'
         time.sleep(0.05)
 
@@ -2564,44 +2564,44 @@ def test_applying_filters_prepares_only_data_and_renders_charts_on_demand(client
         return original(*args, **kwargs)
 
     monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', tracked)
-    response = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
+    response = client.post('/api/ppt-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
     assert response.status_code == 200, response.text
 
     cache_dir = Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'charts-canvas'
     assert not list(cache_dir.glob('*.json'))
     assert calls == []
-    assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
+    assert client.get('/api/ppt-dashboards/statuses').json()['filtered-dashboard'] == {
         'state': 'charts-queued', 'label': 'Data Cached · Charts 0/3',
         'detail': 'Data cached; charts render when viewed or while the application is idle',
     }
 
     token = response.json()['token']
     for index in range(3):
-        rendered = client.get(f'/api/e2e-dashboards/chart/{token}/{index}')
+        rendered = client.get(f'/api/ppt-dashboards/chart/{token}/{index}')
         assert rendered.status_code == 200, rendered.text
     first_models = {path.name for path in cache_dir.glob('*.json')}
     assert len(first_models) == 3
     assert len(calls) == 3
     # Data and every chart of the default universe are ready.
-    assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
+    assert client.get('/api/ppt-dashboards/statuses').json()['filtered-dashboard'] == {
         'state': 'ready', 'label': 'Ready', 'detail': 'Data cached and all 3 charts rendered',
     }
 
     payload['filters'] = {'City': ['London']}
-    filtered = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
+    filtered = client.post('/api/ppt-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
     assert filtered.status_code == 200, filtered.text
     assert {path.name for path in cache_dir.glob('*.json')} == first_models
     assert len(calls) == 3
 
     payload['filters'] = {}
     calls_before_restore = len(calls)
-    restored = client.post('/api/e2e-dashboards/prefetched/filtered-dashboard', json=payload)
+    restored = client.post('/api/ppt-dashboards/prefetched/filtered-dashboard', json=payload)
     assert restored.status_code == 200, restored.text
     assert len(calls) == calls_before_restore
     assert {path.name for path in cache_dir.glob('*.json')} == first_models
 
     core.repository.update_dataset_profile(1, progress=100)
-    refreshed_status = client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard']
+    refreshed_status = client.get('/api/ppt-dashboards/statuses').json()['filtered-dashboard']
     assert refreshed_status['state'] in {'loading-data', 'charts-queued', 'ready'}
 
 
@@ -2631,17 +2631,17 @@ def test_adding_a_dataset_builds_a_new_chart_model_with_every_campaign(client):
         name='Campaign cache test', template='Campaign cache test', datasets={'data': [first_id]},
     ).model_dump(mode='json')
 
-    first = client.post('/api/e2e-dashboards/prepare', json=payload)
+    first = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert first.status_code == 200, first.text
-    first_model = client.get(f"/api/e2e-dashboards/chart/{first.json()['token']}/0")
+    first_model = client.get(f"/api/ppt-dashboards/chart/{first.json()['token']}/0")
     assert first_model.status_code == 200, first_model.text
     assert {bar['key'][-1] for bar in first_model.json()['bars']} == {'2026-Q1'}
 
     payload['datasets']['data'] = [first_id, second_id]
     payload['date_from'], payload['date_to'] = 'Oldest', 'Newest'
-    combined = client.post('/api/e2e-dashboards/prepare', json=payload)
+    combined = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert combined.status_code == 200, combined.text
-    combined_model = client.get(f"/api/e2e-dashboards/chart/{combined.json()['token']}/0")
+    combined_model = client.get(f"/api/ppt-dashboards/chart/{combined.json()['token']}/0")
     assert combined_model.status_code == 200, combined_model.text
     assert {bar['key'][-1] for bar in combined_model.json()['bars']} == {'2026-Q1', '2026-Q2'}
 
@@ -2655,7 +2655,7 @@ def test_dashboard_api_session_expires_on_application_process_restart(client):
 
     app_module.SESSIONS.clear()
 
-    response = client.get('/api/e2e-dashboards', follow_redirects=False)
+    response = client.get('/api/ppt-dashboards', follow_redirects=False)
     assert response.status_code == 401
     assert response.json()['detail'] == 'Your session has expired. Please sign in again.'
 
@@ -2669,7 +2669,7 @@ def test_dashboard_preview_identifies_title_and_transition_slides(client):
     ).encode(), is_default=False)
     payload['template'] = 'Structural dashboard'
 
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload)
 
     assert preview.status_code == 200, preview.text
     slides = preview.json()['slides']
@@ -2681,11 +2681,11 @@ def test_dashboard_preview_identifies_title_and_transition_slides(client):
 
 def test_dashboard_state_migrates_from_legacy_storage(client):
     payload = setup_dashboard(client)
-    core.repository.set_workspace_state('e2e_dashboard_sets_v1', '{"legacy": ' + json.dumps(payload) + '}')
-    result = client.get('/api/e2e-dashboards')
+    core.repository.set_workspace_state('ppt_dashboard_sets_v1', '{"legacy": ' + json.dumps(payload) + '}')
+    result = client.get('/api/ppt-dashboards')
     assert result.status_code == 200
     assert result.json()['legacy']['name'] == 'Comparison'
-    assert json.loads(core.repository.get_workspace_state('e2e_dashboards_v2')) == result.json()
+    assert json.loads(core.repository.get_workspace_state('ppt_dashboards_v2')) == result.json()
 
 
 def test_dashboard_migrates_all_saved_definitions_to_current_default_filters(client):
@@ -2694,10 +2694,10 @@ def test_dashboard_migrates_all_saved_definitions_to_current_default_filters(cli
     payload['custom_fields'] = ['Technology', 'Zone', 'Region', 'Mean_Data_Rate']
     payload['hidden_filters'] = ['Technology', 'Region', 'Zone', 'City', 'Campaign', 'RAT', 'Call Status', 'Former custom filter']
     with core.repository.connection() as connection:
-        connection.execute("DELETE FROM workspace_state WHERE key = 'e2e_dashboard_default_filters_v6'")
-    core.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({'legacy': payload}))
+        connection.execute("DELETE FROM workspace_state WHERE key = 'ppt_dashboard_default_filters_v6'")
+    core.repository.set_workspace_state('ppt_dashboards_v2', json.dumps({'legacy': payload}))
 
-    result = client.get('/api/e2e-dashboards')
+    result = client.get('/api/ppt-dashboards')
 
     assert result.status_code == 200
     migrated = result.json()['legacy']
@@ -2707,35 +2707,35 @@ def test_dashboard_migrates_all_saved_definitions_to_current_default_filters(cli
     assert {key: migrated[key] for key in ('scope', 'datasets', 'date_from', 'date_to')} == {
         key: payload[key] for key in ('scope', 'datasets', 'date_from', 'date_to')
     }
-    assert core.repository.get_workspace_state('e2e_dashboard_default_filters_v6') == '1'
-    assert json.loads(core.repository.get_workspace_state('e2e_dashboards_v2'))['legacy'] == migrated
+    assert core.repository.get_workspace_state('ppt_dashboard_default_filters_v6') == '1'
+    assert json.loads(core.repository.get_workspace_state('ppt_dashboards_v2'))['legacy'] == migrated
 
 
 def test_dashboard_custom_fields_and_snapshot_filters(client):
     payload = setup_dashboard(client)
     core.write_workspace_calculated_dimensions([{'name': '7-cities', 'sources': ['cdr-data'], 'rules': [{'when': 'City IN (London)', 'value': 'Yes'}], 'default': 'No'}])
     payload['custom_fields'] = ['7-cities']
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert preview.status_code == 200, preview.text
     assert preview.json()['options']['7-cities'] == ['No', 'Yes']
     original = preview.json()['token']
     payload['filters'] = {'7-cities': ['Yes']}
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload).json()
     assert preview['rows']['data'] == 2
     assert preview['universe_rows']['data'] == 3
     assert preview['options']['7-cities'] == ['No', 'Yes']
     for index in (0, 1, 2):
-        assert client.get(f"/api/e2e-dashboards/data/{preview['token']}/{index}").json()['total'] == 2
-    assert client.get(f'/api/e2e-dashboards/data/{original}/0').json()['total'] == 3
+        assert client.get(f"/api/ppt-dashboards/data/{preview['token']}/{index}").json()['total'] == 2
+    assert client.get(f'/api/ppt-dashboards/data/{original}/0').json()['total'] == 3
     payload['filters'] = {'7-cities': []}
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['data'] == 0
+    assert client.post('/api/ppt-dashboards/prepare', json=payload).json()['rows']['data'] == 0
     payload['filters'] = {'Test_Name': ['HTTP DL']}
     payload['custom_fields'] = ['Test_Name']
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload).json()
     assert 'Test_Name' in preview['available_fields']
     assert preview['options']['Test_Name'] == ['HTTP DL']
     payload['hidden_filters'] = ['Market']
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload).json()
     assert 'Market' not in preview['options']
 
 
@@ -2759,7 +2759,7 @@ def test_dashboard_source_specific_custom_fields_do_not_repeat_combined_preparat
     ])
     payload['datasets']['voice'] = [2]
     payload['custom_fields'] = ['Test Family', 'Call Family']
-    first = client.post('/api/e2e-dashboards/prepare', json=payload)
+    first = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert first.status_code == 200, first.text
 
     from src.modules.repository import Repository
@@ -2769,7 +2769,7 @@ def test_dashboard_source_specific_custom_fields_do_not_repeat_combined_preparat
 
     monkeypatch.setattr(Repository, 'copy_dataset_rows_to_reporting', unexpected_combined_rebuild)
     payload['filters'] = {'City': ['London']}
-    repeated = client.post('/api/e2e-dashboards/prepare', json=payload)
+    repeated = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert repeated.status_code == 200, repeated.text
 
 
@@ -2778,7 +2778,7 @@ def test_dashboard_loads_new_filter_values_without_preparing_a_snapshot(client):
     payload['custom_fields'] = ['mean data rate']
     payload['filters'] = {'CITY': ['lOnDoN']}
 
-    response = client.post('/api/e2e-dashboards/filter-options', json={
+    response = client.post('/api/ppt-dashboards/filter-options', json={
         'definition': payload,
         'field': 'MEAN-DATA-RATE',
     })
@@ -2804,7 +2804,7 @@ def test_dashboard_rat_filter_uses_dataset_preview_column_precedence(client):
     payload = definition().model_dump(mode='json')
     payload['template'] = 'Radio Dashboard'
 
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload)
 
     assert preview.status_code == 200, preview.text
     assert preview.json()['options']['Campaign'] == ['Spring', 'Summer']
@@ -2831,7 +2831,7 @@ def test_dashboard_falls_back_to_combined_rows_for_values_missing_from_profiles(
     payload = definition().model_dump(mode='json')
     payload['template'] = 'Profile fallback Dashboard'
 
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload)
 
     assert preview.status_code == 200, preview.text
     assert preview.json()['options']['Region'] == ['England']
@@ -2844,13 +2844,13 @@ def test_dashboard_falls_back_to_combined_rows_for_values_missing_from_profiles(
 def test_dashboard_validates_template_dates_and_sources(client):
     payload = setup_dashboard(client)
     payload['date_from'], payload['date_to'] = '2026-09-03', '2026-09-01'
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 400
+    assert client.post('/api/ppt-dashboards/prepare', json=payload).status_code == 400
     payload['date_from'] = payload['date_to'] = None
     payload['datasets'] = {}
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 400
+    assert client.post('/api/ppt-dashboards/prepare', json=payload).status_code == 400
     payload['template'] = 'Unknown'
-    assert client.put('/api/e2e-dashboards/test', json=payload).status_code == 400
-    assert client.get('/api/e2e-dashboards/data/missing/0').status_code == 410
+    assert client.put('/api/ppt-dashboards/test', json=payload).status_code == 400
+    assert client.get('/api/ppt-dashboards/data/missing/0').status_code == 410
 
 
 def test_dashboard_sql_selection_leaves_nr_mode_to_explicit_user_filters(client):
@@ -2872,17 +2872,17 @@ def test_dashboard_sql_selection_leaves_nr_mode_to_explicit_user_filters(client)
     payload = DashboardDefinition(
         name='Voice', template='Voice Dashboard', datasets={'voice': [1]}, technology='nsa',
     ).model_dump(mode='json')
-    nsa = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    nsa = client.post('/api/ppt-dashboards/prepare', json=payload).json()
     assert nsa['rows']['voice'] == 4
     assert nsa['universe_rows']['voice'] == 4
     payload['technology'] = 'sa'
     # An SA Dashboard only uses SA CDRs, but never filters rows by RAT.
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 400
+    assert client.post('/api/ppt-dashboards/prepare', json=payload).status_code == 400
     core.repository.update_dataset_profile(1, nr_mode='SA')
-    sa = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    sa = client.post('/api/ppt-dashboards/prepare', json=payload).json()
     assert sa['rows']['voice'] == 4
     assert sa['universe_rows']['voice'] == 4
-    dashboard_module = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
+    dashboard_module = (Path(__file__).parents[1] / 'src/modules/ppt_dashboards.py').read_text(encoding='utf-8')
     assert 'def nr_mode_sql(' not in dashboard_module
 
 
@@ -2892,28 +2892,28 @@ def test_dashboard_snapshot_access_and_legacy_redirect(client):
     assert response.status_code == 307
     assert response.headers['location'] == '/datasets-analysis?dataset_id=1'
     assert client.get(response.headers['location']).status_code == 200
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload).json()
     client.get('/logout')
     client.post('/login', data={'username': 'demo', 'password': 'demo123'})
-    assert client.get(f"/api/e2e-dashboards/data/{preview['token']}/0").status_code == 410
-    assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/0.png").status_code == 410
-    assert client.get(f"/api/e2e-dashboards/chart/{preview['token']}/0").status_code == 410
-    assert client.get(f"/api/e2e-dashboards/prepared/{preview['token']}").status_code == 410
+    assert client.get(f"/api/ppt-dashboards/data/{preview['token']}/0").status_code == 410
+    assert client.get(f"/api/ppt-dashboards/preview/{preview['token']}/0.png").status_code == 410
+    assert client.get(f"/api/ppt-dashboards/chart/{preview['token']}/0").status_code == 410
+    assert client.get(f"/api/ppt-dashboards/prepared/{preview['token']}").status_code == 410
 
 
 def test_dashboard_reuses_persistent_sql_selection_and_invalidates_dataset_versions(client, monkeypatch):
     payload = setup_dashboard(client)
-    first = client.post('/api/e2e-dashboards/prepare', json=payload)
+    first = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert first.status_code == 200
     with core.repository.connection() as connection:
         assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 1
-    repeated = client.post('/api/e2e-dashboards/prepare', json=payload)
+    repeated = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert repeated.status_code == 200
     assert repeated.json()['token'] != first.json()['token']
     with core.repository.connection() as connection:
         assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 1
     payload['name'] = 'Renamed comparison'
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
+    assert client.post('/api/ppt-dashboards/prepare', json=payload).status_code == 200
     with core.repository.connection() as connection:
         assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 1
 
@@ -2924,23 +2924,23 @@ def test_dashboard_reuses_persistent_sql_selection_and_invalidates_dataset_versi
 
     monkeypatch.setattr(Repository, 'copy_dataset_rows_to_reporting', unexpected_combined_rebuild)
     payload['filters'] = {'City': ['London']}
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['data'] == 2
+    assert client.post('/api/ppt-dashboards/prepare', json=payload).json()['rows']['data'] == 2
     with core.repository.connection() as connection:
         assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 2
     payload['filters'] = {'City': ['Leeds']}
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['data'] == 1
+    assert client.post('/api/ppt-dashboards/prepare', json=payload).json()['rows']['data'] == 1
     with core.repository.connection() as connection:
         assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 3
     payload['filters'] = {'City': ['London']}
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['data'] == 2
+    assert client.post('/api/ppt-dashboards/prepare', json=payload).json()['rows']['data'] == 2
     with core.repository.connection() as connection:
         assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 3
     core.repository.set_workspace_state('dashboard_cache_test', 'updated')
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
+    assert client.post('/api/ppt-dashboards/prepare', json=payload).status_code == 200
     with core.repository.connection() as connection:
         assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 3
     core.repository.update_dataset_profile(1, progress=100)
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
+    assert client.post('/api/ppt-dashboards/prepare', json=payload).status_code == 200
     with core.repository.connection() as connection:
         assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 4
 
@@ -2949,10 +2949,10 @@ def test_dashboard_selection_cache_ignores_filter_value_order(client):
     payload = setup_dashboard(client)
     payload['filters'] = {'City': ['London', 'Leeds']}
 
-    first = client.post('/api/e2e-dashboards/prepare', json=payload)
+    first = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert first.status_code == 200
     payload['filters']['City'].reverse()
-    repeated = client.post('/api/e2e-dashboards/prepare', json=payload)
+    repeated = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert repeated.status_code == 200
 
     with core.repository.connection() as connection:
@@ -2963,11 +2963,11 @@ def test_dashboard_selection_cache_ignores_filter_value_order(client):
 
 def test_dashboard_selection_uses_direct_sql_predicate(client, monkeypatch):
     payload = setup_dashboard(client)
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
 
     monkeypatch.setattr(dashboards_module, 'DASHBOARD_PROFILE_SELECTION_THRESHOLD', 1)
     payload['filters'] = {'City': ['London']}
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert preview.status_code == 200
     assert preview.json()['rows']['data'] == 2
     assert preview.json()['rows_exact'] is True
@@ -2982,21 +2982,21 @@ def test_dashboard_selection_uses_direct_sql_predicate(client, monkeypatch):
         assert 'materialized' not in {
             row['name'] for row in connection.execute('PRAGMA table_info(dashboard_filter_selections)')
         }
-    data = client.get(f"/api/e2e-dashboards/data/{preview.json()['token']}/0")
+    data = client.get(f"/api/ppt-dashboards/data/{preview.json()['token']}/0")
     assert data.status_code == 200
     assert data.json()['total'] == 2
 
 
 def test_dashboard_profile_facets_show_values_outside_the_saved_filter(client, monkeypatch):
     payload = setup_dashboard(client)
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
 
     monkeypatch.setattr(dashboards_module, 'DASHBOARD_PROFILE_SELECTION_THRESHOLD', 1)
     with core.repository.connection() as connection:
         connection.execute("UPDATE dataset_profiles SET filter_options_json = '{}' WHERE dataset_id = 1")
     payload['filters'] = {'Operator': ['A']}
 
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload)
 
     assert preview.status_code == 200, preview.text
     assert preview.json()['rows']['data'] == 2
@@ -3007,25 +3007,25 @@ def test_dashboard_operator_facets_show_and_filter_the_mapped_operators(client):
     payload = setup_dashboard(client)
     core.repository.replace_operator_mapping_group(None, 'Alpha', ['A'])
 
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload)
 
     assert preview.status_code == 200, preview.text
     # The combined table stores A; the Operator Maps show it as Alpha everywhere.
     assert preview.json()['options']['Operator'] == ['Alpha', 'B']
-    options = client.post('/api/e2e-dashboards/filter-options', json={
+    options = client.post('/api/ppt-dashboards/filter-options', json={
         'definition': payload, 'field': 'Operator',
     })
     assert options.status_code == 200, options.text
     assert options.json()['values'] == ['Alpha', 'B']
     # Choosing the mapped label selects the rows stored with its source spelling.
-    filtered = client.post('/api/e2e-dashboards/prepare', json={**payload, 'filters': {'Operator': ['Alpha']}})
+    filtered = client.post('/api/ppt-dashboards/prepare', json={**payload, 'filters': {'Operator': ['Alpha']}})
     assert filtered.status_code == 200, filtered.text
     assert sum(filtered.json()['rows'].values()) > 0
 
 
 def test_dashboard_reuses_normalized_snapshot_for_every_chart(client, monkeypatch):
     payload = setup_dashboard(client)
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
 
     calls = []
     original = dashboards_module.normalise_operator_aliases
@@ -3035,11 +3035,11 @@ def test_dashboard_reuses_normalized_snapshot_for_every_chart(client, monkeypatc
         return original(frame)
 
     monkeypatch.setattr(dashboards_module, 'normalise_operator_aliases', tracked)
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload).json()
     for index in (0, 1, 2):
-        assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/{index}.png").status_code == 200
+        assert client.get(f"/api/ppt-dashboards/preview/{preview['token']}/{index}.png").status_code == 200
     assert calls == [3]
-    assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/0.png").status_code == 200
+    assert client.get(f"/api/ppt-dashboards/preview/{preview['token']}/0.png").status_code == 200
     assert calls == [3]
 
 
@@ -3047,21 +3047,21 @@ def test_dashboard_is_available_to_workspace_users(client):
     setup_dashboard(client)
     client.get('/logout')
     client.post('/login', data={'username': 'admin', 'password': 'admin123'})
-    assert client.get('/e2e-dashboards').status_code == 200
-    assert client.get('/api/e2e-dashboards').status_code == 200
-    assert client.put('/api/e2e-dashboards/test', json=definition().model_dump(mode='json')).status_code == 200
-    assert 'href="/e2e-dashboards"' in client.get('/datasets-analysis').text
+    assert client.get('/ppt-dashboards').status_code == 200
+    assert client.get('/api/ppt-dashboards').status_code == 200
+    assert client.put('/api/ppt-dashboards/test', json=definition().model_dump(mode='json')).status_code == 200
+    assert 'href="/ppt-dashboards"' in client.get('/datasets-analysis').text
     client.get('/logout')
     client.post('/login', data={'username': 'demo', 'password': 'demo123'})
-    assert client.get('/e2e-dashboards').status_code == 200
-    assert 'href="/e2e-dashboards"' in client.get('/datasets-analysis').text
+    assert client.get('/ppt-dashboards').status_code == 200
+    assert 'href="/ppt-dashboards"' in client.get('/datasets-analysis').text
 
 
 def test_dashboard_preparation_can_run_in_the_background(client):
     payload = setup_dashboard(client)
 
     queued = client.post(
-        '/api/e2e-dashboards/prepare?background=1&preparation_id=background-test', json=payload,
+        '/api/ppt-dashboards/prepare?background=1&preparation_id=background-test', json=payload,
     )
 
     assert queued.status_code == 202
@@ -3069,14 +3069,14 @@ def test_dashboard_preparation_can_run_in_the_background(client):
     deadline = time.monotonic() + 15
     progress = {}
     while time.monotonic() < deadline:
-        response = client.get('/api/e2e-dashboards/preparation-progress/background-test')
+        response = client.get('/api/ppt-dashboards/preparation-progress/background-test')
         if response.status_code == 200:
             progress = response.json()
             if progress.get('status') in {'completed', 'failed'}:
                 break
         time.sleep(0.05)
     assert progress['status'] == 'completed', progress
-    prepared = client.get(f"/api/e2e-dashboards/prepared/{progress['token']}")
+    prepared = client.get(f"/api/ppt-dashboards/prepared/{progress['token']}")
     assert prepared.status_code == 200
     assert prepared.json()['rows']['data'] == 3
 
@@ -3095,8 +3095,8 @@ def test_adding_combined_columns_keeps_prepared_dashboard_caches_valid(client):
 
 def test_dashboard_viewer_cover_matches_the_exported_ppt_cover():
     root = Path(__file__).parents[1] / 'src/web_interface/static'
-    script = (root / 'js/e2e_dashboards.js').read_text(encoding='utf-8')
-    stylesheet = (root / 'css/e2e_dashboards.css').read_text(encoding='utf-8')
+    script = (root / 'js/ppt_dashboards.js').read_text(encoding='utf-8')
+    stylesheet = (root / 'css/ppt_dashboards.css').read_text(encoding='utf-8')
 
     assert "coverGeographyLabel('Region', 'Region', 'Regions', 'All Regions')" in script
     assert "coverGeographyLabel('City', 'City', 'Cities', 'All Cities')" in script
@@ -3119,8 +3119,8 @@ def test_dashboard_viewer_cover_matches_the_exported_ppt_cover():
 
 def test_dashboard_viewer_scope_selector_confirms_before_rerendering():
     root = Path(__file__).parents[1] / 'src/web_interface'
-    template = (root / 'templates/e2e_dashboards.html').read_text(encoding='utf-8')
-    script = (root / 'static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    template = (root / 'templates/ppt_dashboards.html').read_text(encoding='utf-8')
+    script = (root / 'static/js/ppt_dashboards.js').read_text(encoding='utf-8')
 
     assert template.index('id="ds-viewer-scope"') < template.index('id="ds-floating-filters"')
     assert "title: 'Change Dashboard Scope', confirmLabel: 'Change Scope', tone: 'warning'" in script
@@ -3133,7 +3133,7 @@ def test_transition_slide_subtitle_uses_the_template_yellow_accent():
     from pptx import Presentation as PptxPresentation
     from src.modules.cdr_reporting import _named_slide_layout, _set_structural_slide_text
 
-    deck = PptxPresentation(Path(__file__).parents[1] / 'assets/ppt-templates/Template_CDR_analysis.pptx')
+    deck = PptxPresentation(Path(__file__).parents[1] / 'assets/powerpoint-templates/Template_01.pptx')
     slide = deck.slides.add_slide(_named_slide_layout(deck, 'Title Only'))
     _set_structural_slide_text(slide, 'Executive Summary', 'Key findings')
 
@@ -3157,8 +3157,8 @@ def test_report_template_editor_offers_find_and_replace():
 
 def test_dashboard_filters_open_as_a_sub_panel_below_their_dashboard_row():
     root = Path(__file__).parents[1] / 'src/web_interface'
-    template = (root / 'templates/e2e_dashboards.html').read_text(encoding='utf-8')
-    script = (root / 'static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    template = (root / 'templates/ppt_dashboards.html').read_text(encoding='utf-8')
+    script = (root / 'static/js/ppt_dashboards.js').read_text(encoding='utf-8')
 
     assert '<div id="ds-filter-parking" hidden><div id="ds-filter-home">' in template
     assert "const parkFilterPanel = () => { $('ds-filter-parking').append($('ds-filter-home')); filterRow.remove(); };" in script
@@ -3176,7 +3176,7 @@ def test_cover_geography_falls_back_to_dashboard_filter_values(client):
     # filter values (resolved through aliases) complete the cover geography.
     core.repository.replace_cdr_catalogue(1, vendors=[], regions=[], cities=[])
 
-    options = client.post('/api/e2e-dashboards/geography-options', json=payload)
+    options = client.post('/api/ppt-dashboards/geography-options', json=payload)
 
     assert options.status_code == 200, options.text
     assert options.json()['cities'] == ['Leeds', 'London']
@@ -3187,11 +3187,11 @@ def test_cover_geography_falls_back_to_dashboard_filter_values(client):
         '1,Quarterly review,Template subtitle,Title Page,,,,Title Slide,,,,,Top\n'
     ).encode(), is_default=False)
     payload['template'] = 'Cover only'
-    assert client.put('/api/e2e-dashboards/cover-only', json=payload).status_code == 200
-    job_id = client.post('/api/e2e-dashboards/cover-only/export-ppt', json={'definition': payload}).json()['job_id']
+    assert client.put('/api/ppt-dashboards/cover-only', json=payload).status_code == 200
+    job_id = client.post('/api/ppt-dashboards/cover-only/export-ppt', json={'definition': payload}).json()['job_id']
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+        job = next(item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
         if job['status'] in {'ready', 'failed'}:
             break
         time.sleep(0.05)
@@ -3211,18 +3211,18 @@ def test_ppt_cover_treats_every_filter_value_as_all_cities(client):
         '1,Quarterly review,Template subtitle,Title Page,,,,Title Slide,,,,,Top\n'
     ).encode(), is_default=False)
     payload.update(template='Cover only', filters={'City': ['leeds ', 'London']})
-    assert client.put('/api/e2e-dashboards/all-cities', json=payload).status_code == 200
+    assert client.put('/api/ppt-dashboards/all-cities', json=payload).status_code == 200
 
-    job_id = client.post('/api/e2e-dashboards/all-cities/export-ppt', json={'definition': payload}).json()['job_id']
+    job_id = client.post('/api/ppt-dashboards/all-cities/export-ppt', json={'definition': payload}).json()['job_id']
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+        job = next(item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
         if job['status'] in {'ready', 'failed'}:
             break
         time.sleep(0.05)
     assert job['status'] == 'ready', job
     assert 'City: All Cities' in job['filters']
-    assert client.get(f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover']['cities'] == 'All Cities'
+    assert client.get(f'/api/ppt-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover']['cities'] == 'All Cities'
 
 
 def test_dashboard_names_are_unique_per_nr_mode(client):
@@ -3230,13 +3230,13 @@ def test_dashboard_names_are_unique_per_nr_mode(client):
     core.repository.add_report_template('sa', 'Dashboard test', core.repository.report_template_content(
         'nsa', 'Dashboard test',
     ), is_default=False)
-    assert client.put('/api/e2e-dashboards/nsa-one', json=payload).status_code == 200
-    duplicate = client.put('/api/e2e-dashboards/nsa-two', json=payload)
+    assert client.put('/api/ppt-dashboards/nsa-one', json=payload).status_code == 200
+    duplicate = client.put('/api/ppt-dashboards/nsa-two', json=payload)
     assert duplicate.status_code == 409
     assert 'NSA Dashboard with this name' in duplicate.json()['detail']
     sa_payload = {**payload, 'technology': 'sa', 'template_technology': 'sa'}
     # The same name is allowed for a Dashboard of the other NR Mode.
-    assert client.put('/api/e2e-dashboards/sa-one', json=sa_payload).status_code == 200
+    assert client.put('/api/ppt-dashboards/sa-one', json=sa_payload).status_code == 200
 
 
 def test_report_template_changes_record_the_last_editor(client):
@@ -3285,21 +3285,21 @@ def test_combined_rf_dashboard_keeps_samples_and_selected_geography(client):
     ).encode(), is_default=False)
     payload = DashboardDefinition(name='Pooled RF', template='Pooled RF test', datasets=datasets,
                                   filters={'City': ['London']}).model_dump(mode='json')
-    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    prepared = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert prepared.status_code == 200, prepared.text
     assert prepared.json()['slides'][0]['charts'][0]['available'] is True
     token = prepared.json()['token']
-    rendered = client.get(f'/api/e2e-dashboards/chart/{token}/0')
+    rendered = client.get(f'/api/ppt-dashboards/chart/{token}/0')
     assert rendered.status_code == 200, rendered.text
     assert 'series' in rendered.json(), rendered.json()
     series = rendered.json()['series'][0]
     assert series['samples'] == 5
     assert sum(series['counts']) == 5
-    context = client.get(f'/api/e2e-dashboards/chart/{token}/0/filter-context')
+    context = client.get(f'/api/ppt-dashboards/chart/{token}/0/filter-context')
     assert context.status_code == 200, context.text
     assert 'LTE_RSRP' in context.json()['columns_by_source']['cdr-all']
     assert len(context.json()['dataset_ids']) == 3
-    preview = client.post(f'/api/e2e-dashboards/chart/{token}/0/filter-preview', json={
+    preview = client.post(f'/api/ppt-dashboards/chart/{token}/0/filter-preview', json={
         'filters': 'Bin Size = 5; LTE_RSRP >= -85',
     })
     assert preview.status_code == 200, preview.text
@@ -3331,18 +3331,18 @@ def test_dynamic_histogram_dashboard_filters_operators_and_updates_source_templa
     core.repository.add_report_template('nsa', 'Dynamic RF test', catalogue_csv(entries), is_default=False)
     payload = DashboardDefinition(name='Dynamic RF', template='Dynamic RF test',
                                   datasets={'data': [dataset_id]}, filters={'City': ['London']}).model_dump(mode='json')
-    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    prepared = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert prepared.status_code == 200, prepared.text
     slide = prepared.json()['slides'][0]
     assert slide['layout'] == 'Title + 2 rows + 2 columns + comments down'
     assert [chart['title'] for chart in slide['charts']] == ['LTE RSRP – A', 'LTE RSRP – B', 'NR RSRP – A', 'NR RSRP – B']
     assert [chart['focus_row'] for chart in slide['charts']] == [0, 0, 1, 1]
     token = prepared.json()['token']
-    model = client.get(f'/api/e2e-dashboards/chart/{token}/1').json()
+    model = client.get(f'/api/ppt-dashboards/chart/{token}/1').json()
     assert all(item['key'][0] == 'B' for item in model['series'])
-    missing = client.get(f'/api/e2e-dashboards/chart/{token}/3').json()
+    missing = client.get(f'/api/ppt-dashboards/chart/{token}/3').json()
     assert missing['type'] == 'empty'
-    saved = client.post(f'/api/e2e-dashboards/chart/{token}/1/update-template', json={
+    saved = client.post(f'/api/ppt-dashboards/chart/{token}/1/update-template', json={
         'chart_title': 'LTE RSRP – B', 'filters': 'Bin Size = 10',
     })
     assert saved.status_code == 200, saved.text
@@ -3352,7 +3352,7 @@ def test_dynamic_histogram_dashboard_filters_operators_and_updates_source_templa
     assert restored[0].chart_title == 'LTE RSRP'
     assert restored[1].filters == 'Bin Size = 5'
     for index in (0, 1):
-        context = client.get(f'/api/e2e-dashboards/chart/{token}/{index}/filter-context')
+        context = client.get(f'/api/ppt-dashboards/chart/{token}/{index}/filter-context')
         assert context.status_code == 200, context.text
         assert context.json()['filters'] == 'Bin Size = 10'
 
@@ -3390,17 +3390,17 @@ def test_dynamic_vendor_only_editor_keeps_operator_rows_after_bin_edit(client):
     core.repository.add_report_template('nsa', 'Dynamic RF vendor test', catalogue_csv(entries), is_default=False)
     payload = DashboardDefinition(name='Dynamic RF vendor', template='Dynamic RF vendor test',
                                   datasets={'data': [dataset_id]}, filters={'City': ['London']}).model_dump(mode='json')
-    ordinary = client.post('/api/e2e-dashboards/prepare', json=payload)
+    ordinary = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert ordinary.status_code == 200, ordinary.text
     vendor_payload = {**payload, 'scope': 'multivendor', 'vendor_comparison': 'vendor_only'}
-    vendor = client.post('/api/e2e-dashboards/prepare', json=vendor_payload)
+    vendor = client.post('/api/ppt-dashboards/prepare', json=vendor_payload)
     assert vendor.status_code == 200, vendor.text
     slide = vendor.json()['slides'][0]
     assert [chart['title'] for chart in slide['charts']] == [
         'LTE RSRP – Ericsson', 'LTE RSRP – Huawei', 'NR RSRP – Ericsson', 'NR RSRP – Huawei',
     ]
     token = vendor.json()['token']
-    saved = client.post(f'/api/e2e-dashboards/chart/{token}/1/update-template', json={
+    saved = client.post(f'/api/ppt-dashboards/chart/{token}/1/update-template', json={
         'chart_title': 'LTE RSRP – Huawei', 'filters': 'Bin Size = 10',
     })
     assert saved.status_code == 200, saved.text
@@ -3409,7 +3409,7 @@ def test_dynamic_vendor_only_editor_keeps_operator_rows_after_bin_edit(client):
     assert [entry.grouping_rows for entry in restored] == ['Operator', 'Operator']
     assert [entry.filters for entry in restored] == ['Bin Size = 10', 'Bin Size = 5']
     for index in range(4):
-        context = client.get(f'/api/e2e-dashboards/chart/{token}/{index}/filter-context')
+        context = client.get(f'/api/ppt-dashboards/chart/{token}/{index}/filter-context')
         assert context.status_code == 200, context.text
         assert context.json()['dynamic_rows_field'] == ''
         assert context.json()['dynamic_columns_field'] == 'Vendor'
@@ -3456,24 +3456,24 @@ def _compact_read_dashboard(client):
 
 
 def test_cached_and_grouped_reads_produce_identical_chart_models(client, monkeypatch):
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
 
     payload = _compact_read_dashboard(client)
-    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    prepared = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert prepared.status_code == 200, prepared.text
     token = prepared.json()['token']
     indexes = [chart['index'] for slide in prepared.json()['slides'] for chart in slide['charts']]
     assert len(indexes) == 5
-    cached = [client.post(f'/api/e2e-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
+    cached = [client.post(f'/api/ppt-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
     assert list(dashboards_module.column_cache_dir(core.repository.db_path).rglob('*.pkl'))
     monkeypatch.setattr(dashboards_module, 'DASHBOARD_COLUMN_CACHE', False)
-    compact = [client.post(f'/api/e2e-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
+    compact = [client.post(f'/api/ppt-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
     # The grouped reads were persisted with their row counts (240 rows -> fewer groups).
     grouped = [pd.read_pickle(path) for path in dashboards_module.frame_cache_dir(core.repository.db_path).glob('*.pkl')]
     assert grouped and all('__catalog_rows' in frame.columns for frame in grouped)
     assert all(len(frame) < frame['__catalog_rows'].sum() == 240 for frame in grouped)
     monkeypatch.setattr(dashboards_module, 'DASHBOARD_COMPACT_READS', False)
-    complete = [client.post(f'/api/e2e-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
+    complete = [client.post(f'/api/ppt-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
     assert all(model['type'] != 'empty' for model in complete)
     assert cached == compact == complete
 
@@ -3485,15 +3485,15 @@ def test_cached_and_grouped_reads_produce_identical_chart_models(client, monkeyp
     {'filters': {'Operator': ['B'], 'City': ['London']}, 'date_from': '2026-03-01'},
 ])
 def test_column_cache_serves_changed_universes_without_sqlite(client, monkeypatch, changes):
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
 
     payload = _compact_read_dashboard(client)
-    baseline = client.post('/api/e2e-dashboards/prepare', json=payload)
+    baseline = client.post('/api/ppt-dashboards/prepare', json=payload)
     assert baseline.status_code == 200, baseline.text
     for chart in (chart for slide in baseline.json()['slides'] for chart in slide['charts']):
-        assert client.get(f"/api/e2e-dashboards/chart/{baseline.json()['token']}/{chart['index']}").status_code == 200
+        assert client.get(f"/api/ppt-dashboards/chart/{baseline.json()['token']}/{chart['index']}").status_code == 200
     changed = {**payload, **changes}
-    prepared = client.post('/api/e2e-dashboards/prepare', json=changed)
+    prepared = client.post('/api/ppt-dashboards/prepare', json=changed)
     assert prepared.status_code == 200, prepared.text
     token = prepared.json()['token']
     indexes = [chart['index'] for slide in prepared.json()['slides'] for chart in slide['charts']]
@@ -3505,13 +3505,13 @@ def test_column_cache_serves_changed_universes_without_sqlite(client, monkeypatc
     monkeypatch.setattr(dashboard_column_cache.ColumnCache, '_build', lambda *args: reads.append('build') or original_build(*args))
     monkeypatch.setattr(dashboards_module.pd, 'read_sql_query', lambda query, *args, **kwargs: (
         reads.append(query) if 'reporting_rows_' in query else None) or original_read(query, *args, **kwargs))
-    cached = [client.get(f'/api/e2e-dashboards/chart/{token}/{index}').json() for index in indexes]
+    cached = [client.get(f'/api/ppt-dashboards/chart/{token}/{index}').json() for index in indexes]
     assert reads == []
     monkeypatch.setattr(dashboard_column_cache.ColumnCache, '_build', original_build)
     monkeypatch.setattr(dashboards_module.pd, 'read_sql_query', original_read)
     monkeypatch.setattr(dashboards_module, 'DASHBOARD_COLUMN_CACHE', False)
     monkeypatch.setattr(dashboards_module, 'DASHBOARD_COMPACT_READS', False)
-    sqlite = [client.post(f'/api/e2e-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
+    sqlite = [client.post(f'/api/ppt-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
     assert cached == sqlite
 
 
@@ -3525,10 +3525,10 @@ def _wait_for(condition, timeout=60.0):
 
 
 def test_idle_chart_precompute_waits_for_quiet_periods_and_persists_models(client, monkeypatch):
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
 
     payload = _compact_read_dashboard(client)
-    saved = client.put('/api/e2e-dashboards/idle-precompute', json=payload)
+    saved = client.put('/api/ppt-dashboards/idle-precompute', json=payload)
     assert saved.status_code == 200, saved.text
     model_dir = dashboards_module.canvas_model_cache_dir(core.repository.db_path)
     column_dir = dashboards_module.column_cache_dir(core.repository.db_path)
@@ -3551,12 +3551,12 @@ def test_idle_chart_precompute_waits_for_quiet_periods_and_persists_models(clien
 
 
 def test_background_work_builds_one_dashboard_at_a_time_in_creation_order(client, monkeypatch):
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
 
     payload = _compact_read_dashboard(client)
     monkeypatch.setattr(core, 'IDLE_DASHBOARD_WARMUP_SECONDS', 3600)
     for name in ('first', 'second', 'third'):
-        assert client.put(f'/api/e2e-dashboards/{name}', json={**payload, 'name': name.title()}).status_code == 200
+        assert client.put(f'/api/ppt-dashboards/{name}', json={**payload, 'name': name.title()}).status_code == 200
     finished = []
     original_add_log = dashboards_module.Repository.add_log
 
@@ -3567,7 +3567,7 @@ def test_background_work_builds_one_dashboard_at_a_time_in_creation_order(client
 
     monkeypatch.setattr(dashboards_module.Repository, 'add_log', tracked_log)
     # The newest Dashboard is queued again first, yet the oldest is built first.
-    assert client.put('/api/e2e-dashboards/third', json={**payload, 'name': 'Third'}).status_code == 200
+    assert client.put('/api/ppt-dashboards/third', json={**payload, 'name': 'Third'}).status_code == 200
     core.IDLE_DASHBOARD_WARMUP_CALLBACK()
     monkeypatch.setattr(core, 'IDLE_DASHBOARD_WARMUP_SECONDS', 0)
     assert _wait_for(lambda: len(finished) == 3), finished
@@ -3576,10 +3576,10 @@ def test_background_work_builds_one_dashboard_at_a_time_in_creation_order(client
 
 
 def test_preloaded_charts_wait_for_the_visible_slide(client, monkeypatch):
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
 
     payload = setup_dashboard(client)
-    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    preview = client.post('/api/ppt-dashboards/prepare', json=payload).json()
     token = preview['token']
     indexes = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
     assert len(indexes) >= 2
@@ -3596,10 +3596,10 @@ def test_preloaded_charts_wait_for_the_visible_slide(client, monkeypatch):
 
     monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', gated)
     results = {}
-    visible = threading.Thread(target=lambda: results.setdefault('visible', client.get(f'/api/e2e-dashboards/chart/{token}/{indexes[0]}')))
+    visible = threading.Thread(target=lambda: results.setdefault('visible', client.get(f'/api/ppt-dashboards/chart/{token}/{indexes[0]}')))
     visible.start()
     assert visible_started.wait(10)
-    preload = threading.Thread(target=lambda: results.setdefault('preload', client.get(f'/api/e2e-dashboards/chart/{token}/{indexes[1]}?priority=low')))
+    preload = threading.Thread(target=lambda: results.setdefault('preload', client.get(f'/api/ppt-dashboards/chart/{token}/{indexes[1]}?priority=low')))
     preload.start()
     time.sleep(0.8)
     # The preload is held while the visible chart is being calculated.
@@ -3611,7 +3611,7 @@ def test_preloaded_charts_wait_for_the_visible_slide(client, monkeypatch):
     assert results['preload'].status_code == 200
     assert len(order) == 2
     # A preload of a chart that is already calculated is served at once.
-    assert client.get(f'/api/e2e-dashboards/chart/{token}/{indexes[0]}?priority=low').status_code == 200
+    assert client.get(f'/api/ppt-dashboards/chart/{token}/{indexes[0]}?priority=low').status_code == 200
     assert len(order) == 2
 
 
@@ -3621,16 +3621,16 @@ def test_preloaded_charts_wait_for_the_visible_slide(client, monkeypatch):
     {'filters': {'Campaign': ['UK_Q1_2026'], 'City': ['London']}, 'date_from': '2026-02-01', 'date_to': '2026-05-31'},
 ])
 def test_column_cache_preparation_counts_match_sqlite(client, monkeypatch, changes):
-    import src.modules.e2e_dashboards as dashboards_module
+    import src.modules.ppt_dashboards as dashboards_module
 
     payload = {**_compact_read_dashboard(client), **changes}
     # The first preparation caches every CDR's filter columns.
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
+    assert client.post('/api/ppt-dashboards/prepare', json=payload).status_code == 200
 
     def prepared_universe():
         with core.repository.connection() as connection:
             connection.execute('DELETE FROM dashboard_filter_selections')
-        response = client.post('/api/e2e-dashboards/prepare', json=payload)
+        response = client.post('/api/ppt-dashboards/prepare', json=payload)
         assert response.status_code == 200, response.text
         body = response.json()
         return {key: value for key, value in body.items() if key not in {'token', 'selection_id'}}
@@ -3648,8 +3648,8 @@ def test_column_cache_preparation_counts_match_sqlite(client, monkeypatch, chang
 def test_ppt_export_keeps_legend_entries_hidden_in_the_viewer(client):
     payload = setup_dashboard(client)
     dashboard_id = 'legend-ppt'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
-    prepared = client.post(f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=payload).json()
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
+    prepared = client.post(f'/api/ppt-dashboards/prepare?dashboard_id={dashboard_id}', json=payload).json()
     slide = next(slide for slide in prepared['slides'] if slide['charts'])
     first = slide['charts'][0]
     first_key = f"{slide['number']}|{first['title']}|0"
@@ -3662,7 +3662,7 @@ def test_ppt_export_keeps_legend_entries_hidden_in_the_viewer(client):
         deadline = time.monotonic() + 30
         job = None
         while time.monotonic() < deadline:
-            job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+            job = next(item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
             if job['status'] in {'ready', 'failed'}:
                 break
             time.sleep(0.05)
@@ -3672,7 +3672,7 @@ def test_ppt_export_keeps_legend_entries_hidden_in_the_viewer(client):
         charts_dir = Path(row['output_path']).parent / 'dashboard-charts'
         return job_id, [json.loads(path.read_text(encoding='utf-8')) for path in sorted(charts_dir.glob('*.model.json'))]
 
-    job_id, models = exported_models(client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+    job_id, models = exported_models(client.post(f'/api/ppt-dashboards/{dashboard_id}/export-ppt', json={
         'definition': payload, 'preparation_token': prepared['token'], 'legend_visibility': legend,
     }))
     with_a = [model for model in models if any(item.get('label') == 'A' and item.get('colour') for item in model['legend']['items'])]
@@ -3680,13 +3680,13 @@ def test_ppt_export_keeps_legend_entries_hidden_in_the_viewer(client):
     assert with_a[0].get('hidden_legend_items') is None
     assert all(model.get('hidden_legend_items') == ['A'] for model in with_a[1:])
     # A relaunched job keeps the legend state it was created with.
-    _job_id, relaunched = exported_models(client.post(f'/api/e2e-dashboards/ppt-jobs/{job_id}/retry'))
+    _job_id, relaunched = exported_models(client.post(f'/api/ppt-dashboards/ppt-jobs/{job_id}/retry'))
     assert [model.get('hidden_legend_items') for model in relaunched] == [model.get('hidden_legend_items') for model in models]
 
 
 def test_dynamic_grid_reflow_helpers():
     from types import SimpleNamespace
-    from src.modules.e2e_dashboards import dynamic_card_hidden, dynamic_chart_values, legend_value_hidden, reflowed_dynamic_grid
+    from src.modules.ppt_dashboards import dynamic_card_hidden, dynamic_chart_values, legend_value_hidden, reflowed_dynamic_grid
 
     # Hidden values close whole grid columns or rows; the others keep their order.
     assert reflowed_dynamic_grid('Title + 2 rows + 4 columns', [False, True, False, False] * 2) == (
@@ -3731,8 +3731,8 @@ def test_hidden_dynamic_values_close_their_grid_cards_in_the_ppt(client):
     payload = DashboardDefinition(name='Dynamic grid', template='Dynamic grid legend test',
                                   datasets={'data': [dataset_id]}).model_dump(mode='json')
     dashboard_id = 'dynamic-grid-legend'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
-    prepared = client.post(f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=payload).json()
+    assert client.put(f'/api/ppt-dashboards/{dashboard_id}', json=payload).status_code == 200
+    prepared = client.post(f'/api/ppt-dashboards/prepare?dashboard_id={dashboard_id}', json=payload).json()
     slide = prepared['slides'][0]
     assert slide['layout'] == 'Title + 2 rows + 3 columns + comments down'
     assert [chart['dynamic_values'] for chart in slide['charts']] == [[['A']], [['B']], [['C']]] * 2
@@ -3740,7 +3740,7 @@ def test_hidden_dynamic_values_close_their_grid_cards_in_the_ppt(client):
     assert len(prepared['grid_layouts'][smaller]) == 4
 
     def exported(legend):
-        response = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+        response = client.post(f'/api/ppt-dashboards/{dashboard_id}/export-ppt', json={
             'definition': payload, 'preparation_token': prepared['token'], 'legend_visibility': legend,
         })
         assert response.status_code == 202, response.text
@@ -3748,7 +3748,7 @@ def test_hidden_dynamic_values_close_their_grid_cards_in_the_ppt(client):
         deadline = time.monotonic() + 30
         job = None
         while time.monotonic() < deadline:
-            job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+            job = next(item for item in client.get('/api/ppt-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
             if job['status'] in {'ready', 'failed'}:
                 break
             time.sleep(0.05)

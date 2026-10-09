@@ -24,7 +24,7 @@ KEY_KINDS = {
 # the Non-Qualified Calls filters and the Dashboards. CDR Analysis keeps the filters of each CDR as a query string.
 FILTER_STATE_KEYS = (
     'scoring_report_configurations', 'scoring_calculation_selection_v1', 'nq_calls_filters',
-    'e2e_dashboards_v2', 'e2e_dashboard_sets_v1',
+    'ppt_dashboards_v2', 'ppt_dashboard_sets_v1',
 )
 CDR_ANALYSIS_STATE_KEY = 'datasets_analysis_selection_v1'
 _ALL_SUFFIX = re.compile(r'^(?P<name>.+?)\s+- All(?: Vendors)?$', re.IGNORECASE)

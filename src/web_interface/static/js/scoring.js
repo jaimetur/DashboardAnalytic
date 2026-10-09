@@ -5193,13 +5193,13 @@
       cards.forEach(card => card.setColourMode?.(modeSelect.value));
     });
     section.append(heading, controls);
-    // Tests in a country without map areas: they are placed once its areas are added and the job calculated again.
+    // Tests in a country without map areas: the whole country is one area until its areas are added and the job calculated again.
     const unmapped = view === 'City' ? candidates.find(entry => entry.layer?.unmapped_countries?.length)?.layer.unmapped_countries || [] : [];
     if (unmapped.length) {
       const warning = document.createElement('p');
       warning.className = 'scoring-insight-note scoring-loss-unmapped';
-      warning.textContent = `The tests in ${unmapped.map(item => item.name).join(', ')} are on no map area: add the Map Areas of `
-        + `${unmapped.length > 1 ? 'these countries' : 'this country'} in Workspace Config and calculate the scoring again.`;
+      warning.textContent = `${unmapped.map(item => item.name).join(', ')} ${unmapped.length > 1 ? 'are' : 'is'} shown as a whole country: add the Map Areas of `
+        + `${unmapped.length > 1 ? 'these countries' : 'this country'} in Workspace Config and calculate the scoring again to see ${unmapped.length > 1 ? 'their' : 'its'} areas.`;
       section.append(warning);
     }
     section.append(grid);

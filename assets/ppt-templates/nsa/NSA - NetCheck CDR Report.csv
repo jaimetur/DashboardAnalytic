@@ -1,0 +1,67 @@
+Slide,Slide Tittle,Slide Subtittle,Layout,Dynamic Rows Field,Dynamic Columns Field,Chart Tittle,Source Dataset,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position,Legend Format,Label Position,Label Format,Axis X Range,Axis Y Range,Exclude Null/Empty,Exclude Zero
+1,NetCheck CDR Analysis,Non-Standalone,Title Page,,,,,,Title Slide,,,,,,,,,,,,
+2,NetCheck CDR Voice/Speech Analysis,Non-Standalone,Transition,,,,,,Transition Slide,,,,,,,,,,,,
+3,CDR-Voice/Speech Validation,Non-Standalone,Title + 2 rows + 1 columns + comments right,,,CDR-Voice Validation,CDR-Data,COUNT(Test_ID),Dynamic Table,,Benchmark ×  Test_Result,Operator,,,,,,,,,
+3,CDR-Voice/Speech Validation,Non-Standalone,Title + 2 rows + 1 columns + comments right,,,CDR-Speech Validation,CDR-Speech,COUNT(Test_ID),Dynamic Table,,Benchmark × Test_Result,Operator,,,,,,,,,
+4,Completed Call Ratio,Non-Standalone,Title + 1 rows + 1 columns + comments down,,,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,"Call_Status IN (Completed, Dropped, Failed);
+Call_Family IN (VoLTE, MultiRAB, WhatsApp)",Call_Family,Operator × Campaign,Call_Status,Right,,,"[""#FFFFFF"",""Arial"",""Large""]",,,,
+5,Voice failures,Non-Standalone,Title + 1 rows + 1 columns + comments down,,,,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,"Call_Status IN (Failed, Dropped);
+Call_Family IN (VoLTE, MultiRAB, WhatsApp)",Call_Family,Operator × Campaign,Call_Status,Right,,,,,,,
+6,CST (VoLTE & Multi-RAB),Non-Standalone,Title + 1 rows + 2 columns + comments down,,,CST CDF (VoLTE & Multi-RAB),CDR-Voice,Call_Setup_Time,CDF Line,"Call_Family IN (VoLTE, MultiRAB)",Operator,Campaign,"Operator, Campaign",Bottom,,,,,,,
+6,CST (VoLTE & Multi-RAB),Non-Standalone,Title + 1 rows + 2 columns + comments down,,,CST (VoLTE & Multi-RAB),CDR-Voice,Call_Setup_Time,Average Vertical Bars,"Call_Family IN (VoLTE, MultiRAB)",,Operator × Campaign,Operator,Right,,,,,,,
+7,POLQA AVG MOS (VoLTE & Multi-RAB),Non-Standalone,Title + 1 rows + 2 columns + comments down,,,POLQA AVG MOS CDF (VoLTE & Multi-RAB),CDR-Speech,LQ,CDF Line,"Call_Status = Completed;
+Call_Family IN (VoLTE, MultiRAB)",,Operator × Campaign,"Operator, Campaign",Bottom,,,,"[1.4,]","[,20]",,
+7,POLQA AVG MOS (VoLTE & Multi-RAB),Non-Standalone,Title + 1 rows + 2 columns + comments down,,,POLQA AVG MOS (VoLTE & Multi-RAB),CDR-Speech,LQ,Average Vertical Bars,"Call_Status = Completed;
+Call_Family IN (VoLTE, MultiRAB)",,Operator × Campaign,Operator,Right,,,,,,,
+8,POLQA AVG MOS (WhatsApp),Non-Standalone,Title + 1 rows + 2 columns + comments down,,,POLQA AVG MOS CDF (Whatsapp),CDR-Speech,LQ,CDF Line,"Call_Status = Completed;
+Call_Family = WhatsApp",Operator,Campaign,"Operator, Campaign",Bottom,,,,,,,
+8,POLQA AVG MOS (WhatsApp),Non-Standalone,Title + 1 rows + 2 columns + comments down,,,POLQA AVG MOS (Whatsapp),CDR-Speech,LQ,Average Vertical Bars,"Call_Status = Completed;
+Call_Family = WhatsApp",,Operator × Campaign,Operator,Right,,,,,,,
+9,POLQA <1.6,Non-Standalone,Title + 1 rows + 2 columns + comments down,,,POLQA < 1.6 (WhatsApp),CDR-Speech,LQ,Threshold Stacked Vertical Bars,"Call_Status = Completed;
+Call_Family = WhatsApp;
+Threshold = 1.6",,Operator x Campaign,Threshold,Right,,,"[""#FFFFFF"",""Arial"",""Large""]",,,,
+9,POLQA <1.6,Non-Standalone,Title + 1 rows + 2 columns + comments down,,,POLQA < 1.6 (VoLTE & Multi-RAB),CDR-Speech,LQ,Threshold Stacked Vertical Bars,"Call_Status = Completed;
+Call_Family IN (VoLTE, MultiRAB);
+Threshold = 1.6",,Operator x Campaign,Threshold,Right,,,"[""#FFFFFF"",""Arial"",""Large""]",,,,
+10,NetCheck CDR Data Analysis,Non-Standalone,Transition,,,,,,Transition Slide,,,,,,,,,,,,
+11,CDR-Data Validation,Non-Standalone,Title + 1 rows + 1 columns + comments down,,,CDR-Data Validation,CDR-Data,COUNT(Test_ID),Dynamic Table,,Benchmark × Test_Result,Operator,,,,,,,,,
+12,Data failures,Non-Standalone,Title + 2 rows + 1 columns + comments right,,,Success Ratio per Test type,CDR-Data,Test_Result_Group,100% Stacked Vertical Bars,"Type of Test IN (httpBrowser, httpTransfer, VideoStreaming)",Type_of_Test,Operator × Campaign,Test_Result_Group,Right,,,"[""#FFFFFF"",""Arial"",""Large""]",,,,
+12,Data failures,Non-Standalone,Title + 2 rows + 1 columns + comments right,,,Success Ratio Transfer FDFS,CDR-Data,Test_Result_Group,100% Stacked Vertical Bars,Test Name CONTAINS FDFS,Test_Name,Operator × Campaign,Test_Result_Group,Right,,,"[""#FFFFFF"",""Arial"",""Large""]",,,,
+13,FDTT DL (7s),Non-Standalone,Title + 1 rows + 2 columns + comments down,,,FDTT DL thput CDF,CDR-Data,Mean_Data_Rate,CDF Line,"Test_Result = Completed;
+Test_Name CONTAINS FDTT http DL MT",Operator,Campaign,"Operator, Campaign",Bottom,,,,,,,
+13,FDTT DL (7s),Non-Standalone,Title + 1 rows + 2 columns + comments down,,,Thput Below FDTT DL_ENDC,CDR-Data,Mean_Data_Rate,Distribution Stacked Vertical Bars,"Test_Result = Completed;
+Test_Name = FDTT http DL MT;
+Buckets < 2,5,20,100;
+RAT_Group IN (EN-DC, ENDC Mixed)",Operator,Campaign × Rate Bucket,Buckets,Right,,,,,,,
+14,FDTT UL (7s),Non-Standalone,Title + 1 rows + 2 columns + comments down,,,FDTT UL thput CDF,CDR-Data,Mean_Data_Rate,CDF Line,"Test_Result = Completed;
+Test_Name = FDTT UDP UL ST",Operator,Campaign,"Operator, Campaign",Bottom,,,,,,,
+14,FDTT UL (7s),Non-Standalone,Title + 1 rows + 2 columns + comments down,,,Thput Below FDTT UL,CDR-Data,Mean_Data_Rate,Distribution Stacked Vertical Bars,"Test_Result = Completed;
+Test_Name = FDTT UDP UL ST;
+Buckets < 1,3,10,20",Operator,Campaign × Rate Bucket,Buckets,Right,,,,,"[60,]",,
+15,FDFS DL,Non-Standalone,Title + 1 rows + 3 columns + comments down,,,FDFS DL thput CDF,CDR-Data,Mean_Data_Rate,CDF Line,"Test_Result = Completed;
+Test_Name IN (FDFS HTTP DL ST, FDFS HTTPS DL ST)",Operator,Campaign,"Operator, Campaign",Bottom,,,,,,,
+15,FDFS DL,Non-Standalone,Title + 1 rows + 3 columns + comments down,,,FDFS DL Tranfer Time CDF,CDR-Data,Transfer_Duration,CDF Line,"Test_Result = Completed;
+Test_Name IN (FDFS HTTP DL ST, FDFS HTTPS DL ST)",Operator,Campaign,"Operator, Campaign",Bottom,,,,,,,
+15,FDFS DL,Non-Standalone,Title + 1 rows + 3 columns + comments down,,,Transfer time FDFS DL,CDR-Data,Transfer_Duration,Average Vertical Bars,"Test_Result = Completed;
+Test_Name IN (FDFS HTTP DL ST, FDFS HTTPS DL ST)",,Operator × Campaign,Operator,Right,,,"[""#FFFFFF"",""Arial"",""Large""]",,,,
+16,FDFS UL,Non-Standalone,Title + 1 rows + 3 columns + comments down,,,FDFS UL thput CDF,CDR-Data,Mean_Data_Rate,CDF Line,"Test_Result = Completed;
+Test_Name IN (FDFS HTTP UL ST, FDFS HTTPS UL ST);
+RAT_Group IN (EN-DC, ENDC Mixed)",Operator,Campaign,"Operator, Campaign",Bottom,,,,,,,
+16,FDFS UL,Non-Standalone,Title + 1 rows + 3 columns + comments down,,,FDFS UL Tranfer Time CDF,CDR-Data,Transfer_Duration,CDF Line,"Test_Result = Completed;
+Test_Name IN (FDFS HTTP UL ST, FDFS HTTPS UL ST)",Operator,Campaign,"Operator, Campaign",Bottom,,,,,,,
+16,FDFS UL,Non-Standalone,Title + 1 rows + 3 columns + comments down,,,Transfer time FDFS UL,CDR-Data,Transfer_Duration,Average Vertical Bars,"Test_Result = Completed;
+Test_Name IN (FDFS HTTP UL ST, FDFS HTTPS UL ST)",,Operator × Campaign,Operator,Right,,,"[""#FFFFFF"",""Arial"",""Large""]",,,,
+17,Interactivity,Non-Standalone,Title + 2 rows + 2 columns + comments right,,,Interactivity (RTT),CDR-Data,Interactivity_RTT_Median,CDF Line,"Test_Result = Completed;
+Type_of_Test = Interactivity",Operator,Campaign,"Operator, Campaign",Bottom,,,,,,,
+17,Interactivity,Non-Standalone,Title + 2 rows + 2 columns + comments right,,,Interactivity RTT median,CDR-Data,Interactivity_RTT_Median,Median Vertical Bars,"Test_Result = Completed;
+Type_of_Test = Interactivity",,Operator × Campaign,Operator,Right,,,"[""#FFFFFF"",""Arial"",""Large""]",,,,
+17,Interactivity,Non-Standalone,Title + 2 rows + 2 columns + comments right,,,Packet Error Ratio,CDR-Data,Packet_Error_Ratio,CDF Line,"Test_Result = Completed;
+Type_of_Test = Interactivity",Operator,Campaign,"Operator, Campaign",Bottom,,,,,,Yes,Yes
+17,Interactivity,Non-Standalone,Title + 2 rows + 2 columns + comments right,,,Interactivity Packet Error Ratio Avg,CDR-Data,Packet_Error_Ratio,Average Vertical Bars,"Test_Result = Completed;
+Type_of_Test = Interactivity",,Operator × Campaign,Operator,Right,,,"[""#FFFFFF"",""Arial"",""Large""]",,,,
+18,Browsing,Non-Standalone,Title + 1 rows + 2 columns + comments down,,,Browsing Time to 1MB CDF,CDR-Data,http_Browser_1MB_Reached_Duration,CDF Line,"Test_Result = Completed;
+Type_of_Test = httpBrowser",Operator,Campaign,"Operator, Campaign",Bottom,,,,,,,
+18,Browsing,Non-Standalone,Title + 1 rows + 2 columns + comments down,,,Browsing time to 1MB avg,CDR-Data,http_Browser_1MB_Reached_Duration,Average Vertical Bars,"Test_Result = Completed;
+Type_of_Test = httpBrowser",,Operator × Campaign,Operator,Right,,,"[""#FFFFFF"",""Arial"",""Large""]",,,,
+19,Conclusions,Non-Standalone,Transition,,,,,,Transition Slide,,,,,Top,,,,,,,
+20,.,,Black logo end slide,,,,,,Transition Slide,,,,,Top,,,,,,,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
@@ -93,10 +94,27 @@ def campaign_parts(value: object) -> tuple[str | None, str | None, str | None]:
 # the campaigns of one quarter by ``mode_order`` ("" is the campaign without a mode).
 # Exceptions give their own label to campaigns that do not follow the pattern; they are
 # ordered by the year and quarter of their label, or first (in their table order) when
-# the label has none.
-DEFAULT_CAMPAIGN_FORMAT = '{year}-Q{quarter}{-mode}'
+# the label has none. The default map, used by the workspaces without their own, is
+# ``assets/labels-campaigns/default-campaign-map.json``.
 DEFAULT_CAMPAIGN_MODE_ORDER = ('', 'NSA', 'SA')
-DEFAULT_CAMPAIGN_MAP = {'format': DEFAULT_CAMPAIGN_FORMAT, 'mode_order': list(DEFAULT_CAMPAIGN_MODE_ORDER), 'exceptions': []}
+
+
+def _default_campaign_map() -> dict:
+    from src.config import PROJECT_ROOT
+
+    path = PROJECT_ROOT / 'assets' / 'labels-campaigns' / 'default-campaign-map.json'
+    try:
+        shipped = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        shipped = {}
+    shipped = shipped if isinstance(shipped, dict) else {}
+    return {'format': str(shipped.get('format') or '').strip() or '{year}-Q{quarter}{-mode}',
+            'mode_order': list(shipped.get('mode_order') or DEFAULT_CAMPAIGN_MODE_ORDER),
+            'exceptions': list(shipped.get('exceptions') or [])}
+
+
+DEFAULT_CAMPAIGN_MAP = _default_campaign_map()
+DEFAULT_CAMPAIGN_FORMAT = DEFAULT_CAMPAIGN_MAP['format']
 CAMPAIGN_FORMAT_MARKER = re.compile(r'\{([^A-Za-z{}]*)(year|yy|quarter|mode|market)([^A-Za-z{}]*)\}')
 _campaign_map_override: ContextVar[dict | None] = ContextVar('campaign_map_override', default=None)
 _campaign_map_resolver: Callable[[], dict | None] | None = None

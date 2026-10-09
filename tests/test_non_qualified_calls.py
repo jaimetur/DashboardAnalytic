@@ -83,7 +83,7 @@ def query(client, **payload):
 
 def test_module_is_active_by_default_and_marks_tabs_in_development(client):
     login(client)
-    # Every module but Reporting (old) is active for every user of a new deployment.
+    # Every module but PPT Reporting (old) is active for every user of a new deployment.
     assert client.get('/api/non-qualified-calls/state').status_code == 200
     assert 'href="/non-qualified-calls"' in client.get('/workspace').text
     settings = core.feature_activation_settings()

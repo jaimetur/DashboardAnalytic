@@ -1,0 +1,5 @@
+{
+  "name": "Voice calls per Operator and Campaign",
+  "description": "Calls of each Operator and Campaign by Call Status, with the share of completed calls.",
+  "query_sql": "SELECT Operator, Campaign,\n  COUNT(*) AS Calls,\n  SUM(Call_Status = 'Completed') AS Completed,\n  SUM(Call_Status = 'Failed') AS Failed,\n  SUM(Call_Status = 'Dropped') AS Dropped,\n  ROUND(100.0 * SUM(Call_Status = 'Completed') / COUNT(*), 2) AS Completed_Percent\nFROM selected_voice\nGROUP BY Operator, Campaign\nORDER BY Operator, Campaign"
+}

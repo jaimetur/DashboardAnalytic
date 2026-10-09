@@ -1,0 +1,5 @@
+{
+  "format": "{year}-Q{quarter}{-mode}",
+  "mode_order": ["", "NSA", "SA"],
+  "exceptions": []
+}

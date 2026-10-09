@@ -48,10 +48,10 @@ Stored below `APP_DATA_DIR/workspaces/<workspace>/`:
 - `output/reports/dashboards/`: Dashboard PowerPoint jobs and their persistent PNG, tooltip and Canvas-model assets.
 - `output/reports/cdr-analysis/`: CDR Analysis PowerPoint and Word exports.
 - `output/reports/network-insights/`: Summary Network Insights PowerPoint and Word exports.
-- `output/reports/reports-old/`: Reporting (old) PowerPoint reports and their PNG charts.
-- `output/reports/reports-charts-old/`: Reporting (old) Chart Sets.
+- `output/reports/reports-old/`: PPT Reporting (old) PowerPoint reports and their PNG charts.
+- `output/reports/reports-charts-old/`: PPT Reporting (old) Chart Sets.
 - `output/reports/reporting-jobs/`: Reporting Job runs, one folder per run with its artifacts.
-- `.dashboard-data-cache/`: regenerable E2E Dashboard preview manifests and live Canvas/legacy PIL chart artifacts. Dashboard SQL reads the combined CDR tables in the workspace database directly; this directory is not a user dataset or source of record.
+- `.dashboard-data-cache/`: regenerable PPT Dashboard preview manifests and live Canvas/legacy PIL chart artifacts. Dashboard SQL reads the combined CDR tables in the workspace database directly; this directory is not a user dataset or source of record.
 - `.dashboard-cache-version.json`: signature used to invalidate caches written by older application or cache-format versions.
 
 Workspaces, backups and transfer packages created with the former layout (module folders directly below `output/` and loose documents in `output/reports/`) are moved to these folders the first time the workspace is opened, and the job paths stored in the workspace database follow them.
@@ -100,7 +100,7 @@ NSA/SA selection is a report or Dashboard-definition rule rather than a universa
 
 - Voice and Speech sessions are classified from the available RAT and Call Mode evidence. Recognised ENDC/NSA sessions enter NSA; recognised NR/SA sessions enter SA.
 - Valid Data attempts remain available even when a sampled radio-access value records fallback. This prevents an otherwise valid data test from disappearing solely because one sample is LTE.
-- E2E Dashboard does not expose Technology as an adaptive filter. Its NR Mode belongs to the Dashboard definition, while the separate RAT filter can restrict explicit `RAT_A`, `RAT` or `Sample_RAT_A` values.
+- PPT Dashboard does not expose Technology as an adaptive filter. Its NR Mode belongs to the Dashboard definition, while the separate RAT filter can restrict explicit `RAT_A`, `RAT` or `Sample_RAT_A` values.
 - Missing radio values are not silently relabelled as a recognised technology.
 
 When a chart looks incomplete, compare its chart-filtered dataset with the source RAT and Call Mode fields and with the selected NR Mode.
@@ -137,7 +137,7 @@ Example:
 
 Template filters are parsed as ordered, semicolon-terminated conditions joined with logical AND. Rows and Columns are ordered dimensions, so reversing their selection changes the grouping hierarchy. Legends derive their content from the chosen dimension, filter, threshold or bucket rule, and side legends reserve plot space.
 
-These contracts are shared by E2E Dashboards, Reporting (old), Chart Builder and Template Editor so a saved definition has the same meaning in previews and generated output. The authoring syntax, operators, examples, aggregation behaviour and legend rules are centralized in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
+These contracts are shared by PPT Dashboards, PPT Reporting (old), Chart Builder and Template Editor so a saved definition has the same meaning in previews and generated output. The authoring syntax, operators, examples, aggregation behaviour and legend rules are centralized in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
 ## Multivendor calculation and remapping
 
@@ -188,7 +188,7 @@ vendor NOT CONTAINS (Mixed, Other);
 
 ## Interactive previews and Dashboard preparation
 
-Reporting (old), Chart Builder and Report Template Editor use the shared Interactive Preview. E2E Dashboards uses the same chart contracts in its live viewer, expanded viewer and historical Charts Panel, while preparing one synchronized dataset selection for the complete Dashboard.
+PPT Reporting (old), Chart Builder and PPT Templates Editor use the shared Interactive Preview. PPT Dashboards uses the same chart contracts in its live viewer, expanded viewer and historical Charts Panel, while preparing one synchronized dataset selection for the complete Dashboard.
 
 Live charts draw their Canvas models in the user's browser. Server-side Report, Chart Set and Dashboard exports send those same models through a persistent Node/Chromium renderer, which keeps chart geometry and semantic tooltips aligned with the interactive view. Docker includes these runtime dependencies; source deployments using `dashboard-canvas` need Node.js, a supported Chromium-family browser and the WebSocket module.
 
@@ -204,7 +204,7 @@ The shared preview cache separates expensive data work from presentation work:
 
 Changing only a title should therefore be much faster than changing datasets or filters.
 
-E2E Dashboard persistence has additional layers:
+PPT Dashboard persistence has additional layers:
 
 - `dashboard_filter_selections` stores a versioned selection key, faceted filter values and row counts; its predicates are reproduced from the saved Dashboard definition.
 - The shared `reporting_rows_data`, `reporting_rows_voice` and `reporting_rows_speech` combined tables supply Dashboard filters, chart datasets and chart rendering directly.
@@ -213,13 +213,13 @@ E2E Dashboard persistence has additional layers:
 
 When a workspace opens, the application compares its saved cache signature with the current application and every Dashboard cache-format version. A mismatch deletes obsolete chart models, manifests and selection metadata, then records the current signature. Current-version artifacts remain available. The Workspace **Clear cache** action performs the same derived-data cleanup on demand without deleting definitions, datasets, combined CDR tables, templates or generated jobs.
 
-Dashboard pre-caching (the automatic warm-up of each Dashboard's standard universes, described in [E2E Dashboards](e2e-dashboards.md#preparation-lifecycle-and-cache)) runs on a dedicated low-priority thread, separate from the shared background scheduler used by datasets and exports. It shares one Dashboard work slot with foreground preparations and exports, always yields to them, and prefers Dashboards open in a browser.
+Dashboard pre-caching (the automatic warm-up of each Dashboard's standard universes, described in [PPT Dashboards](ppt-dashboards.md#preparation-lifecycle-and-cache)) runs on a dedicated low-priority thread, separate from the shared background scheduler used by datasets and exports. It shares one Dashboard work slot with foreground preparations and exports, always yields to them, and prefers Dashboards open in a browser.
 
 Chart models are generated only when the corresponding chart is viewed or included in a requested PPT.
 
 The combined-table revision in these cache keys advances only when rows are inserted or rebuilt. Adding or filling columns (for example when another Dashboard or template needs a new field) records a separate timestamp and keeps every prepared universe valid.
 
-Manage Dashboards status checks read each universe manifest directly from its fingerprint-derived path and are reused until datasets, combined rows, auto-calculated fields, mappings, templates or manifests change. Only the most recently used Dashboard snapshots keep their pandas chart frames in memory (3 by default, configurable with `DRIVETEST_ANALYZER_DASHBOARD_FRAME_CACHE_SNAPSHOTS`); older snapshots rebuild them from the combined tables on demand, which bounds memory use on smaller servers.
+PPT Manage Dashboards status checks read each universe manifest directly from its fingerprint-derived path and are reused until datasets, combined rows, auto-calculated fields, mappings, templates or manifests change. Only the most recently used Dashboard snapshots keep their pandas chart frames in memory (3 by default, configurable with `DRIVETEST_ANALYZER_DASHBOARD_FRAME_CACHE_SNAPSHOTS`); older snapshots rebuild them from the combined tables on demand, which bounds memory use on smaller servers.
 
 ## Filtered dataset preview
 
@@ -291,7 +291,7 @@ An import that ends without recording its result is reported as failed to both s
 
 - SQLite uses WAL mode, a busy timeout and normal synchronous mode.
 - Processed CDR rows are materialised per dataset and into combined tables by CDR type.
-- E2E Dashboard filter catalogues normally come from persisted dataset profiles. If an older profile lacks a current default or added field, the application reads only the missing catalogues from combined CDR tables in one grouped pass per CDR type.
+- PPT Dashboard filter catalogues normally come from persisted dataset profiles. If an older profile lacks a current default or added field, the application reads only the missing catalogues from combined CDR tables in one grouped pass per CDR type.
 - Combined CDR tables are queried directly and compact Canvas models persist across restarts after being requested. Live, expanded, historical and exported charts share aggregation, hierarchy, colour, title, legend and semantic-tooltip contracts with Reports and Chart Sets.
 - Interactive Preview caches combined and filtered frames separately.
 - Database import prefers bulk database/file replacement over row-by-row queries where safe.

@@ -6,7 +6,7 @@ DriveTest Analyzer turns processed CDR datasets into interactive KPI analysis, r
 > **Workspace ownership.** Open the intended workspace before selecting datasets, methodologies or templates. Application Config and user accounts have a separate global scope.
 
 > [!TIP]
-> **Choose an analysis workflow.** Use CDR Analysis for one CDR, Builders for ad-hoc exploration, E2E Dashboards for a complete template, Scoring & GAP Analysis for scoring comparisons and Network Insights for radio quality, sites and spectrum.
+> **Choose an analysis workflow.** Use CDR Analysis for one CDR, Builders for ad-hoc exploration, PPT Dashboards for a complete template, Scoring & GAP Analysis for scoring comparisons and Network Insights for radio quality, sites and spectrum.
 
 ## In this guide
 
@@ -19,10 +19,10 @@ DriveTest Analyzer turns processed CDR datasets into interactive KPI analysis, r
 | Workspace | [Open section](#workspace) |
 | CDR Analysis | [Open section](#datasets-analysis) |
 | Network Insights | [Open section](#network-insights) |
-| E2E Dashboards | [Open section](#e2e-dashboards) |
+| PPT Dashboards | [Open section](#ppt-dashboards) |
 | Non-Qualified Calls | [Open section](#non-qualified-calls) |
 | Reporting | [Open section](#reporting) |
-| Reporting (old) | [Open section](#reporting-old) |
+| PPT Reporting (old) | [Open section](#ppt-reporting-old) |
 | Chart Builder | [Open section](#chart-builder) |
 | Query Builder | [Open section](#query-builder) |
 | App Logs | [Open section](#app-logs) |
@@ -35,7 +35,7 @@ DriveTest Analyzer turns processed CDR datasets into interactive KPI analysis, r
 2. Upload Data, Voice or Speech CDRs from **Workspace**.
 3. Confirm the detected input type (and, for CDRs, the NR Mode) and wait for processing to finish.
 4. Optionally map Vodafone and Three vendor information.
-5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **CDR Analysis**, **Chart Builder** or **Query Builder** for focused exploration, or **Reporting (old)** for the classic report and Chart Set workflow. Use **Reporting** to schedule jobs that email CDR Analysis, Network Insights, Dashboard and Scoring artifacts.
+5. Create or open a saved **PPT Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **CDR Analysis**, **Chart Builder** or **Query Builder** for focused exploration, or **PPT Reporting (old)** for the classic report and Chart Set workflow. Use **Reporting** to schedule jobs that email CDR Analysis, Network Insights, Dashboard and Scoring artifacts.
 6. Follow Dashboard preparation and generation in the floating task cards, **PPT Generation Jobs** and **Reports and Charts Jobs**.
 7. Use **Scoring & GAP Analysis** for saved NetCheck scores and GAP reference operator comparisons across selected CDRs and aggregation levels; CDR processing also queues default Operator scoring when compatible companion CDRs are available. See [Scoring & GAP Analysis](scoring-gap-analysis.md).
 8. Use **Network Insights** to compare RSRP and SINR, map weak-coverage and high-interference areas and review sites, spectrum and network deployment. See [Network Insights](network-insights.md).
@@ -58,7 +58,7 @@ The header is available throughout the authenticated application.
 
 ## Application and workspace configuration
 
-**Application Config** controls runtime settings shared by every workspace. The dedicated **Workspace Config** page groups Report Templates Management, Main Cities, Mappings & Reference Data (Operator, Vendor and Campaign Maps and Spectrum Holdings) and Scoring & GAP Analysis Setup for the active workspace. These are separate scopes: changing a workspace template or chart mapping does not change application runtime settings. See [Application Config](app-config.md) and [Workspace Config](workspace-config.md).
+**Application Config** controls runtime settings shared by every workspace. The dedicated **Workspace Config** page groups PPT Templates Management, Main Cities, Mappings & Reference Data (Operator, Vendor and Campaign Maps and Spectrum Holdings) and Scoring & GAP Analysis Setup for the active workspace. These are separate scopes: changing a workspace template or chart mapping does not change application runtime settings. See [Application Config](app-config.md) and [Workspace Config](workspace-config.md).
 
 ## Background tasks and floating cards
 
@@ -156,13 +156,13 @@ Network Insights analyses the radio fields of the selected Data, Voice and Speec
 
 See [Network Insights](network-insights.md).
 
-## E2E Dashboards
+## PPT Dashboards
 
-E2E Dashboards is the main analysis module and the complete template-driven workflow behind DriveTest Analyzer. A saved Dashboard binds a name and NR Mode to a workspace Report Template, filters, hidden fields, slide comments and an optional saved Dataset Universe. Scope, selected Data/Voice/Speech CDRs and dates can be applied temporarily or saved independently from filters.
+PPT Dashboards is the main analysis module and the complete template-driven workflow behind DriveTest Analyzer. A saved Dashboard binds a name and NR Mode to a workspace Report Template, filters, hidden fields, slide comments and an optional saved Dataset Universe. Scope, selected Data/Voice/Speech CDRs and dates can be applied temporarily or saved independently from filters.
 
 The definition can be opened repeatedly, duplicated, exported or moved with its workspace without copying source rows into it.
 
-### Manage Dashboards
+### PPT Manage Dashboards
 
 - Create, open, rename, duplicate, export, import, close and delete workspace Dashboard definitions.
 - Choose NSA or SA before selecting a compatible Report Template.
@@ -197,7 +197,7 @@ Status cards distinguish data loading, queued data, chart rendering, queued char
 
 **Generate PPT** uses the exact applied definition and continues as a background job. Completed jobs retain their CDRs, dates, scope, filter snapshot, comments, PPTX, PNGs, tooltips and Canvas models under `output/reports/dashboards`. **PPT Generation Jobs** supports download, chart access, stop, retry, relaunch and deletion. **Charts Panel** filters completed jobs and reopens their charts in the same expanded viewer, including the historical chart dataset.
 
-The operational guide is [E2E Dashboards](e2e-dashboards.md). Template creation, columns, structural slides, supported chart types, filters, aggregations, legends, layouts and colours are documented once in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
+The operational guide is [PPT Dashboards](ppt-dashboards.md). Template creation, columns, structural slides, supported chart types, filters, aggregations, legends, layouts and colours are documented once in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
 ## Non-Qualified Calls
 
@@ -207,9 +207,9 @@ Non-Qualified Calls follows Scoring & GAP Analysis in the main tabs. It lists ev
 
 **Reporting** schedules **Reporting Jobs** that collect a Summary CDR Analysis, a Summary Network Insights, Dashboard PPTs and Scoring PPTs, each with its own filters, run once or on a daily, weekly or monthly schedule and email the artifacts with a description of each one. It is available to every user unless Admin → Features Activation restricts it, and it can also include the Non-Qualified Calls Executive Summary and Progress Status. See [Reporting](reporting.md).
 
-## Reporting (old)
+## PPT Reporting (old)
 
-Reporting (old) combines processed CDRs and a Report Template from the active workspace. It is available only to the users, roles and groups it is activated for in Admin → Features Activation (off for everyone on a new deployment).
+PPT Reporting (old) combines processed CDRs and a Report Template from the active workspace. It is available only to the users, roles and groups it is activated for in Admin → Features Activation (off for everyone on a new deployment).
 
 ### Reporting module selector
 
@@ -300,7 +300,7 @@ The **Admin** tab opens Administrator Config for `admin` and `super-admin` roles
 
 See [Workspace Config](workspace-config.md) for panel operations and portability.
 
-### Report Template Editor
+### PPT Templates Editor
 
 - Edit cells in a scrollable grid.
 - Validate filter syntax immediately.

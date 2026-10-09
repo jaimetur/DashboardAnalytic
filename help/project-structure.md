@@ -33,8 +33,17 @@ DriveTestAnalyzer/
 │       ├── templates/
 │       └── static/
 ├── assets/
-│   ├── default-calculated-dimensions.json
-│   └── ppt-templates/
+│   ├── autocalculated-fields/
+│   ├── labels-campaigns/
+│   ├── labels-vendors/
+│   ├── map-areas/
+│   ├── powerpoint-templates/
+│   ├── ppt-dashboards/
+│   ├── ppt-templates/
+│   ├── query-builder-queries/
+│   ├── reporting-jobs/
+│   ├── scoring-methodologies/
+│   └── scoring-report-configurations/
 ├── docker/
 ├── help/
 ├── macos-launcher/
@@ -67,20 +76,21 @@ Runtime `config/` and `data/` directories use project-local defaults but are exc
 - `src/modules/analytics.py`: single-dataset analytical calculations.
 - `src/modules/exports.py`: CDR Analysis Word and PowerPoint output, including the multi-dataset Summary CDR Analysis.
 - `src/modules/network_insights_export.py`: Summary Network Insights PowerPoint and Word output.
+- `src/modules/starter_content.py`: the starter content of every workspace (methodologies, Report Templates, Dashboards and Auto-calculated Fields from `assets`).
 - `src/modules/map_areas.py`: Map Areas of a workspace (`map_area_layers`): the countries of the tests, the geoBoundaries levels and downloads, imported layers and the area of each test used by the Scoring points-lost map.
 - `src/modules/report_tasks.py`: Reporting Jobs (`report_tasks`, `report_task_runs`), schedules, artifact generation, email bodies, the scheduler and the artifact provider registry for other modules.
 - `src/modules/email_delivery.py`: SMTP settings (Application Config → Email Delivery) and sending.
 - `src/modules/non_qualified_calls.py`: Non-Qualified Calls: indexing of the NQ calls of every CDR (`nq_calls`, `nq_call_sources`), their follow-up (`nq_call_tracking`, `nq_call_comments`, `nq_call_history`, `nq_call_options`), the summary and drill-down queries, the Excel export, the NQ Call Tracking portability document and its routes.
 - `src/modules/cdr_reporting.py`: Report Template parsing, filters, aggregations, chart contracts, map tiles and classic report rendering.
-- `src/modules/e2e_dashboards.py`: Dashboard definitions, direct combined-CDR SQL selections, preview/model caches, live previews, filtered chart data and Dashboard PPT jobs.
+- `src/modules/ppt_dashboards.py`: Dashboard definitions, direct combined-CDR SQL selections, preview/model caches, live previews, filtered chart data and Dashboard PPT jobs.
 - `src/modules/dashboard_canvas_renderer.mjs`: Node/Chromium-compatible Canvas rendering used for consistent interactive and exported charts.
 - `src/modules/auth.py`: password and authentication helpers.
 - `src/utils/`: chart, filesystem and font utilities shared by modules.
 
 ## Browser layer
 
-- `src/web_interface/templates/`: Jinja pages for Workspace, CDR Analysis, E2E Dashboards, Reporting (old), Chart Builder, Admin, App Logs and document viewing.
-- `src/web_interface/static/js/`: shared UI behaviour, common chart drawing and the E2E Dashboard client.
+- `src/web_interface/templates/`: Jinja pages for Workspace, CDR Analysis, PPT Dashboards, PPT Reporting (old), Chart Builder, Admin, App Logs and document viewing.
+- `src/web_interface/static/js/`: shared UI behaviour, common chart drawing and the PPT Dashboard client.
 - `src/web_interface/static/css/`: application and module-specific styles.
 - `src/web_interface/static/markdown_renderer.js`: in-app README, Changelog and Help rendering, including cross-document heading anchors.
 - `src/web_interface/static/img/`: brand and interface images.
@@ -158,8 +168,8 @@ Report Templates become CSV files only inside portable export, transfer and back
 - `output/reports/dashboards/`: Dashboard PowerPoint jobs and their persistent PNG, tooltip and Canvas-model assets.
 - `output/reports/cdr-analysis/`: CDR Analysis PowerPoint and Word exports.
 - `output/reports/network-insights/`: Summary Network Insights PowerPoint and Word exports.
-- `output/reports/reports-old/`: Reporting (old) PowerPoint reports and their PNG charts.
-- `output/reports/reports-charts-old/`: Reporting (old) Chart Sets.
+- `output/reports/reports-old/`: PPT Reporting (old) PowerPoint reports and their PNG charts.
+- `output/reports/reports-charts-old/`: PPT Reporting (old) Chart Sets.
 - `output/reports/reporting-jobs/`: Reporting Job runs, one folder per run with its artifacts.
 
 Workspaces, backups and transfer packages created with the former layout (module folders directly below `output/` and loose documents in `output/reports/`) are moved to these folders the first time the workspace is opened, and the job paths stored in the workspace database follow them.
@@ -168,8 +178,12 @@ Workspaces, backups and transfer packages created with the former layout (module
 
 ## Bundled assets
 
-- `assets/ppt-templates/Template_CDR_analysis.pptx` supplies slide masters, named layouts and placeholders.
-- `assets/default-calculated-dimensions.json` supplies initial Auto-calculated Field definitions where applicable.
+- `assets/powerpoint-templates/Template_01.pptx` supplies slide masters, named layouts and placeholders.
+- `assets/autocalculated-fields/default-autocalculated-fields.json` holds the Auto-calculated Fields every new workspace starts with (the only source of default fields).
+- Starter content added to every workspace that does not have it yet (see `src/modules/starter_content.py`): `assets/scoring-methodologies/*.json` (Scoring methodologies in the portable configuration format), `assets/ppt-templates/<nsa|sa>/*.csv` (Report Templates, named after their file), `assets/ppt-dashboards/*.json` (Dashboards without CDRs, dates or Operator and Vendor filters), `assets/scoring-report-configurations/*.json` (saved Scoring report configurations), `assets/query-builder-queries/*.json` (saved Query Builder queries) and `assets/reporting-jobs/*.json` (Reporting Jobs, naming their Dashboards and Scoring report configuration). Adding a file to these folders ships it.
+- `assets/labels-vendors/default-vendor-maps.json` holds the Vendor Maps (labels, colours and CDR spellings) a new workspace starts with.
+- `assets/labels-campaigns/default-campaign-map.json` holds the default Campaign Maps (label format, order of the radio modes and exceptions) of the workspaces without their own.
+- `assets/map-areas/` holds the Map Areas shipped with the application (one `<ISO3>.json.gz` per country, such as the UK ITL3 areas, listed in `manifest.json`) and the world country polygons that find the country of each test (see its README).
 - Workspace Report Templates supply slide/chart definitions and are documented in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
 ## Documentation
@@ -186,7 +200,7 @@ The Help navigation order and labels are curated in `src/DriveTestAnalyzer.py`. 
 ## Tests, tooling and delivery
 
 - `tests/test_app.py`: routes, shared UI, Admin, documentation and integration behaviour.
-- `tests/test_e2e_dashboards.py`: Dashboard definitions, filtering, caching, rendering and PPT jobs.
+- `tests/test_ppt_dashboards.py`: Dashboard definitions, filtering, caching, rendering and PPT jobs.
 - `tests/test_cdr_reporting.py`: template, filter, chart and classic Reporting contracts.
 - Other test modules cover analytics, exports, Query Builder, workspaces and workspace template isolation.
 - `tests/conftest.py`: the `client` fixture. Dataset sources are parsed by isolated background workers, so after upload, retry, reprocess and mapping requests the fixture waits for those workers and the combined CDR rebuilds they start; `wait_for_background_dataset_work()` does the same for work queued by other requests.

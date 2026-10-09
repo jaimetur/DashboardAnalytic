@@ -73,7 +73,7 @@ class Settings:
 
     database_path: Path = config_dir / "application.db"
     slides_templates_dir: Path = config_dir / "report-templates"
-    ppt_templates_dir: Path = assets_dir / "ppt-templates"
+    powerpoint_templates_dir: Path = assets_dir / "powerpoint-templates"
     input_dir: Path = data_dir / "input"
     output_dir: Path = data_dir / "output"
     export_dir: Path = data_dir / "output" / "reports"

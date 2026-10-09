@@ -418,8 +418,8 @@ def materialize_cdr_derived_columns(
         )
     return result
 HELP_HOME_DOCUMENT = 'help.md'
-# Only users with the Reporting (old) feature see this chapter.
-OLD_REPORTING_HELP_DOCUMENT = 'reporting-old.md'
+# Only users with the PPT Reporting (old) feature see this chapter.
+OLD_REPORTING_HELP_DOCUMENT = 'ppt-reporting-old.md'
 HELP_NAVIGATION_DOCUMENTS = (
     HELP_HOME_DOCUMENT,
     'overview.md',
@@ -429,8 +429,8 @@ HELP_NAVIGATION_DOCUMENTS = (
     'web-interface.md',
     'workspace-management.md',
     'datasets-analysis.md',
-    'e2e-dashboards.md',
-    'reporting-old.md',
+    'ppt-dashboards.md',
+    'ppt-reporting-old.md',
     'scoring-gap-analysis.md',
     'network-insights.md',
     'non-qualified-calls.md',
@@ -448,9 +448,9 @@ HELP_DOCUMENT_LABELS = {
     'overview.md': 'Product Overview',
     'technical-considerations.md': 'Technical Considerations',
     'datasets-analysis.md': 'CDR Analysis',
-    'e2e-dashboards.md': 'E2E Dashboards',
+    'ppt-dashboards.md': 'PPT Dashboards',
     'reporting.md': 'Reporting',
-    'reporting-old.md': 'Reporting (old)',
+    'ppt-reporting-old.md': 'PPT Reporting (old)',
     'scoring-gap-analysis.md': 'Scoring & GAP Analysis',
     'network-insights.md': 'Network Insights',
     'non-qualified-calls.md': 'Non-Qualified Calls',
@@ -480,8 +480,8 @@ FEATURES: tuple[dict[str, Any], ...] = (
         '/datasets-analysis/analyze', '/datasets-analysis/export', '/datasets-analysis/summary', '/datasets-analysis/metrics',
         '/dashboard/analyze', '/dashboard/export',
     )},
-    {'key': 'e2e-dashboards', 'label': 'E2E Dashboards', 'paths': ('/e2e-dashboards', '/api/e2e-dashboards')},
-    {'key': 'reporting-old', 'label': 'Reporting (old)', 'paths': ('/reporting-old', '/api/reporting-old', '/e2e-reporting')},
+    {'key': 'ppt-dashboards', 'label': 'PPT Dashboards', 'paths': ('/ppt-dashboards', '/api/ppt-dashboards')},
+    {'key': 'ppt-reporting-old', 'label': 'PPT Reporting (old)', 'paths': ('/ppt-reporting-old', '/api/ppt-reporting-old', '/e2e-reporting')},
     {'key': 'scoring', 'label': 'Scoring & GAP Analysis', 'paths': ('/scoring', '/api/scoring')},
     {'key': 'network-insights', 'label': 'Network Insights', 'paths': ('/network-insights', '/api/network-insights')},
     {'key': 'non-qualified-calls', 'label': 'Non-Qualified Calls', 'paths': ('/non-qualified-calls', '/api/non-qualified-calls')},
@@ -497,9 +497,9 @@ FEATURE_ACTIVATION_CACHE_SECONDS = 5.0
 # A rule grants a feature to everyone ('all') or to nobody ('none') by default;
 # its Allowed roles, groups and users gain it and its Forbidden ones lose it.
 # Forbidden always wins over Allowed. A new deployment starts with every module
-# active for every user except Reporting (old), off for every role and user.
+# active for every user except PPT Reporting (old), off for every role and user.
 FEATURE_DEFAULTS: dict[str, dict[str, Any]] = {
-    'reporting-old': {'default': 'none'},
+    'ppt-reporting-old': {'default': 'none'},
 }
 _feature_activation_cache: tuple[float, str, dict[str, Any]] | None = None
 
@@ -663,13 +663,13 @@ def feature_activation_context() -> list[dict[str, Any]]:
     return rows
 
 
-def can_access_e2e_reporting(user: SessionUser) -> bool:
-    """Access to the Reporting (old) module and its Help chapter."""
-    return user_has_feature(user, 'reporting-old')
+def can_access_ppt_reporting_old(user: SessionUser) -> bool:
+    """Access to the PPT Reporting (old) module and its Help chapter."""
+    return user_has_feature(user, 'ppt-reporting-old')
 
 
-def filter_e2e_reporting_help_content(content: str, document_name: str) -> str:
-    """Remove the Reporting (old) chapter from Help for users without that feature.
+def filter_ppt_reporting_old_help_content(content: str, document_name: str) -> str:
+    """Remove the PPT Reporting (old) chapter from Help for users without that feature.
 
     Every other Help chapter stays complete for every user, signed in or not:
     only the old module's own sections and links to its chapter are removed.
@@ -691,7 +691,7 @@ def filter_e2e_reporting_help_content(content: str, document_name: str) -> str:
         filtered.append(line)
     content = '\n'.join(filtered) + ('\n' if content.endswith('\n') else '')
     # Keep the visible text of any remaining inline link to the old chapter.
-    return re.sub(r'\[([^\]]*)\]\([^)]*reporting-old\.md[^)]*\)', r'\1', content, flags=re.IGNORECASE)
+    return re.sub(r'\[([^\]]*)\]\([^)]*ppt-reporting-old\.md[^)]*\)', r'\1', content, flags=re.IGNORECASE)
 
 
 def default_report_slides_template_path(
@@ -745,7 +745,7 @@ def _normalise_catalogue_dimension_name(value: str) -> str:
 
 def default_calculated_dimensions() -> list[dict[str, object]]:
     """Load editable starter definitions from configuration rather than code."""
-    path = PROJECT_ROOT / 'assets' / 'default-calculated-dimensions.json'
+    path = PROJECT_ROOT / 'assets' / 'autocalculated-fields' / 'default-autocalculated-fields.json'
     return json.loads(path.read_text(encoding='utf-8')) if path.exists() else []
 
 
@@ -1009,7 +1009,7 @@ def rename_chart_mapping_dashboard_references(
         'template', 'template_technology', 'technology', 'scope', 'datasets',
         'custom_fields', 'hidden_filters', 'date_from', 'date_to',
     }
-    for state_key in ('e2e_dashboards_v2', 'e2e_dashboard_sets_v1'):
+    for state_key in ('ppt_dashboards_v2', 'ppt_dashboard_sets_v1'):
         stored = repository.get_workspace_state(state_key)
         if stored is None:
             continue
@@ -1043,10 +1043,10 @@ def rename_calculated_dimension_dashboard_references(renames: dict[str, str]) ->
     if not renames:
         return 0
 
-    state_key = 'e2e_dashboards_v2'
+    state_key = 'ppt_dashboards_v2'
     stored = repository.get_workspace_state(state_key)
     if stored is None:
-        state_key = 'e2e_dashboard_sets_v1'
+        state_key = 'ppt_dashboard_sets_v1'
         stored = repository.get_workspace_state(state_key)
     if stored is None:
         return 0
@@ -1505,7 +1505,7 @@ def combined_reporting_required_columns(
         *Repository.REPORTING_CORE_COLUMNS,
         *PREVIEW_METADATA_FIELDS,
         *MAIN_CDR_FIELDS,
-        # E2E Dashboard Default Filters are a fixed part of every combined
+        # PPT Dashboard Default Filters are a fixed part of every combined
         # source. Keep every physical fallback alias so opening a Dashboard
         # never has to repair selected CDR rows just to populate its facets.
         'market', 'operator', 'Operator_Vendor', 'Vendor',
@@ -2500,7 +2500,7 @@ def catalogue_editor_filter_values(columns: dict[str, list[str]]) -> dict[str, d
 
 
 def catalogue_layout_names(technology: str) -> list[str]:
-    template = settings.ppt_templates_dir / TEMPLATE_NAMES[technology]
+    template = settings.powerpoint_templates_dir / TEMPLATE_NAMES[technology]
     if not template.exists():
         return []
     try:
@@ -2651,6 +2651,9 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
         if initialize:
             first_initialization = database_key not in INITIALIZED_WORKSPACE_DATABASES
             if first_initialization:
+                # A workspace restored or transferred from a server with the former module names.
+                from src.modules.ppt_naming import migrate_workspace_database
+                migrate_workspace_database(workspace.database_path)
                 repository.initialize()
                 migrate_output_layout(workspace.output_dir, workspace.database_path)
                 recovered_scoring_ids = recover_interrupted_scoring_jobs(repository)
@@ -2675,6 +2678,13 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
             # exact columns it needs lazily in ``_combined_reporting_frame``.
             for technology in TEMPLATE_NAMES:
                 synchronize_template_file_names(technology)
+            # A new workspace (and every existing one, once) starts with the shipped methodology, Report
+            # Templates, Dashboards and Auto-calculated Fields it does not have yet.
+            try:
+                from src.modules.starter_content import seed_starter_content
+                seed_starter_content(repository)
+            except Exception as exc:  # noqa: BLE001 - starter content never blocks opening a workspace
+                repository.try_add_log('system', 'starter_content_failed', json.dumps({'error': str(exc)}))
         inconsistent_ids = repository.fail_inconsistent_ready_datasets()
         if inconsistent_ids:
             repository.try_add_log('system', 'recover_inconsistent_datasets', json.dumps({'dataset_ids': inconsistent_ids}))
@@ -2845,7 +2855,7 @@ def clear_outdated_workspace_caches(workspace: Workspace) -> bool:
             invalidate_workspace_size_cache(workspace_root)
             return True
 
-    cancel_dashboard_tasks = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_workspace_tasks', None)
+    cancel_dashboard_tasks = getattr(sys.modules[__name__], 'ppt_dashboard_cancel_workspace_tasks', None)
     if callable(cancel_dashboard_tasks):
         cancel_dashboard_tasks(workspace.database_path)
     shutil.rmtree(cache_root, ignore_errors=True)
@@ -2885,8 +2895,8 @@ IDLE_DASHBOARD_WARMUP_CALLBACK: Callable[[], None] | None = None
 PASSIVE_APPLICATION_REQUEST_PATHS = {
     '/api/background-tasks', '/api/workspaces/sizes', '/admin/import-export/transfers/offers',
     '/api/admin/backup-status', '/api/admin/backup-files',
-    '/api/e2e-dashboards/statuses', '/api/e2e-dashboards/ppt-jobs',
-    '/api/reporting-old/jobs', '/api/reporting-old/chart-jobs',
+    '/api/ppt-dashboards/statuses', '/api/ppt-dashboards/ppt-jobs',
+    '/api/ppt-reporting-old/jobs', '/api/ppt-reporting-old/chart-jobs',
 }
 
 
@@ -2975,7 +2985,7 @@ async def lifespan(_: FastAPI):
     ensure_directories([
         settings.database_path.parent,
         settings.template_dir,
-        settings.ppt_templates_dir,
+        settings.powerpoint_templates_dir,
         settings.static_dir,
     ])
     # Capture the configured legacy paths once, then retain them as the
@@ -3006,6 +3016,7 @@ async def lifespan(_: FastAPI):
     if stored_runtime_configuration['configured']:
         apply_runtime_configuration(stored_runtime_configuration)
     migrate_workspace_template_registries()
+    migrate_ppt_module_names()
     # Workspace schema cleanup and interrupted-job recovery happen when a
     # workspace becomes active.  Scanning every workspace here opens and
     # checkpoints every SQLite database, which can leave startup blocked for
@@ -3026,7 +3037,7 @@ async def lifespan(_: FastAPI):
     report_scheduler_stop = Event()
     report_scheduler_thread = Thread(
         target=report_task_scheduler_loop, args=(report_scheduler_stop,),
-        name='e2e-reporting-scheduler', daemon=True,
+        name='ppt-reporting-old-scheduler', daemon=True,
     )
     report_scheduler_thread.start()
     try:
@@ -7257,7 +7268,7 @@ def _workspace_archive_metadata(workspace: Workspace, unsent_files: dict[str, di
     return metadata
 
 
-DASHBOARD_STATE_KEY = 'e2e_dashboards_v2'
+DASHBOARD_STATE_KEY = 'ppt_dashboards_v2'
 
 
 def _mappings_reference_data_archive_payload(workspace: Workspace) -> bytes:
@@ -7469,7 +7480,45 @@ def _dashboard_archive_payload(workspace: Workspace) -> bytes:
         dashboards = {}
     if not isinstance(dashboards, dict):
         dashboards = {}
-    return json.dumps({'format': 'drivetest-analyzer-dashboards', 'version': 1, 'dashboards': dashboards}, ensure_ascii=False, indent=2).encode('utf-8')
+    # The chosen CDRs travel by name and type: their ids only mean something in this workspace.
+    chosen = {
+        int(value) for definition in dashboards.values() if isinstance(definition, dict)
+        for ids in (definition.get('datasets') or {}).values() if isinstance(ids, list)
+        for value in ids if str(value).lstrip('-').isdigit()
+    }
+    cdrs = [
+        {'id': int(row['id']), 'name': str(row['file_name']), 'kind': str(row['dataset_kind'] or '')}
+        for row in task_repository.list_datasets() if int(row['id']) in chosen
+    ] if chosen else []
+    return json.dumps({'format': 'drivetest-analyzer-dashboards', 'version': 1, 'dashboards': dashboards, 'cdrs': cdrs},
+                      ensure_ascii=False, indent=2).encode('utf-8')
+
+
+def _dashboards_on_destination_cdrs(dashboards: dict[str, Any], cdrs: Any, task_repository: Repository) -> dict[str, Any]:
+    """Point the chosen CDRs of imported Dashboards at the CDRs of the destination with the same name and type."""
+    from src.modules.ppt_dashboards import existing_dataset_selection
+
+    destination = list(task_repository.list_datasets())
+    kinds = {int(row['id']): str(row['dataset_kind'] or '') for row in destination}
+    if isinstance(cdrs, list):
+        by_name: dict[tuple[str, str], int] = {}
+        for row in sorted(destination, key=lambda row: int(row['id'])):
+            by_name.setdefault((str(row['file_name']).casefold(), str(row['dataset_kind'] or '')), int(row['id']))
+        targets = {
+            int(item['id']): by_name.get((str(item.get('name') or '').casefold(), str(item.get('kind') or '')))
+            for item in cdrs if isinstance(item, dict) and str(item.get('id', '')).lstrip('-').isdigit()
+        }
+        moved = {}
+        for dashboard_id, definition in dashboards.items():
+            if isinstance(definition, dict) and isinstance(definition.get('datasets'), dict):
+                definition = {**definition, 'datasets': {
+                    kind: [targets.get(int(value)) if str(value).lstrip('-').isdigit() else None for value in ids]
+                    if isinstance(ids, list) else ids
+                    for kind, ids in definition['datasets'].items()
+                }}
+            moved[dashboard_id] = definition
+        dashboards = moved
+    return {dashboard_id: existing_dataset_selection(definition, kinds) for dashboard_id, definition in dashboards.items()}
 
 
 def _exported_calculated_dimensions(workspace: Workspace) -> list[dict[str, object]]:
@@ -7502,6 +7551,7 @@ def _restore_workspace_dashboards(workspace: Workspace, payload: bytes) -> None:
     # A Dashboard import replaces the saved definitions, just as restoring the
     # Dashboard component does, while deliberately retaining generated caches.
     task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+    dashboards = _dashboards_on_destination_cdrs(dashboards, document.get('cdrs'), task_repository)
     task_repository.set_workspace_state(DASHBOARD_STATE_KEY, json.dumps(dashboards, ensure_ascii=False))
 
 
@@ -8879,6 +8929,17 @@ def _archive_workspace_report_templates(
                 archive.writestr(default_path, content)
                 if progress_callback:
                     progress_callback(len(content))
+
+
+def migrate_ppt_module_names() -> None:
+    """Rename the stored E2E Dashboards and Reporting (old) names to PPT Dashboards and PPT Reporting (old)."""
+    from src.modules.module_labels import MODULE_LABELS_STATE_KEY
+    from src.modules.ppt_naming import migrate_application_state, migrate_workspace_database
+
+    migrate_application_state(repository, (FEATURE_ACTIVATION_STATE_KEY, MODULE_LABELS_STATE_KEY))
+    invalidate_feature_activation_cache()
+    for workspace in workspace_registry.list():
+        migrate_workspace_database(workspace.database_path)
 
 
 def migrate_workspace_template_registries() -> None:
@@ -10472,6 +10533,7 @@ def render_admin_template(
             'mapping_assignments': mapping_assignment_rows() if active_workspace else {},
             'vendor_mapping_notice': request.query_params.get('vendor_mapping_notice') or None,
             'workspace_campaigns': workspace_campaign_values() if active_workspace else [],
+            'default_campaign_map': DEFAULT_CAMPAIGN_MAP,
             'vendor_mapping_error': request.query_params.get('vendor_mapping_error') or None,
             **spectrum_holdings_context(request),
             'recurring_backup': recurring_backup_settings(),
@@ -11018,8 +11080,8 @@ def documents_view(request: Request, doc_name: str, user: SessionUser | None = D
 @app.get('/documents/view/help/{doc_file:path}', response_class=HTMLResponse)
 def help_document_view(request: Request, doc_file: str, user: SessionUser | None = Depends(optional_user)) -> HTMLResponse:
     path = resolve_help_doc_path(doc_file)
-    if path.name.casefold() == OLD_REPORTING_HELP_DOCUMENT and not (user and can_access_e2e_reporting(user)):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Reporting (old) access required.')
+    if path.name.casefold() == OLD_REPORTING_HELP_DOCUMENT and not (user and can_access_ppt_reporting_old(user)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='PPT Reporting (old) access required.')
     return render_template(
         request,
         'doc_view.html',
@@ -11045,7 +11107,7 @@ def get_help_documents_index(user: SessionUser | None = Depends(optional_user)) 
     renamed = renamed_help_chapters(module_settings)
     icons = help_chapter_icons(module_settings)
     for relative_path in ordered_help_documents(HELP_NAVIGATION_DOCUMENTS, module_settings):
-        if relative_path == OLD_REPORTING_HELP_DOCUMENT and not (user and can_access_e2e_reporting(user)):
+        if relative_path == OLD_REPORTING_HELP_DOCUMENT and not (user and can_access_ppt_reporting_old(user)):
             continue
         file_path = (help_root / relative_path).resolve()
         if not file_path.exists() or not file_path.is_file():
@@ -11083,11 +11145,11 @@ def get_changelog_index(user: SessionUser | None = Depends(optional_user)) -> di
 @app.get('/api/documents/help/{doc_file:path}')
 def get_help_markdown_document(doc_file: str, user: SessionUser | None = Depends(optional_user)) -> dict[str, Any]:
     path = resolve_help_doc_path(doc_file)
-    if path.name.casefold() == OLD_REPORTING_HELP_DOCUMENT and not (user and can_access_e2e_reporting(user)):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Reporting (old) access required.')
+    if path.name.casefold() == OLD_REPORTING_HELP_DOCUMENT and not (user and can_access_ppt_reporting_old(user)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='PPT Reporting (old) access required.')
     content = path.read_text(encoding='utf-8', errors='replace')
-    if not (user and can_access_e2e_reporting(user)):
-        content = filter_e2e_reporting_help_content(content, path.name)
+    if not (user and can_access_ppt_reporting_old(user)):
+        content = filter_ppt_reporting_old_help_content(content, path.name)
     content = rename_modules_in_help(content, path.name, load_module_labels(repository))
     return {
         'name': path.name,
@@ -11100,8 +11162,8 @@ def get_help_markdown_document(doc_file: str, user: SessionUser | None = Depends
 def get_markdown_document(request: Request, doc_name: str, user: SessionUser | None = Depends(optional_user)) -> dict[str, Any]:
     path = resolve_doc_path(doc_name)
     content = path.read_text(encoding='utf-8', errors='replace')
-    if not (user and can_access_e2e_reporting(user)) and path.name.casefold() in {'readme.md', HELP_HOME_DOCUMENT}:
-        content = filter_e2e_reporting_help_content(content, path.name)
+    if not (user and can_access_ppt_reporting_old(user)) and path.name.casefold() in {'readme.md', HELP_HOME_DOCUMENT}:
+        content = filter_ppt_reporting_old_help_content(content, path.name)
     if path.name.casefold() == HELP_HOME_DOCUMENT:
         content = rename_modules_in_help(content, path.name, load_module_labels(repository))
     return {
@@ -11669,7 +11731,7 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
         # A worker may briefly hold the database while publishing a progress
         # update. The next browser poll will retry without disrupting the page.
         pass
-    task_provider = getattr(sys.modules[__name__], 'e2e_dashboard_tasks', None)
+    task_provider = getattr(sys.modules[__name__], 'ppt_dashboard_tasks', None)
     if callable(task_provider):
         tasks.extend(task_provider(workspace))
     return tasks
@@ -12064,7 +12126,7 @@ def stop_background_task(
             'calculated_dimensions_need_materialization', 'stopped', timeout_seconds=0.1,
         )
     elif prefix == 'dashboard-prepare':
-        stop_dashboard = getattr(sys.modules[__name__], 'e2e_dashboard_stop_task', None)
+        stop_dashboard = getattr(sys.modules[__name__], 'ppt_dashboard_stop_task', None)
         if not callable(stop_dashboard) or not stop_dashboard(workspace.database_path, raw_identifier):
             raise HTTPException(status_code=409, detail='This Dashboard task can no longer be interrupted.')
         task_repository.try_add_log(
@@ -12328,8 +12390,8 @@ def select_workspace(
     # never send the user to Workspace merely because the active data source
     # changed.  Restrict the destination to application modules so this form
     # cannot become an open redirect.
-    target = '/reporting-old' if return_to in {'/e2e-reporting', '/reporting-old'} else return_to
-    target = target if target in {'/workspace', '/datasets-analysis', '/e2e-dashboards', '/reporting-old', '/admin'} else '/workspace'
+    target = '/ppt-reporting-old' if return_to in {'/e2e-reporting', '/ppt-reporting-old'} else return_to
+    target = target if target in {'/workspace', '/datasets-analysis', '/ppt-dashboards', '/ppt-reporting-old', '/admin'} else '/workspace'
     if user.role != 'super-admin' and not repository.user_has_workspace_access(user.username, workspace_id):
         return RedirectResponse(f'{target}?workspace_error=You+do+not+have+access+to+that+workspace.', status_code=status.HTTP_303_SEE_OTHER)
     try:
@@ -12627,7 +12689,7 @@ def delete_workspace_cache(
     add_workspace_audit_log(workspace, user.username, 'clear_workspace_cache_started', {
         'workspace': workspace.id, 'name': workspace.name,
     })
-    cancel_dashboard_tasks = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_workspace_tasks', None)
+    cancel_dashboard_tasks = getattr(sys.modules[__name__], 'ppt_dashboard_cancel_workspace_tasks', None)
     if callable(cancel_dashboard_tasks):
         cancel_dashboard_tasks(workspace.database_path)
     if active_workspace and active_workspace.id == workspace_id:
@@ -13861,7 +13923,7 @@ def _clear_chart_preview_caches() -> None:
     # alter its hierarchy order. Invalidate only those inexpensive derived
     # models so the current Dashboard token remains usable and repaints with
     # the newly saved Operator/Vendor order.
-    invalidate_dashboard_models = globals().get('e2e_dashboard_invalidate_chart_models')
+    invalidate_dashboard_models = globals().get('ppt_dashboard_invalidate_chart_models')
     if active_workspace and callable(invalidate_dashboard_models):
         invalidate_dashboard_models(active_workspace.database_path)
 
@@ -13995,7 +14057,7 @@ def _report_job_charts_payload(row: Any) -> dict[str, Any] | None:
         charts.append({
             'slide': item.get('slide'), 'title': str(item.get('title') or ''),
             'source': str(item.get('source') or ''), 'chart_type': str(item.get('chart_type') or ''),
-            'image_url': f"/reporting-old/jobs/{int(row['id'])}/charts/{file_name}",
+            'image_url': f"/ppt-reporting-old/jobs/{int(row['id'])}/charts/{file_name}",
         })
     if not charts:
         return None
@@ -14147,7 +14209,7 @@ def _temporary_preview_dataset_ids(editable: dict[str, Any], selected_ids: dict[
     return requested
 
 
-@app.get('/api/reporting-old/chart-preview/context')
+@app.get('/api/ppt-reporting-old/chart-preview/context')
 def temporary_chart_preview_context(source: str, identifier: str, chart_index: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return an immutable chart definition for the interactive viewer sandbox."""
     entry, selected_ids, _technology, _multivendor, template_row_index, _template_entries = _temporary_chart_preview_context(source, identifier, chart_index)
@@ -14182,7 +14244,7 @@ def temporary_chart_preview_context(source: str, identifier: str, chart_index: i
     })
 
 
-@app.post('/api/reporting-old/chart-preview')
+@app.post('/api/ppt-reporting-old/chart-preview')
 async def temporary_chart_preview(request: Request, user: SessionUser = Depends(current_user)) -> Response:
     """Render a transient chart from viewer edits without altering stored output."""
     try:
@@ -14356,7 +14418,7 @@ def _store_report_hover_targets(report_id: str, chart_index: int, targets: list[
         return
 
 
-@app.post('/api/reporting-old/chart-preview/hover')
+@app.post('/api/ppt-reporting-old/chart-preview/hover')
 async def temporary_chart_preview_hover(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return semantic chart hit areas for the interactive PNG preview."""
     try:
@@ -14369,7 +14431,7 @@ async def temporary_chart_preview_hover(request: Request, user: SessionUser = De
     return JSONResponse({'targets': targets})
 
 
-@app.post('/api/reporting-old/chart-preview/data')
+@app.post('/api/ppt-reporting-old/chart-preview/data')
 async def temporary_chart_preview_data(request: Request, user: SessionUser = Depends(current_user)) -> Response:
     """Return the bounded filtered chart dataset for the viewer sandbox."""
     try:
@@ -14552,13 +14614,13 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
         'duration_seconds': duration_seconds,
         'duration_label': duration_label,
         'error': str(row['last_error'] or ''),
-        'download_url': f'/reporting-old/jobs/{report_id}/download' if output_available else None,
-        'open_url': f'/reporting-old/jobs/{report_id}/open' if output_available else None,
-        'charts_url': f'/api/reporting-old/jobs/{report_id}/charts' if charts_payload else None,
-        'charts_download_url': f'/reporting-old/jobs/{report_id}/charts/download' if charts_payload else None,
-        'delete_url': f'/reporting-old/jobs/{report_id}/delete',
-        'stop_url': f'/reporting-old/jobs/{report_id}/stop' if status_value == 'processing' else None,
-        'retry_url': f'/reporting-old/jobs/{report_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
+        'download_url': f'/ppt-reporting-old/jobs/{report_id}/download' if output_available else None,
+        'open_url': f'/ppt-reporting-old/jobs/{report_id}/open' if output_available else None,
+        'charts_url': f'/api/ppt-reporting-old/jobs/{report_id}/charts' if charts_payload else None,
+        'charts_download_url': f'/ppt-reporting-old/jobs/{report_id}/charts/download' if charts_payload else None,
+        'delete_url': f'/ppt-reporting-old/jobs/{report_id}/delete',
+        'stop_url': f'/ppt-reporting-old/jobs/{report_id}/stop' if status_value == 'processing' else None,
+        'retry_url': f'/ppt-reporting-old/jobs/{report_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
     }
 
 
@@ -14595,11 +14657,11 @@ def serialize_report_chart_job(row: Any) -> dict[str, Any]:
         'duration_label': duration_label,
         'error': str(row['last_error'] or ''),
         'generation': generation or None,
-        'open_url': f'/api/reporting-old/chart-sets/{generation}' if status_value == 'ready' and generation else None,
-        'charts_download_url': f'/reporting-old/chart-sets/{generation}/download' if chart_set else None,
-        'delete_url': f'/reporting-old/chart-jobs/{job_id}/delete',
-        'stop_url': f'/reporting-old/chart-jobs/{job_id}/stop' if status_value == 'processing' else None,
-        'retry_url': f'/reporting-old/chart-jobs/{job_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
+        'open_url': f'/api/ppt-reporting-old/chart-sets/{generation}' if status_value == 'ready' and generation else None,
+        'charts_download_url': f'/ppt-reporting-old/chart-sets/{generation}/download' if chart_set else None,
+        'delete_url': f'/ppt-reporting-old/chart-jobs/{job_id}/delete',
+        'stop_url': f'/ppt-reporting-old/chart-jobs/{job_id}/stop' if status_value == 'processing' else None,
+        'retry_url': f'/ppt-reporting-old/chart-jobs/{job_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
     }
 
 
@@ -14704,7 +14766,7 @@ def _run_netcheck_report_job_locked(
         }))
 
 
-@app.get('/reporting-old', response_class=HTMLResponse)
+@app.get('/ppt-reporting-old', response_class=HTMLResponse)
 def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
     if not active_workspace:
         return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Reporting.', status_code=status.HTTP_303_SEE_OTHER)
@@ -15193,7 +15255,7 @@ async def chart_builder_preview(request: Request, user: SessionUser = Depends(cu
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.post('/reporting-old/netcheck-cdr')
+@app.post('/ppt-reporting-old/netcheck-cdr')
 def generate_netcheck_cdr_report(
     data_dataset_id: list[int] = Form([]),
     voice_dataset_id: list[int] = Form([]),
@@ -15226,7 +15288,7 @@ def generate_netcheck_cdr_report(
         for dataset in datasets
     ):
         raise HTTPException(status_code=400, detail='Multivendor reporting requires every selected Data, Voice and Speech CDR to have a Workspace Vendor mapping.')
-    template = settings.ppt_templates_dir / TEMPLATE_NAMES[technology]
+    template = settings.powerpoint_templates_dir / TEMPLATE_NAMES[technology]
     available_catalogues = {item['identifier']: item for item in report_catalogue_options(technology)}
     selected_catalogue = next((item for item in available_catalogues.values() if item['active']), None)
     if slides_templates:
@@ -15270,7 +15332,7 @@ def generate_netcheck_cdr_report(
     return JSONResponse({'job_id': report_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@app.post('/reporting-old/netcheck-cdr/charts')
+@app.post('/ppt-reporting-old/netcheck-cdr/charts')
 def generate_netcheck_cdr_charts(
     data_dataset_id: list[int] = Form([]),
     voice_dataset_id: list[int] = Form([]),
@@ -15611,7 +15673,7 @@ def _report_chart_payload(manifest: dict[str, Any], generation: str, output_dir:
             'title': str(item.get('title') or ''),
             'source': str(item.get('source') or ''),
             'chart_type': str(item.get('chart_type') or ''),
-            'image_url': f'/reporting-old/charts/{generation}/{file_name}?v={manifest.get("generated_at", "")}',
+            'image_url': f'/ppt-reporting-old/charts/{generation}/{file_name}?v={manifest.get("generated_at", "")}',
         })
     if not charts:
         return None
@@ -15821,7 +15883,7 @@ def persist_report_charts(
     return payload
 
 
-@app.get('/reporting-old/charts/{generation}/{chart_file}')
+@app.get('/ppt-reporting-old/charts/{generation}/{chart_file}')
 def report_chart_image(generation: str, chart_file: str, user: SessionUser = Depends(current_user)) -> FileResponse:
     if not _valid_report_chart_generation(generation) or not re.fullmatch(r'chart-\d+\.png', chart_file):
         raise HTTPException(status_code=404, detail='Chart not found.')
@@ -15831,7 +15893,7 @@ def report_chart_image(generation: str, chart_file: str, user: SessionUser = Dep
     return FileResponse(chart_path, media_type='image/png')
 
 
-@app.get('/reporting-old/chart-sets/{generation}/download')
+@app.get('/ppt-reporting-old/chart-sets/{generation}/download')
 def download_report_chart_set(generation: str, user: SessionUser = Depends(current_user)) -> FileResponse:
     """Download every PNG belonging to one standalone Chart Set."""
     if not _valid_report_chart_generation(generation) or load_persisted_report_charts(generation) is None:
@@ -15840,7 +15902,7 @@ def download_report_chart_set(generation: str, user: SessionUser = Depends(curre
     return _chart_png_zip_response(directory, f'Chart_Set_{generation}.zip')
 
 
-@app.get('/api/reporting-old/chart-sets/{generation}')
+@app.get('/api/ppt-reporting-old/chart-sets/{generation}')
 def report_chart_set(generation: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
     payload = load_persisted_report_charts(generation)
     if payload is None:
@@ -15927,7 +15989,7 @@ def start_bulk_report_deletion(workspace: Workspace, kind: str, username: str) -
     return job
 
 
-@app.post('/reporting-old/chart-sets/delete-all')
+@app.post('/ppt-reporting-old/chart-sets/delete-all')
 def delete_all_report_chart_sets(user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Remove every standalone Chart Set and every Charts Job row."""
     if not active_workspace:
@@ -15936,7 +15998,7 @@ def delete_all_report_chart_sets(user: SessionUser = Depends(admin_user)) -> JSO
     return JSONResponse({'job_id': job['id'], 'status': job['status']}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@app.get('/api/reporting-old/bulk-deletions/{job_id}')
+@app.get('/api/ppt-reporting-old/bulk-deletions/{job_id}')
 def bulk_report_deletion_status(job_id: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return the state of one bulk Reports or Chart Sets deletion job."""
     with BULK_REPORT_DELETION_JOBS_LOCK:
@@ -15950,7 +16012,7 @@ def bulk_report_deletion_status(job_id: str, user: SessionUser = Depends(current
     })
 
 
-@app.post('/reporting-old/chart-sets/{generation}/delete')
+@app.post('/ppt-reporting-old/chart-sets/{generation}/delete')
 def delete_report_chart_set(generation: str, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     if not _valid_report_chart_generation(generation):
         raise HTTPException(status_code=404, detail='Chart set not found.')
@@ -15964,12 +16026,12 @@ def delete_report_chart_set(generation: str, user: SessionUser = Depends(admin_u
     return JSONResponse({'chart_sets': list_persisted_report_chart_sets()})
 
 
-@app.get('/api/reporting-old/chart-jobs')
+@app.get('/api/ppt-reporting-old/chart-jobs')
 def report_chart_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse:
     return JSONResponse({'jobs': [serialize_report_chart_job(row) for row in repository.list_report_chart_jobs(limit=None)]})
 
 
-@app.post('/reporting-old/chart-jobs/{job_id}/delete')
+@app.post('/ppt-reporting-old/chart-jobs/{job_id}/delete')
 def delete_report_chart_job(job_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     job = repository.get_report_chart_job(job_id)
     if not job:
@@ -15987,7 +16049,7 @@ def delete_report_chart_job(job_id: int, user: SessionUser = Depends(admin_user)
     return JSONResponse({'deleted': job_id, 'generation': generation or None})
 
 
-@app.post('/reporting-old/chart-jobs/{job_id}/stop')
+@app.post('/ppt-reporting-old/chart-jobs/{job_id}/stop')
 def stop_report_chart_job(job_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not repository.stop_report_chart_job(job_id):
         raise HTTPException(status_code=409, detail='Only processing Chart Set jobs can be stopped.')
@@ -15995,7 +16057,7 @@ def stop_report_chart_job(job_id: int, user: SessionUser = Depends(current_user)
     return JSONResponse({'stopped': job_id})
 
 
-@app.post('/reporting-old/chart-jobs/{job_id}/retry')
+@app.post('/ppt-reporting-old/chart-jobs/{job_id}/retry')
 def retry_report_chart_job(job_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not active_workspace:
         raise HTTPException(status_code=409, detail='Open a workspace before retrying Report Charts.')
@@ -16390,7 +16452,7 @@ def build_scoring_job_powerpoint(task_repository: Repository, job_id: int) -> tu
     if not job.get('configuration') and not result.get('configuration'):
         job['configuration'] = task_repository.get_scoring_configuration()
     export_job = _scoring_export_job_with_catalogue_defaults(task_repository, job)
-    template = settings.ppt_templates_dir / TEMPLATE_NAMES['nsa']
+    template = settings.powerpoint_templates_dir / TEMPLATE_NAMES['nsa']
     export_job['_scoring_display_selections'] = prepare_scoring_display_selections(export_job, result, template)
     content = export_scoring_powerpoint(
         export_job, result, template, operator_mapping_groups,
@@ -16510,10 +16572,10 @@ def scoring_job_export(
                 job['configuration'] = export_configuration or task_repository.get_scoring_configuration()
             export_job = _scoring_export_job_with_catalogue_defaults(task_repository, job)
             export_job['_scoring_display_selections'] = prepare_scoring_display_selections(
-                export_job, result, settings.ppt_templates_dir / TEMPLATE_NAMES['nsa'],
+                export_job, result, settings.powerpoint_templates_dir / TEMPLATE_NAMES['nsa'],
             )
             content = export_scoring_powerpoint(
-                export_job, result, settings.ppt_templates_dir / TEMPLATE_NAMES['nsa'],
+                export_job, result, settings.powerpoint_templates_dir / TEMPLATE_NAMES['nsa'],
                 operator_mapping_groups, table_mode=table_mode or 'expanded',
                 vendor_mapping_groups=vendor_mapping_groups,
                 gap_layout=gap_layout or 'end', environment=selected_environment,
@@ -16609,7 +16671,7 @@ def build_scoring_report_document(task_repository: Repository, base: dict[str, A
 
     report = normalize_report_configuration(configuration)
     operator_mapping_groups = task_repository.list_operator_mapping_groups()
-    template = settings.ppt_templates_dir / TEMPLATE_NAMES['nsa']
+    template = settings.powerpoint_templates_dir / TEMPLATE_NAMES['nsa']
     entries = []
     for scenario in report['scenarios']:
         job = _scenario_scoring_job(task_repository, base, scenario, username)
@@ -16753,7 +16815,7 @@ async def scoring_report_configurations_import(
         await package.close()
 
 
-@app.get('/api/reporting-old/jobs')
+@app.get('/api/ppt-reporting-old/jobs')
 def reporting_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse:
     return JSONResponse({'jobs': [serialize_report_job(row) for row in repository.list_report_runs(limit=None)]})
 
@@ -16771,19 +16833,19 @@ def _report_job_file(report_id: int) -> tuple[dict[str, Any], Path]:
     return payload, path
 
 
-@app.get('/reporting-old/jobs/{report_id}/download')
+@app.get('/ppt-reporting-old/jobs/{report_id}/download')
 def download_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
     payload, path = _report_job_file(report_id)
     return FileResponse(path, filename=payload['report_name'], media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
 
 
-@app.get('/reporting-old/jobs/{report_id}/open')
+@app.get('/ppt-reporting-old/jobs/{report_id}/open')
 def open_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
     payload, path = _report_job_file(report_id)
     return FileResponse(path, filename=payload['report_name'], media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation', content_disposition_type='inline')
 
 
-@app.get('/api/reporting-old/jobs/{report_id}/charts')
+@app.get('/api/ppt-reporting-old/jobs/{report_id}/charts')
 def report_job_charts(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     report = repository.get_report_run(report_id)
     payload = _report_job_charts_payload(report) if report else None
@@ -16792,7 +16854,7 @@ def report_job_charts(report_id: int, user: SessionUser = Depends(current_user))
     return JSONResponse(payload)
 
 
-@app.get('/reporting-old/jobs/{report_id}/charts/download')
+@app.get('/ppt-reporting-old/jobs/{report_id}/charts/download')
 def download_report_job_charts(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
     """Download the PNG charts rendered while generating one PowerPoint report."""
     report = repository.get_report_run(report_id)
@@ -16803,7 +16865,7 @@ def download_report_job_charts(report_id: int, user: SessionUser = Depends(curre
     return _chart_png_zip_response(directory, f'{report_name}_charts.zip')
 
 
-@app.get('/reporting-old/jobs/{report_id}/charts/{chart_file}')
+@app.get('/ppt-reporting-old/jobs/{report_id}/charts/{chart_file}')
 def report_job_chart_image(report_id: int, chart_file: str, user: SessionUser = Depends(current_user)) -> FileResponse:
     if not re.fullmatch(r'slide-\d+-chart-\d+\.png', chart_file):
         raise HTTPException(status_code=404, detail='Chart not found.')
@@ -16817,7 +16879,7 @@ def report_job_chart_image(report_id: int, chart_file: str, user: SessionUser = 
     return FileResponse(chart_path, media_type='image/png')
 
 
-@app.post('/reporting-old/jobs/{report_id}/charts/delete')
+@app.post('/ppt-reporting-old/jobs/{report_id}/charts/delete')
 def delete_report_job_charts(report_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Delete only the rendered-chart folder belonging to one report."""
     report = repository.get_report_run(report_id)
@@ -16830,7 +16892,7 @@ def delete_report_job_charts(report_id: int, user: SessionUser = Depends(admin_u
     return JSONResponse({'deleted': report_id})
 
 
-@app.post('/reporting-old/jobs/{report_id}/delete')
+@app.post('/ppt-reporting-old/jobs/{report_id}/delete')
 def delete_report_job(report_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     report = repository.delete_report_run(report_id)
     if not report:
@@ -16840,7 +16902,7 @@ def delete_report_job(report_id: int, user: SessionUser = Depends(admin_user)) -
     return JSONResponse({'deleted': report_id})
 
 
-@app.post('/reporting-old/jobs/{report_id}/stop')
+@app.post('/ppt-reporting-old/jobs/{report_id}/stop')
 def stop_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not repository.stop_report_job(report_id):
         raise HTTPException(status_code=409, detail='Only processing report jobs can be stopped.')
@@ -16848,7 +16910,7 @@ def stop_report_job(report_id: int, user: SessionUser = Depends(current_user)) -
     return JSONResponse({'stopped': report_id})
 
 
-@app.post('/reporting-old/jobs/delete-all')
+@app.post('/ppt-reporting-old/jobs/delete-all')
 def delete_all_report_jobs(user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Delete every persisted PowerPoint report job and its generated file."""
     if not active_workspace:
@@ -16857,7 +16919,7 @@ def delete_all_report_jobs(user: SessionUser = Depends(admin_user)) -> JSONRespo
     return JSONResponse({'job_id': job['id'], 'status': job['status']}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@app.post('/reporting-old/jobs/{report_id}/retry')
+@app.post('/ppt-reporting-old/jobs/{report_id}/retry')
 def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not active_workspace:
         raise HTTPException(status_code=409, detail='Open a workspace before retrying a report.')
@@ -16911,7 +16973,7 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
     generate_tooltips = bool(previous['generate_tooltips'])
     submit_background_task(
         _run_netcheck_report_job, report_id, task_repository, selected, technology, multivendor,
-        catalog_entries, settings.ppt_templates_dir / TEMPLATE_NAMES[technology], destination,
+        catalog_entries, settings.powerpoint_templates_dir / TEMPLATE_NAMES[technology], destination,
         user.username, template_option['name'], generate_tooltips, str(previous['vendor_comparison'] or 'operator_vendor'),
     )
     repository.add_log(user.username, 'retry_report_job', json.dumps({
@@ -16923,8 +16985,8 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
 @app.api_route('/e2e-reporting', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], include_in_schema=False)
 @app.api_route('/e2e-reporting/{legacy_path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], include_in_schema=False)
 def legacy_reporting_redirect(request: Request, legacy_path: str = '') -> RedirectResponse:
-    """Keep E2E Reporting bookmarks from earlier versions working: that module is now Reporting (old)."""
-    destination = '/reporting-old' + (f'/{legacy_path}' if legacy_path else '')
+    """Keep E2E Reporting bookmarks from earlier versions working: that module is now PPT Reporting (old)."""
+    destination = '/ppt-reporting-old' + (f'/{legacy_path}' if legacy_path else '')
     if request.url.query:
         destination += f'?{request.url.query}'
     return RedirectResponse(destination, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
@@ -18587,7 +18649,7 @@ def application_reset_roots() -> list[Path]:
 
 def _reset_protected_paths() -> list[Path]:
     """Folders a reset never deletes: the code, the shipped assets and the user's home."""
-    paths = [PROJECT_ROOT, settings.template_dir, settings.static_dir, settings.ppt_templates_dir, settings.assets_dir, Path.home()]
+    paths = [PROJECT_ROOT, settings.template_dir, settings.static_dir, settings.powerpoint_templates_dir, settings.assets_dir, Path.home()]
     return [Path(path).resolve() for path in paths]
 
 
@@ -20821,7 +20883,7 @@ def rename_report_catalogue(
             previous_identifier = catalogue_id
             repository.rename_report_template(technology, catalogue_id, new_identifier, updated_by=user.username)
             catalogue_id = new_identifier
-            rename_dashboards = getattr(sys.modules[__name__], 'e2e_dashboard_rename_template_references', None)
+            rename_dashboards = getattr(sys.modules[__name__], 'ppt_dashboard_rename_template_references', None)
             if callable(rename_dashboards):
                 rename_dashboards(technology, previous_identifier, new_identifier, user.username)
     except ValueError as exc:
@@ -20941,7 +21003,7 @@ def reconcile_saved_template_comments(
     previous_content: bytes, entries: list[CatalogEntry],
 ) -> None:
     """Update Dashboard slide comments after the template response has returned."""
-    reconcile_comments = getattr(sys.modules[__name__], 'e2e_dashboard_reconcile_template_slide_comments', None)
+    reconcile_comments = getattr(sys.modules[__name__], 'ppt_dashboard_reconcile_template_slide_comments', None)
     if not callable(reconcile_comments):
         return
     try:
@@ -21979,7 +22041,7 @@ templates.env.filters['two_decimals'] = format_two_decimals
 templates.env.filters['campaign_label'] = lambda value: compact_campaign_value(value) or value
 
 # Register the template-driven dashboard workspace after the shared reporting helpers.
-from src.modules.e2e_dashboards import (
+from src.modules.ppt_dashboards import (
     DASHBOARD_CHART_MODEL_CACHE_VERSION,
     DASHBOARD_PREVIEW_MANIFEST_VERSION,
     DASHBOARD_RENDER_CACHE_VERSION,

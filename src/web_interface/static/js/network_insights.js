@@ -396,7 +396,7 @@
       <td class="num">${number(row.high_interference_share)}%</td><td>${classBar(row.sinr_classes)}</td></tr>`).join('')}</tbody>`;
   };
 
-  // In-chart zoom controls, as in E2E Dashboards: zoom out/in, level, reset
+  // In-chart zoom controls, as in PPT Dashboards: zoom out/in, level, reset
   // and pan arrows while zoomed. Dragging a rectangle also zooms.
   const panPaths = {left: 'M15 5 8 12l7 7', right: 'm9 5 7 7-7 7', up: 'M5 15 12 8l7 7', down: 'm5 9 7 7 7-7'};
   const renderChart = (canvas, payload) => {

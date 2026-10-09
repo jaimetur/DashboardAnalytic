@@ -4,27 +4,24 @@ For every KPI of every scoring group, the tests that make the KPI lose points ge
 weight: the tests that miss the KPI condition (a failed call, POLQA below 1.6, a
 transfer below 2 Mbit/s...) weigh one each, and for averages, medians and P90 each test
 weighs what it misses the KPI's High threshold by. The share of each area (City,
-Region or Cluster of the CDR rows, and the map area containing the test: the ITL3 area (the UK
-NUTS3 level) or the area of the workspace's Map Areas of its country, see ``map_areas``) is the
+Region or Cluster of the CDR rows, and the map area containing the test: the area of the Map Areas
+of its country, such as the ITL3 areas of the UK, see ``map_areas``) is the
 sum of its tests' weights over the total, so the points an operator loses in a KPI can be placed
 on a map with any scoring's points. The points each City (or route) loses in each map area are
 kept too (``City|Area``), to show the losses of a City alone on the map.
 
-The ITL3 boundaries are the ONS "International Territorial Level 3 (January 2025)
-Boundaries UK BUC" (Open Government Licence v3.0) in ``assets/geo``. Workspaces with a
-Clusters or Region Mapping dataset also map the Cluster and Region losses on its polygons.
+Workspaces with a Clusters or Region Mapping dataset also map the Cluster and Region losses on
+its polygons.
 """
 from __future__ import annotations
 
 import json
 import re
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from src.config import PROJECT_ROOT
 
 AREA_FIELDS = {'City': ('City', 'G_Level_4'), 'Region': ('Region',), 'Cluster': ('Cluster',)}
 COORDINATE_SOURCES = {
@@ -32,13 +29,11 @@ COORDINATE_SOURCES = {
     'voice': (('Call_Start_Latitude_A', 'Call_Start_Longitude_A'),),
     'speech': (('Recording_Latitude', 'Recording_Longitude'), ('Playing_Latitude', 'Playing_Longitude')),
 }
-BOUNDARY_FIELDS = {'ITL3': ('uk-itl3-2025.geojson', 'ITL325NM')}
 # The map areas of every country (the ITL3 areas in the UK) and the losses of each City in each one.
 AREA = 'Area'
 CITY_AREA = 'City|Area'
 CITY_AREA_SEPARATOR = '\x1f'
 MAP_FIELDS = (*AREA_FIELDS, AREA)
-BOUNDARY_DIRECTORY = PROJECT_ROOT / 'assets' / 'geo'
 NOT_SPECIFIED = 'Not specified'
 AREA_COLUMN = '__area_{}'
 LATITUDE, LONGITUDE, PLACE = '__latitude', '__longitude', '__place'
@@ -58,7 +53,7 @@ def source_columns(kind: str) -> list[str]:
 def attach_location(frame: pd.DataFrame, source: pd.DataFrame, kind: str, resolve, areas=None) -> None:
     """Copy the area and coordinate columns of the source rows into the scoring frame.
 
-    ``areas`` (a ``map_areas.AreaIndex``) names the map area of each test; without it, the UK's.
+    ``areas`` (a ``map_areas.AreaIndex``) names the map area of each test; without it, the ones shipped.
     """
     for field, aliases in AREA_FIELDS.items():
         column = next((resolved for alias in aliases if (resolved := resolve(source.columns, alias)) is not None), None)
@@ -79,59 +74,10 @@ def attach_location(frame: pd.DataFrame, source: pd.DataFrame, kind: str, resolv
     frame[PLACE] = (source[level_2].astype('string').str.casefold() == 'city') if level_2 is not None else True
 
 
-@lru_cache(maxsize=4)
-def _boundary_index(field: str):
-    """Polygons, names and spatial index of a bundled boundary layer (None when missing)."""
-    from shapely import STRtree
-    from shapely.geometry import shape
-
-    file_name, name_field = BOUNDARY_FIELDS[field]
-    try:
-        document = json.loads((BOUNDARY_DIRECTORY / file_name).read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        return None
-    features = [feature for feature in document.get('features', []) if feature.get('geometry')]
-    geometries = [shape(feature['geometry']) for feature in features]
-    names = [str(feature['properties'][name_field]) for feature in features]
-    return geometries, names, STRtree(geometries)
-
-
-def boundary_names(field: str, latitude: pd.Series, longitude: pd.Series) -> pd.Series:
-    """Name of the boundary polygon containing each coordinate (missing outside every polygon)."""
-    import numpy as np
-    from shapely import points
-
-    names = pd.Series(pd.NA, index=latitude.index, dtype='string')
-    index = _boundary_index(field)
-    located = latitude.notna() & longitude.notna() & ~((latitude == 0) & (longitude == 0))
-    if index is None or not located.any():
-        return names
-    _geometries, polygon_names, tree = index
-    rows, polygons = tree.query(points(longitude[located].to_numpy(), latitude[located].to_numpy()),
-                                predicate='intersects')
-    if len(rows):
-        first = pd.Series(polygons, index=rows).groupby(level=0).first()
-        positions = np.flatnonzero(located.to_numpy())[first.index.to_numpy()]
-        names.iloc[positions] = [polygon_names[polygon] for polygon in first.to_numpy()]
-    return names
-
-
 def _rings(geometry, precision: int) -> list[list[list[float]]]:
     polygons = geometry.geoms if geometry.geom_type == 'MultiPolygon' else [geometry]
     return [[[round(x, precision), round(y, precision)] for x, y in polygon.exterior.coords]
             for polygon in polygons if not polygon.is_empty]
-
-
-def bundled_boundaries(field: str, precision: int = 3) -> dict[str, list[list[list[float]]]]:
-    """Outer rings ([longitude, latitude]) of each polygon of a bundled boundary layer."""
-    index = _boundary_index(field) if field in BOUNDARY_FIELDS else None
-    if index is None:
-        return {}
-    geometries, names, _tree = index
-    boundaries: dict[str, list] = {}
-    for name, geometry in zip(names, geometries):
-        boundaries.setdefault(name, []).extend(_rings(geometry, precision))
-    return boundaries
 
 
 def mapping_boundaries(
@@ -165,16 +111,20 @@ def mapping_boundaries(
 def map_boundaries(result: dict[str, Any] | None, field: str) -> dict[str, list[list[list[float]]]]:
     """Polygons of a points-lost field: the map areas or the workspace mapping saved with the job.
 
-    The map areas are the bundled ITL3 areas when the tests are in the UK and the areas of the other
-    countries saved with the job.
+    The map areas shipped with the application (or the whole country) are read from the application and
+    the others are saved with the job.
     """
     document = result.get('points_loss') if isinstance(result, dict) else None
     if field == AREA:
         areas = (document or {}).get('map_areas') if isinstance(document, dict) else None
         if not isinstance(areas, dict):
             return {}
-        uk = bundled_boundaries('ITL3') if any(item.get('code') == 'GBR' for item in areas.get('countries') or []) else {}
-        return {**uk, **(areas.get('boundaries') or {})}
+        from src.modules.map_areas import bundled_rings
+        shipped = {}
+        for item in areas.get('countries') or []:
+            if item.get('bundled'):
+                shipped.update(bundled_rings(item['code']))
+        return {**shipped, **(areas.get('boundaries') or {})}
     saved = (document or {}).get('boundaries') if isinstance(document, dict) else None
     return dict((saved or {}).get(field) or {})
 
@@ -262,9 +212,8 @@ class AreaGeometry:
         self.areas: dict[str, dict[str, dict[str, Any]]] = {field: {} for field in AREA_FIELDS}
         self.background: list[list[float]] = []
         self._seen = 0
-        # The map areas with tests, and a sample of the tests outside every map area.
+        # The map areas with tests.
         self.used_areas: set[str] = set()
-        self.unplaced: list[tuple[float, float]] = []
 
     def add(self, frame: pd.DataFrame) -> None:
         if LATITUDE not in frame or LONGITUDE not in frame:
@@ -276,11 +225,6 @@ class AreaGeometry:
         map_area = AREA_COLUMN.format(AREA)
         if map_area in located:
             self.used_areas.update(str(name) for name in located[map_area].dropna().unique())
-            outside = located[located[map_area].isna()]
-            room = 5000 - len(self.unplaced)
-            if room > 0 and not outside.empty:
-                sample = outside[[LATITUDE, LONGITUDE]].iloc[::max(1, len(outside) // room)].head(room)
-                self.unplaced.extend((float(lat), float(lon)) for lat, lon in sample.itertuples(index=False))
         step = max(1, len(located) // 1500)
         for latitude, longitude in located[[LATITUDE, LONGITUDE]].iloc[::step].itertuples(index=False):
             self._seen += 1
@@ -309,14 +253,8 @@ class AreaGeometry:
                                            for lat, lon in sample.itertuples(index=False))
 
     def map_areas(self, index) -> dict[str, Any]:
-        """The map areas of the tests (see ``map_areas.AreaIndex.document``) and the countries without them."""
-        from src.modules.map_areas import country_codes
-
-        unplaced = pd.DataFrame(self.unplaced, columns=['latitude', 'longitude'])
-        codes = country_codes(unplaced['latitude'], unplaced['longitude']).dropna() if not unplaced.empty else pd.Series(dtype='string')
-        mapped = {code for code, _label, _areas in index.layers}
-        missing = [str(code) for code, count in codes.value_counts().items() if count >= 20 and code not in mapped]
-        return index.document(self.used_areas, missing)
+        """The map areas of the tests (see ``map_areas.AreaIndex.document``)."""
+        return index.document(self.used_areas)
 
     def document(self) -> dict[str, Any]:
         areas = {}

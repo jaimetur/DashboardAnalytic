@@ -88,16 +88,16 @@
 </details>
 </div>
 {% endmacro %}
-  <details class="panel collapsible-panel report-catalogue-panel" open data-panel-state-key="admin:slides-templates-management">
+  <details class="panel collapsible-panel report-catalogue-panel" id="ppt-templates-management" open data-panel-state-key="admin:ppt-templates-management">
     <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">PowerPoint reporting</p>
-        <h2>Report Templates Management</h2>
+        <h2>PPT Templates Management</h2>
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
     <div class="collapsible-panel-body">
-    <h3 class="templates-library-heading">Import Report Template</h3>
+    <h3 class="templates-library-heading">Import PPT Template</h3>
     <p class="lede">Import a Report Template CSV, select whether it is for NSA or SA, and manage the stored workspace templates below.</p>
     {% if catalogue_error %}<span hidden data-catalogue-import-error>{{ catalogue_error }}</span>{% endif %}
     {% if catalogue_notice %}<span hidden data-catalogue-import-notice>{{ catalogue_notice }}</span>{% endif %}
@@ -112,7 +112,7 @@
       <input type="hidden" name="overwrite_existing" value="0" data-catalogue-overwrite>
       <button type="submit">Import</button>
     </form>
-    <h3 class="templates-library-heading">Report Templates Library</h3>
+    <h3 class="templates-library-heading">PPT Templates Library</h3>
     <div class="table-wrap catalogue-workspace-table-wrap">
       <table class="catalogue-workspace-table">
         <thead><tr><th>Template name</th><th>NR Mode</th><th>Created</th><th>Last Updated</th><th>Last Updated by</th><th>Default</th><th>Actions</th></tr></thead>
@@ -257,6 +257,7 @@
       {% if active_workspace %}
       <p class="lede">How every chart, table, legend, filter and PowerPoint or Word report shows and orders the campaigns of <strong>"{{ active_workspace.name }}"</strong>. The label format applies to every campaign, so new campaigns follow it without editing the map; filters and stored CDR values keep the original campaigns.</p>
       <script id="campaign-map-campaigns" type="application/json">{{ workspace_campaigns | default([]) | tojson }}</script>
+      <script id="campaign-map-default" type="application/json">{{ default_campaign_map | default({}) | tojson }}</script>
       <div class="campaign-maps" data-campaign-maps>
         <div class="campaign-map-settings">
           <section>
@@ -288,7 +289,7 @@
         </section>
         <p class="campaign-map-message" data-campaign-message role="status" aria-live="polite"></p>
         <div class="campaign-map-actions">
-          <button type="button" class="secondary-button" data-campaign-default title="Fill the default map: {year}-Q{quarter}{-mode}, then NSA and SA, no exceptions">Default map</button>
+          <button type="button" class="secondary-button" data-campaign-default title="Fill the default map of the application">Default map</button>
           <button type="button" data-campaign-save>Save Campaign Maps</button>
         </div>
       </div>
@@ -305,7 +306,7 @@
     </summary>
     <div class="collapsible-panel-body">
       {% if active_workspace %}
-      <p class="lede">The administrative areas the Points Lost Map of Scoring &amp; GAP Analysis colours in each country of the tests of <strong>"{{ active_workspace.name }}"</strong>, such as municipalities in Spain or counties in the USA. The United Kingdom always uses the bundled ITL3 areas. Calculate the scoring again after adding or changing the areas of a country.</p>
+      <p class="lede">The administrative areas the Points Lost Map of Scoring &amp; GAP Analysis colours in each country of the tests of <strong>"{{ active_workspace.name }}"</strong>, such as municipalities in Spain or counties in the USA. A country without areas is coloured as one area, the whole country. Calculate the scoring again after adding or changing the areas of a country.</p>
       <div class="campaign-maps map-areas" data-map-areas>
         <section>
           <h3>Countries of the tests</h3>
@@ -377,7 +378,7 @@
 
   <div class="confirm-overlay report-template-editor-overlay" data-admin-template-editor hidden>
     <section class="confirm-panel report-template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-template-editor-title">
-      <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="admin-template-editor-title" data-admin-template-editor-title>Edit Report Template</h3></div><button type="button" class="report-chart-viewer-close" data-admin-template-editor-close aria-label="Close template editor">×</button></header>
-      <iframe class="report-template-editor-frame" data-admin-template-editor-frame title="Report Templates Editor"></iframe>
+      <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="admin-template-editor-title" data-admin-template-editor-title>Edit PPT Template</h3></div><button type="button" class="report-chart-viewer-close" data-admin-template-editor-close aria-label="Close template editor">×</button></header>
+      <iframe class="report-template-editor-frame" data-admin-template-editor-frame title="PPT Templates Editor"></iframe>
     </section>
   </div>

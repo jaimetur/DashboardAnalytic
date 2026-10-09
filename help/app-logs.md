@@ -24,7 +24,7 @@ App Logs is available to authenticated users with the existing application roles
 
 Use the filters to narrow entries by **Date**, **User**, **Executed by**, **Type** and **Action**. User matching is case-insensitive and usernames display in lowercase. Select **Clear Filters** to restore the full list, or **Refresh** to request the latest entries. The table refreshes automatically every five seconds.
 
-Events include authentication, ingestion and processing, report and Dashboard generation, configuration changes, imports, exports, backups and transfers. Background events retain the requester and `system` executor separately.
+Events include authentication, ingestion and processing, report and Dashboard generation, configuration changes, imports, exports, backups and transfers. A Scoring & GAP Analysis calculation that fails writes a `scoring_job_failed` event with its error and where it happened. Background events retain the requester and `system` executor separately.
 
 ## Execution Log
 

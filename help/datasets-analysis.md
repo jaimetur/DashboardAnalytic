@@ -3,7 +3,7 @@
 CDR Analysis provides on-demand KPI analysis for one processed CDR in the active workspace.
 
 > [!NOTE]
-> **One dataset at a time.** Use this module for a focused investigation of one processed Data, Voice or Speech CDR. Use E2E Dashboards for a complete template across multiple datasets.
+> **One dataset at a time.** Use this module for a focused investigation of one processed Data, Voice or Speech CDR. Use PPT Dashboards for a complete template across multiple datasets.
 
 > [!TIP]
 > **Inspect before exporting.** Update Analysis after changing the controls, then inspect sample counts and the filtered records.
@@ -64,7 +64,7 @@ Controls adapt to the selected dataset.
 
 - **CDF Curve** shows the empirical KPI distribution. **Global CDF Comparison** and **Compare CDF by** draw one curve per value of the chosen dimension (Operator by default, listed first), up to eight curves.
 - **Group Benchmark** compares the selected aggregation. Bar labels that do not fit are rotated.
-- Every chart has floating zoom controls in its top-right corner (−, level, + and reset) and, as in E2E Dashboards, zooms into a rectangle dragged over it: a CDF narrows its X and Y range, and a bar chart widens to fit the selected bars and scrolls to them. Hovering a bar shows its value, and hovering a CDF shows the probability of every curve at that value.
+- Every chart has floating zoom controls in its top-right corner (−, level, + and reset) and, as in PPT Dashboards, zooms into a rectangle dragged over it: a CDF narrows its X and Y range, and a bar chart widens to fit the selected bars and scrolls to them. Hovering a bar shows its value, and hovering a CDF shows the probability of every curve at that value.
 - **Visible X Range** has two handles to adjust the start and the end of the CDF axis. By default it starts where the first curve reaches 5% of its samples and ends where every curve reaches 95%, leaving out nearly empty tails; a rectangle zoom moves both handles and reset returns to these defaults.
 - **Grouped Percentiles** and **Processed Metrics** show decimal values with two digits; Processed Metrics lists Cluster after Region. Grouped by Operator, Vendor or Operator_Vendor, the tables, the percentiles, the bars and the CDF curves follow the order of the Operator Maps and Vendor Maps tables of Workspace Config; values that are not in the maps follow alphabetically (mixed groups before operators without a vendor).
 - Metric cards provide compact numerical summaries.
@@ -107,9 +107,9 @@ Empty fixed, derived and Auto-calculated fields remain visible. Stronger header 
 
 **Export PowerPoint** and **Export Word** open one dialog. With **Use the current filters, metrics and chart settings** (checked when an analysis is open) the document is the open CDR exactly as on screen: its metrics and filters, each chart's **Compare by** and **Compare CDF by**, and each CDF's **Visible X Range**. Unchecking it exports the CDRs selected in the dialog (the open CDR by default; CDR Data, Voice and Speech panels with **Select All** each) with every KPI and no filters, the same summary available as a [Reporting](reporting.md) artifact.
 
-Word exports contain the same report as PowerPoint, one landscape page per slide (rendered with LibreOffice when it is installed, as in the Docker image). PowerPoint exports use the workspace PowerPoint template (`assets/ppt-templates/Template_CDR_analysis.pptx`): a title slide names the CDR and lists its type, metrics and every filter, the content slides use the template's title layout and the deck ends with its closing slide. Exported documents are also kept in the `output/reports/cdr-analysis/` folder of the workspace, where an identical export of the open CDR is reused instead of generated again.
+Word exports contain the same report as PowerPoint, one landscape page per slide (rendered with LibreOffice when it is installed, as in the Docker image). PowerPoint exports use the workspace PowerPoint template (`assets/powerpoint-templates/Template_01.pptx`): a title slide names the CDR and lists its type, metrics and every filter, the content slides use the template's title layout and the deck ends with its closing slide. Exported documents are also kept in the `output/reports/cdr-analysis/` folder of the workspace, where an identical export of the open CDR is reused instead of generated again.
 
-Analysis filters do not overwrite stored dataset rows. Analysis filters do not overwrite stored dataset rows. For a complete template-driven report, use E2E Dashboards or the restricted Reporting (old) workflow.
+Analysis filters do not overwrite stored dataset rows. Analysis filters do not overwrite stored dataset rows. For a complete template-driven report, use PPT Dashboards or the restricted PPT Reporting (old) workflow.
 
 ## Example investigation
 

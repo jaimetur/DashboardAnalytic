@@ -30,7 +30,7 @@ def test_template_contains_every_fixed_grid_size_and_comment_variant():
     from pptx import Presentation
     from src.modules.cdr_reporting import _layout_chart_frames
 
-    deck = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    deck = Presentation('assets/powerpoint-templates/Template_01.pptx')
     layouts = {canonical_layout_name(layout.name): layout for layout in deck.slide_layouts}
 
     for rows in range(1, 7):
@@ -44,7 +44,7 @@ def test_template_contains_every_fixed_grid_size_and_comment_variant():
 def test_template_contains_all_dynamic_axes_and_comment_variants():
     from pptx import Presentation
 
-    deck = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    deck = Presentation('assets/powerpoint-templates/Template_01.pptx')
     layouts = {canonical_layout_name(layout.name): layout for layout in deck.slide_layouts}
 
     for name in DYNAMIC_LAYOUTS:
@@ -105,7 +105,7 @@ def test_template_editor_layout_suggestions_include_supported_names_only():
 def test_visible_physical_layout_block_is_unique_and_sorted_after_black_title_page():
     from pptx import Presentation
 
-    deck = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    deck = Presentation('assets/powerpoint-templates/Template_01.pptx')
     physical = [canonical_layout_name(layout.name) for layout in deck.slide_layouts]
     physical_visible = [name for name in physical if selectable_layout_name(name)]
     fixed_names = {

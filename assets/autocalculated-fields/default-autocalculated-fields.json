@@ -1,0 +1,95 @@
+[
+  {
+    "name": "Call_Family",
+    "sources": [
+      "cdr-voice",
+      "cdr-speech"
+    ],
+    "default": "CALL",
+    "default_from": "",
+    "expression": "",
+    "rules": [
+      {
+        "when": "[Session_Type] CONTAINS MultiRAB",
+        "value": "MultiRAB"
+      },
+      {
+        "when": "[Session_Type] CONTAINS WhatsApp",
+        "value": "WhatsApp"
+      },
+      {
+        "when": "[Session_Type] = CALL",
+        "value": "VoLTE"
+      }
+    ]
+  },
+  {
+    "name": "Test_Family",
+    "sources": [
+      "cdr-data"
+    ],
+    "default": "",
+    "default_from": "[Type_of_Test] OR [Test_Type]",
+    "expression": "",
+    "rules": [
+      {
+        "when": "[Test_Name] CONTAINS YouTube",
+        "value": "YouTube"
+      },
+      {
+        "when": "[Test_Name] CONTAINS FDFS",
+        "value": "FDFS"
+      },
+      {
+        "when": "[Test_Name] CONTAINS FDTT",
+        "value": "FDTT"
+      }
+    ]
+  },
+  {
+    "name": "Test_Result_Group",
+    "sources": [
+      "cdr-data",
+      "cdr-voice",
+      "cdr-speech"
+    ],
+    "default": "",
+    "default_from": "",
+    "expression": "",
+    "rules": [
+      {
+        "when": "[Test_Result] OR [Call_Status] OR [status] IN (Completed, Visible Completed)",
+        "value": "Success"
+      },
+      {
+        "when": "[Test_Result] OR [Call_Status] OR [status] IN (Cutoff, Failed)",
+        "value": "Failure"
+      }
+    ]
+  },
+  {
+    "name": "RAT_Group",
+    "sources": [
+      "cdr-data",
+      "cdr-voice",
+      "cdr-speech"
+    ],
+    "default": "",
+    "default_from": "[RAT] OR [RAT_A]",
+    "expression": "",
+    "rules": [
+      {
+        "when": "[RAT] OR [RAT_A] IN (EN-DC/LTE, EN-DC/LTE/GSM)",
+        "value": "ENDC Mixed"
+      },
+      {
+        "when": "[RAT] OR [RAT_A] IN (NE-DC, NR SA)",
+        "value": "NR SA"
+      },
+      {
+        "when": "[RAT] OR [RAT_A] IN (NE-DC/EN-DC, NE-DC/EN-DC/LTE, NE-DC/GSM, NE-DC/LTE, NE-DC/LTE/GSM, NR SA/EN-DC, NR SA/EN-DC/LTE, NR SA/LTE)",
+        "value": "NR SA Mixed"
+      }
+    ]
+  }
+]

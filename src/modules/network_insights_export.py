@@ -577,7 +577,7 @@ def export_network_insights_powerpoint(destination: Path, analysis: dict[str, An
     from src.config import settings
     from src.modules.cdr_reporting import _named_slide_layout, _remove_all_slides, _set_structural_slide_text
 
-    presentation = Presentation(template or settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
+    presentation = Presentation(template or settings.powerpoint_templates_dir / 'Template_01.pptx')
     _remove_all_slides(presentation)
     cover = presentation.slides.add_slide(_named_slide_layout(presentation, 'Title Page'))
     _set_structural_slide_text(cover, 'Summary Network Insights', 'DriveTest Analyzer')

@@ -1,0 +1,178 @@
+{
+  "CAN": {
+    "country_code": "CAN",
+    "level": "ADM3",
+    "level_label": "census subdivision",
+    "source": "Statistics Canada (StatCan)",
+    "license": "Open Data Commons Open Database License 1.0",
+    "attribution": "Statistics Canada (StatCan) via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2016",
+    "unit_count": 5031,
+    "file": "CAN.json.gz"
+  },
+  "CHE": {
+    "country_code": "CHE",
+    "level": "ADM1",
+    "level_label": "canton",
+    "source": "Federal Office of Topography swisstopo",
+    "license": "Federal Office of Topography swisstopo License",
+    "attribution": "Federal Office of Topography swisstopo via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2022",
+    "unit_count": 26,
+    "file": "CHE.json.gz"
+  },
+  "DEU": {
+    "country_code": "DEU",
+    "level": "ADM3",
+    "level_label": "independent city or district",
+    "source": "Federal Agency for Cartography and Geodesy",
+    "license": "Data license Germany - Attribution - Version 2.0",
+    "attribution": "Federal Agency for Cartography and Geodesy via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2021",
+    "unit_count": 401,
+    "file": "DEU.json.gz"
+  },
+  "ESP": {
+    "country_code": "ESP",
+    "level": "ADM2",
+    "level_label": "province",
+    "source": "El Instituto Nacional de Estadística",
+    "license": "National Institute of Statistics (INE) Data License",
+    "attribution": "El Instituto Nacional de Estadística via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2018",
+    "unit_count": 52,
+    "file": "ESP.json.gz"
+  },
+  "FRA": {
+    "country_code": "FRA",
+    "level": "ADM3",
+    "level_label": "arrondissement",
+    "source": "Institut national de l'information géographique et forestière (IGN-F)",
+    "license": "Etalab Open License 2.0",
+    "attribution": "Institut national de l'information géographique et forestière (IGN-F) via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2022",
+    "unit_count": 320,
+    "file": "FRA.json.gz"
+  },
+  "GBR": {
+    "country_code": "GBR",
+    "level": "ITL3",
+    "level_label": "ITL3 area",
+    "source": "Office for National Statistics",
+    "license": "Open Government Licence v3.0",
+    "attribution": "Office for National Statistics; contains OS data © Crown copyright and database right 2025",
+    "year": "2025",
+    "unit_count": 182,
+    "file": "GBR.json.gz"
+  },
+  "IND": {
+    "country_code": "IND",
+    "level": "ADM2",
+    "level_label": "district",
+    "source": "Pathways Data Pvt. Ltd., lgdirectory.gov.in",
+    "license": "Open Data Commons Open Database License 1.0",
+    "attribution": "Pathways Data Pvt. Ltd., lgdirectory.gov.in via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2021",
+    "unit_count": 735,
+    "file": "IND.json.gz"
+  },
+  "ITA": {
+    "country_code": "ITA",
+    "level": "ADM3",
+    "level_label": "province",
+    "source": "ISTAT, National Institute of Statistics",
+    "license": "Creative Commons Attribution 3.0 License",
+    "attribution": "ISTAT, National Institute of Statistics via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2023",
+    "unit_count": 107,
+    "file": "ITA.json.gz"
+  },
+  "JPN": {
+    "country_code": "JPN",
+    "level": "ADM1",
+    "level_label": "prefecture",
+    "source": "OpenStreetMap, Wambacher",
+    "license": "Open Data Commons Open Database License 1.0",
+    "attribution": "OpenStreetMap, Wambacher via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2017",
+    "unit_count": 47,
+    "file": "JPN.json.gz"
+  },
+  "KOR": {
+    "country_code": "KOR",
+    "level": "ADM2",
+    "level_label": "district",
+    "source": "geoBoundaries, citypopulation.de",
+    "license": "Creative Commons Attribution 3.0 License",
+    "attribution": "geoBoundaries, citypopulation.de via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2020",
+    "unit_count": 228,
+    "file": "KOR.json.gz"
+  },
+  "MEX": {
+    "country_code": "MEX",
+    "level": "ADM2",
+    "level_label": "municipio",
+    "source": "World Bank",
+    "license": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+    "attribution": "World Bank via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2012",
+    "unit_count": 2457,
+    "file": "MEX.json.gz"
+  },
+  "NLD": {
+    "country_code": "NLD",
+    "level": "ADM1",
+    "level_label": "province",
+    "source": "National Georegister",
+    "license": "CC0 1.0 Universal (CC0 1.0) Public Domain Dedication",
+    "attribution": "National Georegister via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2022",
+    "unit_count": 12,
+    "file": "NLD.json.gz"
+  },
+  "POL": {
+    "country_code": "POL",
+    "level": "ADM2",
+    "level_label": "county",
+    "source": "Geoboundaries, OpenStreetMap",
+    "license": "Open Data Commons Open Database License 1.0",
+    "attribution": "Geoboundaries, OpenStreetMap via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2017",
+    "unit_count": 380,
+    "file": "POL.json.gz"
+  },
+  "PRT": {
+    "country_code": "PRT",
+    "level": "ADM1",
+    "level_label": "district",
+    "source": "DG Territory",
+    "license": "Open Data Commons Open Database License 1.0",
+    "attribution": "DG Territory via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2016",
+    "unit_count": 20,
+    "file": "PRT.json.gz"
+  },
+  "ROU": {
+    "country_code": "ROU",
+    "level": "ADM1",
+    "level_label": "county",
+    "source": "World Bank",
+    "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+    "attribution": "World Bank via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2017",
+    "unit_count": 42,
+    "file": "ROU.json.gz"
+  },
+  "USA": {
+    "country_code": "USA",
+    "level": "ADM2",
+    "level_label": "county",
+    "source": "United States Census Bureau, MAF/TIGER Database",
+    "license": "Public Domain",
+    "attribution": "United States Census Bureau, MAF/TIGER Database via geoBoundaries (William & Mary geoLab), www.geoboundaries.org",
+    "year": "2018",
+    "unit_count": 3227,
+    "file": "USA.json.gz"
+  }
+}

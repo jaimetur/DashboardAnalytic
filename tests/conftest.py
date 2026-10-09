@@ -45,11 +45,11 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     output_dir = data_dir / "output"
     export_dir = data_dir / "exports"
     slides_templates_dir = data_dir / "slides-templates"
-    ppt_templates_dir = data_dir / "ppt-templates"
+    powerpoint_templates_dir = data_dir / "powerpoint-templates"
 
-    for directory in (config_dir, input_dir, output_dir, export_dir, slides_templates_dir, ppt_templates_dir):
+    for directory in (config_dir, input_dir, output_dir, export_dir, slides_templates_dir, powerpoint_templates_dir):
         directory.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(app_module.PROJECT_ROOT / "assets" / "ppt-templates" / "Template_CDR_analysis.pptx", ppt_templates_dir / "Template_CDR_analysis.pptx")
+    shutil.copy2(app_module.PROJECT_ROOT / "assets" / "powerpoint-templates" / "Template_01.pptx", powerpoint_templates_dir / "Template_01.pptx")
     nsa_target = slides_templates_dir / "default" / "nsa" / "NSA Slide Template.csv"
     nsa_target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(Path(__file__).parent / "fixtures" / "NSA Slide Template.csv", nsa_target)
@@ -66,7 +66,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     object.__setattr__(settings, "output_dir", output_dir)
     object.__setattr__(settings, "export_dir", export_dir)
     object.__setattr__(settings, "slides_templates_dir", slides_templates_dir)
-    object.__setattr__(settings, "ppt_templates_dir", ppt_templates_dir)
+    object.__setattr__(settings, "powerpoint_templates_dir", powerpoint_templates_dir)
     app_module.repository.db_path = settings.database_path
     app_module.repository.set_global_database(settings.database_path)
     # Backups resolve their folder from the application data directory, which
@@ -94,9 +94,9 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 @pytest.fixture()
-def reporting_old(client: TestClient) -> TestClient:
-    """Reporting (old) is off for every user by default; the tests of the old module turn it on."""
+def ppt_reporting_old(client: TestClient) -> TestClient:
+    """PPT Reporting (old) is off for every user by default; the tests of the old module turn it on."""
     rules = app_module.feature_activation_settings()
-    rules['reporting-old'] = {'default': 'all'}
+    rules['ppt-reporting-old'] = {'default': 'all'}
     app_module.save_feature_activation_settings(rules)
     return client

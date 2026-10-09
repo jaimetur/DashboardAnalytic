@@ -1314,7 +1314,7 @@ function setupChartInteractions(container) {
   svg.addEventListener('mouseleave', hideHover);
   svg.addEventListener('pointerleave', hideHover);
   container.addEventListener('pointerleave', hideHover);
-  // Zoom controls as in E2E Dashboards: −, level, + and reset; the chart scrolls horizontally when zoomed.
+  // Zoom controls as in PPT Dashboards: −, level, + and reset; the chart scrolls horizontally when zoomed.
   const viewport = document.createElement('div');
   viewport.className = 'chart-zoom-viewport';
   svg.before(viewport); viewport.append(svg);
@@ -1341,7 +1341,7 @@ function setupChartInteractions(container) {
     }
     apply(1);
   });
-  // Box zoom as in E2E Dashboards: drag a rectangle over the chart to zoom into it.
+  // Box zoom as in PPT Dashboards: drag a rectangle over the chart to zoom into it.
   const toViewBox = (event) => {
     const box = svg.getBoundingClientRect();
     return {
@@ -4501,7 +4501,7 @@ document.querySelectorAll('[data-open-template-editor]').forEach((button) => {
   button.addEventListener('click', () => {
     if (!adminTemplateEditor || !adminTemplateEditorFrame) return;
     adminTemplateEditorFrame.src = button.dataset.openTemplateEditor || '';
-    if (adminTemplateEditorTitle) adminTemplateEditorTitle.textContent = `Edit Report Template: "${button.dataset.templateName || 'Selected Template'}"`;
+    if (adminTemplateEditorTitle) adminTemplateEditorTitle.textContent = `Edit PPT Template: "${button.dataset.templateName || 'Selected Template'}"`;
     adminTemplateEditor.hidden = false;
     adminTemplateEditorClose?.focus();
   });
@@ -5895,7 +5895,7 @@ function setupPagePanelNavigator() {
   const themeClasses = {
     'module-tab-workspace': 'workspace',
     'module-tab-datasets-analysis': 'datasets',
-    'module-tab-e2e-dashboards': 'dashboards',
+    'module-tab-ppt-dashboards': 'dashboards',
     'module-tab-reporting': 'reporting',
     'module-tab-chart-builder': 'builder',
     'module-tab-utility': 'utility',

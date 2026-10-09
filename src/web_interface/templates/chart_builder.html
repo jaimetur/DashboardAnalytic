@@ -3,7 +3,7 @@
 <section class="dashboard-stack spacious-stack reporting-stack">
   <article class="panel hero-panel chart-builder-hero" style="background:linear-gradient(135deg,#b85b20,#e99b45)!important;color:#fff">
     <p class="eyebrow">Chart Builder</p><h2>Ad-Hoc Charts from your CDRs</h2>
-    <p class="lede">Chart any KPI of one or more processed CDRs as a bar, CDF, scatter or table, slice it by rows, columns and filters, and explore it with the interactive viewer of E2E Dashboards without changing any template.</p>
+    <p class="lede">Chart any KPI of one or more processed CDRs as a bar, CDF, scatter or table, slice it by rows, columns and filters, and explore it with the interactive viewer of PPT Dashboards without changing any template.</p>
   </article>
   <article class="panel" data-page-panel-label="Interactive Preview">
     <div class="section-head tight-head">
@@ -19,7 +19,7 @@
       <select data-chart-builder-sources multiple size="6">{% for dataset in datasets %}<option value="{{ dataset.id }}" data-kind="{{ dataset.kind }}" data-columns='{{ dataset.columns | tojson }}'>{{ dataset.name }}</option>{% endfor %}</select>
     </label>
     <div class="chart-builder-layout">
-      <section class="chart-builder-viewer e2e-dashboards" data-chart-builder-viewer aria-label="Individual chart viewer">
+      <section class="chart-builder-viewer ppt-dashboards" data-chart-builder-viewer aria-label="Individual chart viewer">
         <header class="chart-builder-viewer-header">
           <div><p class="eyebrow">Individual chart</p><h3 data-chart-builder-title>Ad-hoc chart</h3></div>
           <button type="button" class="ds-viewer-icon-action ds-viewer-refresh-action" data-chart-builder-refresh title="Refresh chart" aria-label="Refresh chart"></button>

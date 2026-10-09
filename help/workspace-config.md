@@ -1,6 +1,6 @@
 # Workspace Config
 
-Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Main Cities, Mappings & Reference Data (Operator, Vendor and Campaign Maps, Map Areas and Spectrum Holdings) and Scoring & GAP Analysis Setup. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
+Workspace Config is a dedicated page for settings owned by the active workspace: PPT Templates Management, Main Cities, Mappings & Reference Data (Operator, Vendor and Campaign Maps, Map Areas and Spectrum Holdings) and Scoring & GAP Analysis Setup. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
 
 > [!IMPORTANT]
 > **Workspace settings.** Every edit on this page belongs to the active workspace. Application Config controls shared runtime settings.
@@ -15,8 +15,8 @@ Open **Config → Workspace Config** from the main navigation at `/workspace-con
 | Task or topic | Go to |
 | --- | --- |
 | Access and active workspace | [Open section](#access-and-active-workspace) |
-| Report Templates Management | [Open section](#report-templates-management) |
-| Report Template Editor | [Open section](#report-template-editor) |
+| PPT Templates Management | [Open section](#ppt-templates-management) |
+| PPT Templates Editor | [Open section](#ppt-templates-editor) |
 | Report Template reference | [Open section](#report-template-reference) |
 | Mappings & Reference Data | [Open section](#mappings-reference-data) |
 | Campaign Maps | [Open section](#campaign-maps) |
@@ -32,11 +32,11 @@ Open **Config → Workspace Config** from the main navigation at `/workspace-con
 
 The Workspace Config section is available to `user-editor`, `admin` and `super-admin` accounts. `user-viewer` accounts do not have access. Open a workspace before using its configuration panels; their contents and changes belong only to that workspace.
 
-## Report Templates Management
+## PPT Templates Management
 
 Templates belong to the active workspace and are stored in that workspace database's `report_templates` table. Import, export, backup and transfer packages serialize them as portable CSV files, but those files are package artifacts rather than the live source of record. Obsolete `slides-templates` directories are removed by the current migration and portability flows.
 
-Report Templates Management supports NSA and SA templates, one default for each technology, and the editor described below. Template names are unique per NR Mode, so an NSA and an SA template may share a name.
+PPT Templates Management supports NSA and SA templates, one default for each technology, and the editor described below. Template names are unique per NR Mode, so an NSA and an SA template may share a name.
 
 The library is sorted by NR Mode (NSA first) and then name; its columns show the NR Mode, creation and last update times, and **Last Updated by**, the user who last imported, edited, renamed, duplicated, promoted or moved the template.
 
@@ -60,7 +60,7 @@ One template can be default for each technology within a workspace. Reporting in
 
 The row Export action downloads that individual CSV; portable ZIP export is available under Import / Export / Transfer.
 
-## Report Template Editor
+## PPT Templates Editor
 
 **Edit** opens the selected template in a large dialog. The surrounding page controls are omitted from the embedded editor.
 
@@ -100,7 +100,7 @@ Removing the last template reference leaves the existing column available for fu
 
 ## Report Template reference
 
-This is the canonical authoring reference for templates used by both [E2E Dashboards](e2e-dashboards.md) and [Reporting (old)](reporting-old.md). The common `assets/ppt-templates/Template_CDR_analysis.pptx` supplies the masters, named layouts and placeholders. Each distinct `Slide` value creates one slide; chart rows sharing that value fill its chart placeholders in row order.
+This is the canonical authoring reference for templates used by both [PPT Dashboards](ppt-dashboards.md) and [PPT Reporting (old)](ppt-reporting-old.md). The common `assets/powerpoint-templates/Template_01.pptx` supplies the masters, named layouts and placeholders. Each distinct `Slide` value creates one slide; chart rows sharing that value fill its chart placeholders in row order.
 
 ### Template columns
 
@@ -136,7 +136,7 @@ Use one row without `Source Dataset` or KPI fields. A structural row cannot shar
 - `Title Slide` normally uses `Title Page` and fills title/subtitle placeholders.
 - `Transition Slide` normally uses `Title Only` and creates a section divider.
 - Title and Transition subtitles use the template's yellow accent (theme accent 4) in exported presentations, whatever layout hosts them.
-- In E2E Dashboards, a Title Slide that opens the Dashboard also lists the Scope, Regions and Cities below its subtitle and decorative line, in the viewer and in the exported PPT.
+- In PPT Dashboards, a Title Slide that opens the Dashboard also lists the Scope, Regions and Cities below its subtitle and decorative line, in the viewer and in the exported PPT.
 
 ```text
 Slide: 1
@@ -430,7 +430,7 @@ The maps do not rewrite source workbooks, stored CDR rows or combined CDR tables
 
 Vendor Maps have the same two subpanels: **1 · Vendor names found in the CDRs** lists every Vendor name of the ready CDRs (the Operators without a Vendor, `<Operator> - All`, are not Vendors) and gives each one a label exactly as in the [Operator Maps](#operator-maps), and **2 · Vendor labels** has the same **Order**, **Colour**, **Label**, **Possible names in the CDRs** and **Actions** controls, with **Add label**, **Save Labels**, **Move up**, **Move down** and confirmed **Delete**. Names are matched without regard to case.
 
-A new workspace starts with the Vendor labels, in this order, Ericsson (`#0255AD`), Ericsson (Mixed) (`#002F61`), Huawei (`#FBBD00`), Samsung (`#008521`), NSN (`#8C00FF`, also `Nokia` and `NNS`), SCW (`#6F42C1`), Mixed (non-Ericsson) (`#5E4F2E`, also `Mixed`), Other Vendor (`#5E4F26`) and (blank) (`#7A8791`).
+A new workspace starts with the Vendor labels, in this order, Ericsson (`#0255AD`), Ericsson (Mixed) (`#002F61`), Huawei (`#FBBD00`), Samsung (`#008521`), NSN (`#8C00FF`, also `Nokia` and `NNS`), SCW (`#6F42C1`), Mixed (non-Ericsson) (`#5E4F2E`, also `Mixed`), Other Vendor (`#5E4F26`) and (blank) (`#7A8791`). These labels come from `assets/labels-vendors/default-vendor-maps.json`, so a deployment can change them for every new workspace.
 
 Renaming a Vendor label updates exact matching Report Template and saved Dashboard references, and the same saved filters as an Operator rename.
 
@@ -444,7 +444,7 @@ Campaign Maps set how every chart, table, legend, filter and PowerPoint or Word 
 - **Order inside a quarter** orders campaigns by year and quarter, and the campaigns of one quarter by mode: by default first the campaign without mode, then NSA, then SA. Use the arrows to change it.
 - **Exceptions** give their own label to campaigns that do not follow the pattern, one or more source campaigns per label. They are ordered by the year and quarter of their label, after the campaigns of that quarter, or first, in the table order, when the label has none. Campaigns without a year and quarter and without an exception keep their name.
 
-The **Preview** lists the campaigns of the ready CDRs of the workspace with the labels and order of the map being edited, and the **Status** of each one: **Unassigned** for a campaign without a year and quarter and without an exception (its **+** adds an exception for it, labelled with its own name to start with), **Merges N** when N campaigns share its label, which every filter, table, chart and report adds up as one campaign, and **Assigned** otherwise. Saving an exception that merges two or more campaigns of the CDRs asks for confirmation first. **Default map** fills the default map; **Save Campaign Maps** applies it and refreshes chart caches. Labels are only visual: filters, stored CDR values and saved selections keep the original campaigns.
+The **Preview** lists the campaigns of the ready CDRs of the workspace with the labels and order of the map being edited, and the **Status** of each one: **Unassigned** for a campaign without a year and quarter and without an exception (its **+** adds an exception for it, labelled with its own name to start with), **Merges N** when N campaigns share its label, which every filter, table, chart and report adds up as one campaign, and **Assigned** otherwise. Saving an exception that merges two or more campaigns of the CDRs asks for confirmation first. **Default map** fills the default map of the application (`assets/labels-campaigns/default-campaign-map.json`, which a deployment can change; the workspaces without their own map use it); **Save Campaign Maps** applies it and refreshes chart caches. Labels are only visual: filters, stored CDR values and saved selections keep the original campaigns.
 
 ### Unassigned values warning
 
@@ -452,13 +452,13 @@ While the ready CDRs of the workspace have Operators, Vendors or Campaigns that 
 
 ### Map Areas
 
-Map Areas are the administrative areas the **Points Lost Map** of [Scoring & GAP Analysis](scoring-gap-analysis.md#points-lost-map) colours in each country of the tests, such as municipalities in Spain, counties in the USA or census divisions in Canada. The United Kingdom always uses the bundled ITL3 areas; every other country needs its own areas, and its tests are shown as bubbles until it has them.
+Map Areas are the administrative areas the **Points Lost Map** of [Scoring & GAP Analysis](scoring-gap-analysis.md#points-lost-map) colours in each country of the tests, such as municipalities in Spain, counties in the USA or census divisions in Canada. The application ships the areas of its main markets, used by every workspace without downloading anything (also on a server without Internet access): the ITL3 areas of the United Kingdom, and, at the level closest in size to them, Germany (districts), France (arrondissements), Italy (provinces), Spain (provinces), Poland (counties), Romania (counties), the Netherlands (provinces), Portugal (districts), Switzerland (cantons), the United States (counties), Canada (census subdivisions), Mexico (municipios), Japan (prefectures), South Korea (districts) and India (districts); `assets/map-areas/README.md` lists their sources and licences. A workspace can replace the areas shipped for any country with its own. Any other country is coloured as one area, the whole country, until the workspace adds its areas.
 
-- **Countries of the tests** lists the countries found in a sample of the coordinates of the ready CDRs, with their share of the tests and their Map Areas. **Choose areas…** lists the administrative levels that [geoBoundaries](https://www.geoboundaries.org) offers for the country, each with its number of areas and its licence; the suggested level is the finest one with up to 12,000 areas that allows commercial use, and levels whose licence does not allow it ask before downloading. **Download** saves the areas, simplified, in the workspace (a large country can take a minute). The server must be able to reach geoboundaries.org and github.com; otherwise import the areas from a file.
+- **Countries of the tests** lists the countries found in a sample of the coordinates of the ready CDRs, with their share of the tests and their Map Areas (their own, the ones shipped with the application, or none). **Choose areas…** lists the administrative levels that [geoBoundaries](https://www.geoboundaries.org) offers for the country, each with its number of areas and its licence; the suggested level is the finest one with up to 12,000 areas that allows commercial use, and levels whose licence does not allow it ask before downloading. **Download** saves the areas, simplified, in the workspace (a large country can take a minute). The server must be able to reach geoboundaries.org and github.com; otherwise import the areas from a file.
 - **Saved Map Areas** lists one layer per country with its areas, source, licence and last update, and **Delete** removes it.
 - **Import areas from a file** reads a GeoJSON, or a ZIP holding one Shapefile, with one polygon per area: give the country (ISO 3166 alpha-3 code, such as `ESP`), the name of the areas (such as *municipality*) and, when it is not detected, the attribute that holds their names. It replaces the saved areas of that country.
 
-Areas with the same name in one country are numbered. Calculate the scoring again after adding or changing the areas of a country: each job keeps the polygons of the areas its tests are in and the outline of their countries. The Map Areas are stored in the **Map Area Layers** table, and travel with the Mappings & Reference Data in Import / Export, transfers and backups. Country borders: Natural Earth (public domain).
+Polygons with the same name in the same region are the parts of one area, and a name found in several regions takes the name of its region (for example *Washington (Ohio)*); names published with broken accents are repaired. Calculate the scoring again after adding or changing the areas of a country: each job keeps the polygons of the areas its tests are in and the outline of their countries. The Map Areas are stored in the **Map Area Layers** table, and travel with the Mappings & Reference Data in Import / Export, transfers and backups. Country borders: Natural Earth (public domain).
 
 ### Spectrum Holdings
 

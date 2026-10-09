@@ -1,0 +1,5 @@
+{
+  "name": "Tests per City and Operator",
+  "description": "How many Data, Voice and Speech tests each City has for each Operator.",
+  "query_sql": "SELECT City, Operator, cdr_type, COUNT(*) AS Tests\nFROM (\n  SELECT City, Operator, 'Data' AS cdr_type FROM selected_data\n  UNION ALL SELECT City, Operator, 'Voice' FROM selected_voice\n  UNION ALL SELECT City, Operator, 'Speech' FROM selected_speech\n)\nGROUP BY City, Operator, cdr_type\nORDER BY City, Operator, cdr_type"
+}
