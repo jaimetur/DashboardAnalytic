@@ -115,7 +115,7 @@ Long operations use progress dialogs for stages such as:
 - loading a Chart Data Preview;
 - loading a filtered dataset.
 
-Blocking destination-transfer dialogs are restored after a browser reload while the accepted operation remains active.
+Server-transfer dialogs can be hidden with **Hide** while the transfer continues as a background task, and are restored after a browser reload while the transfer remains active. On the destination, once the package has arrived, a dialog without **Hide** keeps every open page out of use until the import ends; on the source, the dialog comes back once when that import starts and can be hidden again.
 
 ## Floating background-task cards
 

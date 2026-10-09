@@ -199,6 +199,7 @@ MANUAL_RESTORE_JOBS: dict[str, dict[str, Any]] = {}
 MANUAL_RESTORE_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 TRANSFER_OFFER_TTL = timedelta(minutes=15)
+TRANSFER_PROGRESS_SAVE_SECONDS = 10.0
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
 application_data_dir = settings.data_dir
@@ -8179,6 +8180,13 @@ def _cleanup_expired_export_packages() -> None:
             if offer.get('status') == 'pending' and float(offer.get('created_at', 0)) < offer_cutoff:
                 offer.update({'status': 'expired', 'phase': 'approval expired', 'error': 'The transfer offer expired before it was accepted.', 'finished_at': now})
                 _save_transfer_offer(offer)
+            # An accepted transfer whose source never sent the package is not kept running forever.
+            if (
+                offer.get('status') == 'accepted' and offer.get('id') not in ACTIVE_TRANSFER_RECEIVES
+                and float(offer.get('accepted_at') or offer.get('created_at') or 0) < cutoff
+            ):
+                offer.update({'status': 'expired', 'phase': 'package not received', 'error': 'The source server did not send the package within 24 hours.', 'finished_at': now})
+                _save_transfer_offer(offer)
         for job_id in [
             job_id for job_id, job in TRANSFER_JOBS.items()
             if job.get('status') in {'ready', 'failed'} and float(job.get('finished_at', 0)) < cutoff
@@ -9483,6 +9491,12 @@ def _refresh_persisted_transfer_offers() -> None:
             except (OSError, ValueError, TypeError, sqlite3.Error):
                 continue
     persisted = {str(offer['id']): offer for offer in repository.list_transfer_offers()}
+    # An offer this process is receiving or importing keeps its live state: the
+    # running receive or import updates that object, so replacing it with the
+    # stored copy would hide its progress and its cancellation request.
+    for offer_id in set(ACTIVE_TRANSFER_RECEIVES) | set(ACTIVE_TRANSFER_IMPORTS):
+        if offer_id in TRANSFER_OFFERS:
+            persisted[offer_id] = TRANSFER_OFFERS[offer_id]
     TRANSFER_OFFERS.clear()
     TRANSFER_OFFERS.update(persisted)
 
@@ -9494,6 +9508,9 @@ def _save_transfer_offer(offer: dict[str, Any]) -> None:
 
 def _start_received_transfer(offer_id: str) -> None:
     """Start an accepted incoming transfer independently of the job queue."""
+    # Callers mark the offer as importing; registering it before the thread starts
+    # keeps a status request in between from closing it as an abandoned import.
+    ACTIVE_TRANSFER_IMPORTS.add(offer_id)
     Thread(
         target=_run_received_transfer,
         args=(offer_id,),
@@ -9504,11 +9521,23 @@ def _start_received_transfer(offer_id: str) -> None:
 
 # Incoming transfers this server process is importing right now.
 ACTIVE_TRANSFER_IMPORTS: set[str] = set()
+# Incoming transfers this server process is receiving, with their current attempt.
+ACTIVE_TRANSFER_RECEIVES: dict[str, str] = {}
 INTERRUPTED_TRANSFER_ERROR = 'Interrupted: the server stopped before this transfer finished, and nothing more is imported. Send it again if needed.'
+UNFINISHED_TRANSFER_IMPORT_ERROR = 'The import stopped on this server before it finished, and nothing more is imported. Send the transfer again if needed.'
+
+
+def _close_abandoned_transfer_import(offer_id: str) -> None:
+    """Report an import that no running thread will finish as failed."""
+    try:
+        _interrupt_stale_transfer_offers([offer_id], frozenset({'received', 'importing'}), error=UNFINISHED_TRANSFER_IMPORT_ERROR)
+    except sqlite3.Error:
+        pass
 
 
 def _interrupt_stale_transfer_offers(
     offer_ids: Iterable[str] | None = None, statuses: frozenset[str] = frozenset({'receiving', 'received', 'importing'}),
+    error: str = INTERRUPTED_TRANSFER_ERROR,
 ) -> list[str]:
     """Mark incoming transfers that no running import will finish as interrupted.
 
@@ -9523,8 +9552,8 @@ def _interrupt_stale_transfer_offers(
         for offer_id, offer in TRANSFER_OFFERS.items():
             if wanted is not None and offer_id not in wanted:
                 continue
-            if offer.get('status') in statuses and offer_id not in ACTIVE_TRANSFER_IMPORTS:
-                offer.update({'status': 'failed', 'phase': 'interrupted', 'error': INTERRUPTED_TRANSFER_ERROR,
+            if offer.get('status') in statuses and offer_id not in ACTIVE_TRANSFER_IMPORTS and offer_id not in ACTIVE_TRANSFER_RECEIVES:
+                offer.update({'status': 'failed', 'phase': 'interrupted', 'error': error,
                               'finished_at': datetime.now(timezone.utc).timestamp()})
                 _save_transfer_offer(offer)
                 interrupted.append(offer_id)
@@ -9537,6 +9566,9 @@ def _run_received_transfer(offer_id: str) -> None:
         _import_received_transfer(offer_id)
     finally:
         ACTIVE_TRANSFER_IMPORTS.discard(offer_id)
+        # An import that ended without storing its result (for example because
+        # recording a failure also failed) must not stay shown as running.
+        _close_abandoned_transfer_import(offer_id)
 
 
 def _import_received_transfer(offer_id: str) -> None:
@@ -9554,13 +9586,25 @@ def _import_received_transfer(offer_id: str) -> None:
         _save_transfer_offer(offer)
     repository.try_add_log('system', 'incoming_transfer_import_started', json.dumps({'offer_id': offer_id, 'content': offer.get('content')}))
 
+    last_progress_save = monotonic()
+
     def update_progress(phase: str, progress: float) -> None:
+        nonlocal last_progress_save
         with TRANSFER_LOCK:
             current_offer = TRANSFER_OFFERS.get(offer_id)
             if current_offer:
                 if current_offer.get('cancel_requested'):
                     raise InterruptedError('Incoming transfer stopped by user.')
+                previous_phase = current_offer.get('phase')
                 current_offer.update({'phase': phase, 'progress': round(min(99.0, max(0.0, progress)), 1)})
+                # Store each new phase, and the progress now and then, so the
+                # destination keeps a truthful record of how far the import got.
+                if phase != previous_phase or monotonic() - last_progress_save >= TRANSFER_PROGRESS_SAVE_SECONDS:
+                    last_progress_save = monotonic()
+                    try:
+                        _save_transfer_offer(current_offer)
+                    except sqlite3.Error:
+                        pass
     try:
         notice = _apply_import_archive(
             package_path, manifest, update_progress,
@@ -9584,6 +9628,18 @@ def _import_received_transfer(offer_id: str) -> None:
         repository.try_add_log('system', 'incoming_transfer_import_failed', json.dumps({'offer_id': offer_id, 'error': str(exc)}))
     finally:
         package_path.unlink(missing_ok=True)
+
+
+def _raise_for_destination_response(response: Any, fallback: str) -> None:
+    """Raise the destination server's own explanation of a rejected request."""
+    status_code = int(getattr(response, 'status_code', 200) or 200)
+    if status_code < 400:
+        return
+    try:
+        detail = str(response.json().get('detail') or '').strip()
+    except (AttributeError, TypeError, ValueError):
+        detail = ''
+    raise ValueError(detail or f'{fallback} (HTTP {status_code}).')
 
 
 def _run_transfer_job(job_id: str) -> None:
@@ -9665,14 +9721,7 @@ def _run_transfer_job(job_id: str) -> None:
                     with TRANSFER_LOCK:
                         job['phase'] = f'retrying destination connection ({attempt + 2}/3)'
                     sleep(1 << attempt)
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                try:
-                    detail = str(response.json().get('detail') or '').strip()
-                except (AttributeError, TypeError, ValueError):
-                    detail = ''
-                raise ValueError(detail or f'The destination server rejected the transfer request (HTTP {response.status_code}).') from exc
+            _raise_for_destination_response(response, 'The destination server rejected the transfer request')
             offer_id = str(response.json().get('offer_id') or '')
             if not offer_id:
                 raise ValueError('The destination server did not create a transfer offer.')
@@ -9691,7 +9740,7 @@ def _run_transfer_job(job_id: str) -> None:
                     _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'),
                     headers=headers,
                 )
-                response.raise_for_status()
+                _raise_for_destination_response(response, 'The destination server could not report the transfer status')
                 remote_status = str(response.json().get('status') or '')
                 if remote_status == 'accepted':
                     break
@@ -9753,7 +9802,7 @@ def _run_transfer_job(job_id: str) -> None:
                     with TRANSFER_LOCK:
                         job.update({'status': 'transferring', 'phase': f'retrying transmission ({attempt + 2}/3)', 'bytes_sent': 0, 'progress': 0.0})
                     sleep(2 ** attempt)
-            response.raise_for_status()
+            _raise_for_destination_response(response, 'The destination server could not receive the package')
             with TRANSFER_LOCK:
                 job['status'] = 'remote_importing'
                 job['bytes_sent'] = package_size
@@ -9761,11 +9810,18 @@ def _run_transfer_job(job_id: str) -> None:
 
             import_deadline = monotonic() + 86400
             while monotonic() < import_deadline:
+                if cancellation_requested():
+                    # The destination stops only an import that is no longer
+                    # running; a running import continues there until it finishes.
+                    raise InterruptedError(
+                        'The server transfer was cancelled. If the destination server was still importing the package, '
+                        'that import continues there and its result is shown on that server.'
+                    )
                 response = client.get(
                     _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'),
                     headers=headers,
                 )
-                response.raise_for_status()
+                _raise_for_destination_response(response, 'The destination server could not report the import status')
                 remote_payload = response.json()
                 remote_status = str(remote_payload.get('status') or '')
                 with TRANSFER_LOCK:
@@ -11356,11 +11412,11 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
             **_background_task_timing(job),
         }
         can_stop = prefix == 'export' or (
-            prefix == 'transfer' and job.get('status') != 'remote_importing'
+            prefix == 'transfer' and job.get('status') not in {'cancelling', 'cancelled'}
         ) or (
             prefix == 'import' and job.get('status') == 'queued'
         ) or (
-            prefix == 'incoming-transfer' and job.get('status') in {'receiving', 'received'}
+            prefix == 'incoming-transfer' and job.get('status') in {'accepted', 'receiving', 'received'}
         ) or (
             # An import no running process will finish can be closed.
             prefix == 'incoming-transfer' and job.get('status') == 'importing' and str(job.get('id')) not in ACTIVE_TRANSFER_IMPORTS
@@ -11461,7 +11517,8 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
                     'review_transfer_offer_id': str(offer.get('id') or ''),
                 })
                 continue
-            if offer.get('status') not in {'receiving', 'received', 'importing'}:
+            # An accepted transfer runs in the background while the source prepares its package.
+            if offer.get('status') not in {'accepted', 'receiving', 'received', 'importing'}:
                 continue
             label = 'Importing transferred package' if offer.get('status') == 'importing' else 'Receiving server transfer'
             append_job(
@@ -11768,8 +11825,8 @@ def stop_background_task(
                 raise HTTPException(status_code=404, detail='Transfer task not found.')
             if workspace_id not in {str(item) for item in (job.get('workspace_ids') or [])}:
                 raise HTTPException(status_code=404, detail='Transfer task not found.')
-            if job.get('status') in {'ready', 'failed', 'cancelled', 'remote_importing'}:
-                raise HTTPException(status_code=409, detail='A transfer can only be stopped before the destination starts importing data.')
+            if job.get('status') in {'ready', 'failed', 'cancelled'}:
+                raise HTTPException(status_code=409, detail='The transfer has already finished.')
             job.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
     elif prefix in {'workspace-delete', 'workspace-cache-clear'}:
         operation = 'delete' if prefix == 'workspace-delete' else 'cache-clear'
@@ -11825,8 +11882,8 @@ def stop_server_background_task(task_id: str = Form(...), user: SessionUser = De
     if prefix == 'transfer':
         with TRANSFER_LOCK:
             job = TRANSFER_JOBS.get(job_id)
-            if not job or job.get('owner') != user.username or job.get('status') in {'ready', 'failed', 'cancelled', 'remote_importing'}:
-                raise HTTPException(status_code=409, detail='A transfer can only be stopped before the destination starts importing data.')
+            if not job or job.get('owner') != user.username or job.get('status') in {'ready', 'failed', 'cancelled'}:
+                raise HTTPException(status_code=409, detail='The transfer has already finished.')
             job.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
         return JSONResponse({'stopping': task_id})
     if prefix == 'incoming-transfer':
@@ -11838,9 +11895,15 @@ def stop_server_background_task(task_id: str = Form(...), user: SessionUser = De
         with TRANSFER_LOCK:
             _refresh_persisted_transfer_offers()
             offer = TRANSFER_OFFERS.get(job_id)
-            if not offer or offer.get('status') not in {'receiving', 'received'}:
+            if not offer or offer.get('status') not in {'accepted', 'receiving', 'received'}:
                 raise HTTPException(status_code=409, detail='This incoming transfer can no longer be stopped.')
-            offer.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
+            if offer.get('status') == 'accepted':
+                # Nothing is running yet: the source is told when it sends the package.
+                offer.update(cancel_requested=True, status='cancelled', phase='cancelled',
+                             error='The destination server cancelled the transfer.',
+                             finished_at=datetime.now(timezone.utc).timestamp())
+            else:
+                offer.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
             _save_transfer_offer(offer)
         return JSONResponse({'stopping': task_id})
     with MANUAL_BACKUP_JOBS_LOCK:
@@ -18933,6 +18996,11 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     return JSONResponse({'offer_id': offer_id, 'status': 'pending'})
 
 
+def _is_abandoned_transfer_import(offer_id: str, offer: dict[str, Any]) -> bool:
+    """Return whether an import is recorded as running but no thread is running it."""
+    return offer.get('status') in {'received', 'importing'} and offer_id not in ACTIVE_TRANSFER_IMPORTS
+
+
 @app.get('/api/import-export/transfers/offers/{offer_id}')
 def get_transfer_offer_status(offer_id: str, request: Request) -> JSONResponse:
     _cleanup_expired_export_packages()
@@ -18942,6 +19010,12 @@ def get_transfer_offer_status(offer_id: str, request: Request) -> JSONResponse:
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer or not _transfer_offer_secret_matches(offer, secret):
             raise HTTPException(status_code=404, detail='The transfer offer does not exist.')
+        abandoned = _is_abandoned_transfer_import(offer_id, offer)
+    if abandoned:
+        # Report it as failed so the source stops waiting for a result that never comes.
+        _close_abandoned_transfer_import(offer_id)
+    with TRANSFER_LOCK:
+        offer = TRANSFER_OFFERS.get(offer_id) or offer
         payload = {key: offer.get(key) for key in ('status', 'phase', 'progress', 'notice', 'error') if offer.get(key) is not None}
     return JSONResponse(payload)
 
@@ -18954,10 +19028,18 @@ def cancel_transfer_offer(offer_id: str, request: Request) -> JSONResponse:
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer or not _transfer_offer_secret_matches(offer, secret):
             raise HTTPException(status_code=404, detail='The transfer offer does not exist.')
-        if offer.get('status') == 'importing':
+        abandoned = _is_abandoned_transfer_import(offer_id, offer)
+    if abandoned:
+        _close_abandoned_transfer_import(offer_id)
+        return JSONResponse({'cancelled': True})
+    with TRANSFER_LOCK:
+        offer = TRANSFER_OFFERS.get(offer_id) or offer
+        if offer.get('status') in {'received', 'importing'}:
             raise HTTPException(status_code=409, detail='The destination has started importing data and cannot be stopped safely.')
         if offer.get('status') not in {'ready', 'failed', 'rejected', 'expired', 'cancelled'}:
-            offer.update({'status': 'cancelled', 'phase': 'cancelled by source', 'error': 'The source server cancelled the transfer.', 'finished_at': datetime.now(timezone.utc).timestamp()})
+            # A package still being received stops at its next chunk.
+            offer.update({'status': 'cancelled', 'phase': 'cancelled by source', 'error': 'The source server cancelled the transfer.',
+                          'cancel_requested': True, 'finished_at': datetime.now(timezone.utc).timestamp()})
             _save_transfer_offer(offer)
     return JSONResponse({'cancelled': True})
 
@@ -18965,63 +19047,102 @@ def cancel_transfer_offer(offer_id: str, request: Request) -> JSONResponse:
 @app.put('/api/import-export/transfers/offers/{offer_id}/package')
 async def receive_transfer_package(offer_id: str, request: Request) -> JSONResponse:
     secret = request.headers.get('X-Dashboard-Transfer-Secret', '')
+    package_dir = export_package_dir()
+    package_dir.mkdir(parents=True, exist_ok=True)
+    # Each transmission attempt writes its own file: a retry that starts while the
+    # interrupted attempt is still winding down must not share, or lose, its file.
+    attempt_id = uuid4().hex
+    package_path = package_dir / f'incoming-transfer-{offer_id}-{attempt_id}.upload'
     with TRANSFER_LOCK:
         _refresh_persisted_transfer_offers()
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer or not _transfer_offer_secret_matches(offer, secret):
             raise HTTPException(status_code=404, detail='The transfer offer does not exist.')
+        if offer.get('cancel_requested') or offer.get('status') in {'cancelling', 'cancelled'}:
+            raise HTTPException(status_code=409, detail='The destination server cancelled the transfer.')
         if offer.get('status') not in {'accepted', 'receiving'}:
             raise HTTPException(status_code=409, detail='The transfer has not been accepted by the destination server.')
         expected_size = max(int(request.headers.get('Content-Length') or 0), 0)
+        # Recording the file in the offer keeps package recovery and cleanup,
+        # which remove unknown incomplete uploads, away from this one.
         offer.update({
             'status': 'receiving', 'phase': 'receiving package', 'size': expected_size,
-            'bytes_received': 0, 'progress': 0.0,
+            'bytes_received': 0, 'progress': 0.0, 'path': str(package_path), 'receive_attempt': attempt_id,
             'started_at': offer.get('started_at') or datetime.now(timezone.utc).timestamp(),
         })
+        offer.pop('error', None)
         _save_transfer_offer(offer)
-    package_dir = export_package_dir()
-    package_dir.mkdir(parents=True, exist_ok=True)
-    package_path = package_dir / f'incoming-transfer-{offer_id}.upload'
+        ACTIVE_TRANSFER_RECEIVES[offer_id] = attempt_id
+
+    def is_current_attempt() -> bool:
+        return offer.get('receive_attempt') == attempt_id
+
+    def finish_attempt() -> None:
+        if ACTIVE_TRANSFER_RECEIVES.get(offer_id) == attempt_id:
+            ACTIVE_TRANSFER_RECEIVES.pop(offer_id, None)
+
+    last_progress_save = monotonic()
     try:
         with package_path.open('wb') as output:
             async for chunk in request.stream():
                 with TRANSFER_LOCK:
                     if offer.get('cancel_requested'):
                         raise InterruptedError('Incoming transfer stopped by user.')
+                    if not is_current_attempt():
+                        raise InterruptedError('A newer transmission attempt replaced this one.')
                 output.write(chunk)
                 with TRANSFER_LOCK:
                     offer['bytes_received'] = int(offer.get('bytes_received') or 0) + len(chunk)
                     size = int(offer.get('size') or 0)
                     if size:
                         offer['progress'] = round(min(100.0, offer['bytes_received'] * 100.0 / size), 1)
+                    if monotonic() - last_progress_save >= TRANSFER_PROGRESS_SAVE_SECONDS:
+                        last_progress_save = monotonic()
+                        try:
+                            _save_transfer_offer(offer)
+                        except sqlite3.Error:
+                            pass
         manifest = read_import_manifest(package_path)
         if str(manifest.get('kind') or '') != str(offer['kind']):
             raise ValueError('The received package type does not match the accepted transfer offer.')
         with TRANSFER_LOCK:
+            if offer.get('cancel_requested'):
+                raise InterruptedError('Incoming transfer stopped by user.')
+            if not is_current_attempt():
+                raise InterruptedError('A newer transmission attempt replaced this one.')
             offer.update({
                 'path': str(package_path), 'manifest': manifest,
                 'status': 'importing', 'phase': 'validating', 'progress': 0.0,
             })
             _save_transfer_offer(offer)
+            # The import keeps the live offer from here on.
+            ACTIVE_TRANSFER_IMPORTS.add(offer_id)
+            finish_attempt()
         _start_received_transfer(offer_id)
         return JSONResponse({'offer_id': offer_id, 'status': 'importing'})
-    except (OSError, ValueError, zipfile.BadZipFile) as exc:
-        package_path.unlink(missing_ok=True)
-        with TRANSFER_LOCK:
-            offer.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
-            _save_transfer_offer(offer)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except InterruptedError as exc:
         package_path.unlink(missing_ok=True)
         with TRANSFER_LOCK:
-            offer.update({'status': 'cancelled', 'phase': 'cancelled', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
-            _save_transfer_offer(offer)
+            if is_current_attempt():
+                offer.update({'status': 'cancelled', 'phase': 'cancelled', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
+                _save_transfer_offer(offer)
+                finish_attempt()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        package_path.unlink(missing_ok=True)
+        with TRANSFER_LOCK:
+            if is_current_attempt():
+                offer.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
+                _save_transfer_offer(offer)
+                finish_attempt()
+        raise HTTPException(status_code=400, detail=f'The destination server could not receive the package: {exc}') from exc
     except Exception as exc:
         package_path.unlink(missing_ok=True)
         with TRANSFER_LOCK:
-            offer.update({'status': 'accepted', 'phase': 'waiting for transmission retry', 'error': 'The package transfer was interrupted; waiting for the source to retry.', 'progress': 0.0})
-            _save_transfer_offer(offer)
+            if is_current_attempt():
+                offer.update({'status': 'accepted', 'phase': 'waiting for transmission retry', 'error': 'The package transfer was interrupted; waiting for the source to retry.', 'progress': 0.0})
+                _save_transfer_offer(offer)
+                finish_attempt()
         raise HTTPException(status_code=503, detail='The package transfer was interrupted; the source may retry.') from exc
 
 
@@ -19035,8 +19156,16 @@ def list_pending_transfer_offers(user: SessionUser = Depends(super_admin_user)) 
             for offer in TRANSFER_OFFERS.values()
             if offer.get('status') == 'pending'
         ]
+        # Every open page learns about a running import, so it can keep the
+        # application out of use while the received data replaces the current data.
+        active_imports = [
+            {key: offer.get(key) for key in ('id', 'kind', 'content')}
+            for offer_id, offer in TRANSFER_OFFERS.items()
+            if offer.get('status') in {'received', 'importing'} and offer_id in ACTIVE_TRANSFER_IMPORTS
+        ]
     return JSONResponse({
         'offers': sorted(offers, key=lambda offer: float(offer.get('created_at') or 0)),
+        'active_imports': active_imports,
         'destination_workspaces': [
             {'id': workspace.id, 'name': workspace.name} for workspace in workspace_registry.list()
         ],
@@ -19051,9 +19180,14 @@ def get_admin_transfer_offer(offer_id: str, user: SessionUser = Depends(super_ad
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer:
             raise HTTPException(status_code=404, detail='The transfer offer no longer exists.')
+        abandoned = _is_abandoned_transfer_import(offer_id, offer)
+    if abandoned:
+        _close_abandoned_transfer_import(offer_id)
+    with TRANSFER_LOCK:
+        offer = TRANSFER_OFFERS.get(offer_id) or offer
         return JSONResponse({
             key: offer.get(key)
-            for key in ('id', 'source', 'content', 'status', 'phase', 'progress', 'size', 'bytes_received', 'notice', 'error')
+            for key in ('id', 'source', 'kind', 'content', 'status', 'phase', 'progress', 'size', 'bytes_received', 'notice', 'error')
             if offer.get(key) is not None
         })
 
@@ -19076,6 +19210,7 @@ def import_recovered_transfer_package(offer_id: str, user: SessionUser = Depends
             raise HTTPException(status_code=404, detail='The recovered transfer package is no longer available.')
         offer.update({'status': 'importing', 'phase': 'validating', 'progress': 0.0, 'accepted_by': user.username})
         _save_transfer_offer(offer)
+        ACTIVE_TRANSFER_IMPORTS.add(offer_id)
     _start_received_transfer(offer_id)
     return JSONResponse({'offer_id': offer_id, 'status': 'importing'})
 

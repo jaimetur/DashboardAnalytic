@@ -131,11 +131,16 @@ Workspace replacement is automatic: the application closes the target when requi
 5. Follow export creation and transmission at source.
 6. Follow reception and automatic import at destination.
 
-The dialog remembers the last destination. Active state is restored after page reload, resumable reception tolerates temporary connection cuts and contacting can be cancelled.
+The dialog remembers the last destination. Active state is restored after page reload and resumable reception tolerates temporary connection cuts; each retry is received into its own file. If the destination rejects the package, the source shows the destination's reason.
+
+The transfer runs as a background task on both servers, shown in the red **System tasks** card:
+
+- **Source:** **Hide** closes the progress dialog to keep using the application. The dialog comes back once when the destination starts importing the package, with **Hide** again, and the result is always shown. **Cancel operation**, or stopping the task, cancels the transfer at any stage; once the destination has started importing, that import continues there and its result is shown on the destination.
+- **Destination:** while the source prepares and sends the package, **Hide** closes the dialog and the task can be stopped from the card. When the package has arrived, a dialog without **Hide** keeps every open page out of use until the import ends, because the received data replaces the current data. An import that stops without recording a result is reported as failed on both servers instead of being left running. An accepted transfer whose package does not arrive within 24 hours expires.
 
 Literal private IP destinations such as `192.168.1.17` are contacted directly, bypassing proxy variables inherited by Docker. The receiving application must listen on `0.0.0.0` rather than only `127.0.0.1`, and its host firewall must allow inbound TCP traffic on the selected port. When the destination is the Docker host itself, use `host.docker.internal`; a different computer on the LAN should use that computer's LAN IP.
 
-For super-admins, complete unimported packages appear in **Recovered transfer packages** with content, workspaces, creation time, size, Import and Delete actions. Incomplete remnants are removed automatically.
+For super-admins, complete unimported packages appear in **Recovered transfer packages** with content, workspaces, creation time, size, Import and Delete actions. Incomplete remnants are removed automatically; a package still being received is never removed, so Admin pages can be opened or reloaded during a transfer.
 
 ## Interface Settings
 

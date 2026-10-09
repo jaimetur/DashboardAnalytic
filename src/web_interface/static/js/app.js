@@ -4785,6 +4785,7 @@ const loadingTitle = document.getElementById('loading-title');
 const loadingCopy = document.getElementById('loading-copy');
 const loadingProgressBar = document.querySelector('.loading-progress-bar');
 const loadingCancel = document.getElementById('loading-cancel');
+const loadingHide = document.getElementById('loading-hide');
 const datasetPreviewOverlay = document.getElementById('dataset-preview-overlay');
 const datasetPreviewDialog = datasetPreviewOverlay?.querySelector('.dataset-preview-dialog');
 const datasetPreviewFrame = document.getElementById('dataset-preview-dialog-frame');
@@ -6623,10 +6624,15 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   return {definition: currentDefinition, close: closeMenu};
 }
 
+function resetLoadingActions() {
+  if (loadingCancel instanceof HTMLButtonElement) { loadingCancel.hidden = true; loadingCancel.onclick = null; loadingCancel.disabled = false; }
+  if (loadingHide instanceof HTMLButtonElement) { loadingHide.hidden = true; loadingHide.onclick = null; }
+}
+
 function hideLoadingOverlay() {
   if (!loadingOverlay) return;
   loadingOverlay.hidden = true;
-  if (loadingCancel instanceof HTMLButtonElement) { loadingCancel.hidden = true; loadingCancel.onclick = null; loadingCancel.disabled = false; }
+  resetLoadingActions();
   document.body.classList.remove('loading-active');
 }
 
@@ -6634,7 +6640,7 @@ function showLoadingOverlay(label, copy) {
   if (!loadingOverlay) return;
   loadingTitle.textContent = label || 'Processing request';
   loadingCopy.textContent = copy || 'Please wait while the workspace processes the selected dataset or updates the analysis.';
-  if (loadingCancel instanceof HTMLButtonElement) { loadingCancel.hidden = true; loadingCancel.onclick = null; loadingCancel.disabled = false; }
+  resetLoadingActions();
   if (loadingProgressBar instanceof HTMLElement) {
     loadingProgressBar.style.width = '45%';
     loadingProgressBar.style.animation = '';
@@ -7205,6 +7211,144 @@ function selectTransferDestination() {
   });
 }
 
+const ACTIVE_SERVER_TRANSFER_KEY = 'drivetest-analyzer:active-transfer';
+
+function readActiveServerTransfer() {
+  try { return JSON.parse(window.localStorage.getItem(ACTIVE_SERVER_TRANSFER_KEY) || 'null'); } catch (_error) { return null; }
+}
+
+function storeActiveServerTransfer(state) {
+  try {
+    if (state) window.localStorage.setItem(ACTIVE_SERVER_TRANSFER_KEY, JSON.stringify(state));
+    else window.localStorage.removeItem(ACTIVE_SERVER_TRANSFER_KEY);
+  } catch (_error) { /* Ignore storage failures. */ }
+}
+
+// Follows an outgoing server transfer, which runs on the server as a background
+// task. Its dialog can be hidden to keep using the application; it comes back
+// once when the destination starts importing the package (and can be hidden
+// again), and the result is shown when the transfer ends.
+function followServerTransfer(initialState) {
+  let state = {...initialState};
+  if (!state.cancel_url && state.job_id) state.cancel_url = `/admin/import-export/transfers/jobs/${encodeURIComponent(state.job_id)}/cancel`;
+  let dialogShown = false;
+  const progressCopy = (transfer) => {
+    const progress = transfer.progress ? ` — ${transfer.progress}%` : '';
+    const copies = {
+      queued: 'Preparing the connection to the destination server.',
+      connecting: 'Connecting to the destination server and creating the transfer request.',
+      awaiting_acceptance: 'Waiting for a super-admin on the destination server to accept the transfer.',
+      exporting: `The destination accepted the transfer. Creating the selected export package${progress}.`,
+      transferring: `Sending the package to the destination server${progress}.`,
+      remote_importing: `The destination server is importing the package${transfer.remote_phase ? `: ${transfer.remote_phase}` : ''}${progress}.`,
+      cancelling: 'Cancelling the server transfer.',
+    };
+    return copies[transfer.status] || 'The server transfer is in progress.';
+  };
+  const closeDialog = () => {
+    if (dialogShown) hideLoadingOverlay();
+    dialogShown = false;
+  };
+  const finish = () => {
+    const stored = readActiveServerTransfer();
+    if (!stored || stored.job_id === state.job_id) storeActiveServerTransfer(null);
+    closeDialog();
+  };
+  const showDialog = (status) => {
+    showLoadingOverlay('Server transfer', 'The server transfer is in progress.');
+    dialogShown = true;
+    if (loadingHide instanceof HTMLButtonElement) {
+      loadingHide.hidden = false;
+      loadingHide.onclick = () => {
+        state = {...state, hidden_status: status};
+        storeActiveServerTransfer(state);
+        closeDialog();
+      };
+    }
+    if (loadingCancel instanceof HTMLButtonElement) {
+      loadingCancel.hidden = !state.cancel_url;
+      loadingCancel.onclick = async () => {
+        loadingCancel.disabled = true;
+        loadingCancel.textContent = 'Cancelling…';
+        await fetch(state.cancel_url, {method: 'POST', credentials: 'same-origin', headers: {Accept: 'application/json'}}).catch(() => {});
+        loadingCancel.textContent = 'Cancel operation';
+      };
+    }
+  };
+  // The dialog is shown unless it was hidden; a dialog hidden before the remote
+  // import comes back once that import starts.
+  const dialogWanted = (status) => !state.hidden_status
+    || (state.hidden_status !== 'remote_importing' && status === 'remote_importing');
+  const poll = async () => {
+    // Another operation may have closed or taken over the shared dialog.
+    if (dialogShown && (loadingOverlay?.hidden || loadingTitle?.textContent !== 'Server transfer')) dialogShown = false;
+    const stored = readActiveServerTransfer();
+    if (stored?.job_id && stored.job_id !== state.job_id) { closeDialog(); return; }
+    if (stored?.job_id === state.job_id) state = {...state, ...stored};
+    let response;
+    try {
+      response = await fetch(state.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}, cache: 'no-store'});
+    } catch (_error) {
+      // A brief network interruption must not abandon a long transfer.
+      window.setTimeout(() => { void poll(); }, 5000);
+      return;
+    }
+    const responseType = response.headers.get('content-type') || '';
+    if (response.redirected || !responseType.includes('application/json')) {
+      closeDialog();
+      showInfoDialog('Your session expired. Log in again to follow the server transfer; it continues on the server meanwhile.', {title: 'Server Transfer', tone: 'error'});
+      return;
+    }
+    const transfer = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      finish();
+      showInfoDialog(transfer.detail || 'The transfer status could not be read.', {title: 'Server Transfer Error', tone: 'error'});
+      return;
+    }
+    if (transfer.status === 'ready') {
+      finish();
+      showInfoDialog(transfer.notice || 'The destination server received and imported the package successfully.', {title: 'Server Transfer Complete', tone: 'info'});
+      return;
+    }
+    if (transfer.status === 'failed') {
+      finish();
+      showInfoDialog(transfer.error || 'The destination server could not complete the transfer.', {title: 'Server Transfer Error', tone: 'error'});
+      return;
+    }
+    if (transfer.status === 'cancelled') {
+      finish();
+      if (transfer.error) showInfoDialog(transfer.error, {title: 'Server Transfer Cancelled', tone: 'info'});
+      return;
+    }
+    if (dialogWanted(transfer.status)) {
+      if (state.hidden_status) {
+        delete state.hidden_status;
+        storeActiveServerTransfer(state);
+      }
+      // Another operation's dialog is not replaced; the transfer dialog waits for it.
+      if (!dialogShown && loadingOverlay?.hidden) showDialog(transfer.status);
+    } else if (dialogShown) {
+      // Hidden from another tab.
+      closeDialog();
+    }
+    if (dialogShown) {
+      setLoadingProgress(transfer.progress);
+      if (loadingCopy) loadingCopy.textContent = progressCopy(transfer);
+      if (loadingHide instanceof HTMLButtonElement) {
+        loadingHide.onclick = () => {
+          state = {...state, hidden_status: transfer.status};
+          storeActiveServerTransfer(state);
+          closeDialog();
+        };
+      }
+      if (loadingCancel instanceof HTMLButtonElement && transfer.status === 'cancelling') loadingCancel.disabled = true;
+    }
+    window.setTimeout(() => { void poll(); }, 1500);
+  };
+  storeActiveServerTransfer(state);
+  void poll();
+}
+
 document.querySelectorAll('[data-export-package-form]').forEach((form) => {
   const transferButton = form.querySelector('[data-server-transfer]');
   const selectedExportTargets = (formData) => formData.getAll('export_target').map((value) => String(value));
@@ -7248,28 +7392,6 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     formData.set('destination_url', destination.destinationUrl);
     if (destination.destinationPort) formData.set('destination_port', destination.destinationPort);
     showLoadingOverlay('Contacting destination server', 'Checking whether the destination server accepts the selected export.');
-    let transferCancelUrl = '';
-    let transferCancelled = false;
-    if (loadingCancel instanceof HTMLButtonElement) {
-      loadingCancel.hidden = false;
-      loadingCancel.onclick = async () => {
-        transferCancelled = true;
-        loadingCancel.disabled = true;
-        loadingCancel.textContent = 'Cancelling…';
-        if (transferCancelUrl) {
-          await fetch(transferCancelUrl, {method: 'POST', credentials: 'same-origin', headers: {Accept: 'application/json'}}).catch(() => {});
-        }
-        hideLoadingOverlay();
-        loadingCancel.textContent = 'Cancel operation';
-      };
-    }
-    const handleTransferError = (error) => {
-      hideLoadingOverlay();
-      showInfoDialog(error instanceof Error ? error.message : 'The server transfer could not be completed.', {
-        title: 'Server Transfer Error',
-        tone: 'error',
-      });
-    };
     try {
       const response = await fetch('/admin/import-export/transfers/jobs', {
         method: 'POST',
@@ -7283,49 +7405,14 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       }
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.status_url) throw new Error(payload.detail || 'The transfer could not be started.');
-      transferCancelUrl = payload.cancel_url || '';
-      if (transferCancelled) {
-        if (transferCancelUrl) await fetch(transferCancelUrl, {method: 'POST', credentials: 'same-origin', headers: {Accept: 'application/json'}}).catch(() => {});
-        return;
-      }
-      try { window.localStorage.setItem('drivetest-analyzer:active-transfer', JSON.stringify({job_id: payload.job_id, status_url: payload.status_url})); } catch (_error) { /* Ignore storage failures. */ }
-      const pollTransfer = async () => {
-        const statusResponse = await fetch(payload.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
-        const transfer = await statusResponse.json().catch(() => ({}));
-        if (!statusResponse.ok) throw new Error(transfer.detail || 'The transfer status could not be read.');
-        if (transfer.status === 'ready') {
-          try { window.localStorage.removeItem('drivetest-analyzer:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
-          hideLoadingOverlay();
-          showInfoDialog(transfer.notice || 'The destination server received and imported the package successfully.', {
-            title: 'Server Transfer Complete',
-            tone: 'info',
-          });
-          return;
-        }
-        if (transfer.status === 'failed') {
-          try { window.localStorage.removeItem('drivetest-analyzer:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
-          throw new Error(transfer.error || 'The destination server could not complete the transfer.');
-        }
-        if (transfer.status === 'cancelled' || transfer.status === 'cancelling') {
-          try { window.localStorage.removeItem('drivetest-analyzer:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
-          hideLoadingOverlay();
-          return;
-        }
-        setLoadingProgress(transfer.progress);
-        const copies = {
-          queued: 'Preparing the connection to the destination server.',
-          connecting: 'Connecting to the destination server and creating the transfer request.',
-          awaiting_acceptance: 'Waiting for a super-admin on the destination server to accept the transfer.',
-          exporting: `The destination accepted the transfer. Creating the selected export package${transfer.progress ? ` — ${transfer.progress}%` : ''}.`,
-          transferring: `Sending the package to the destination server${transfer.progress ? ` — ${transfer.progress}%` : ''}.`,
-          remote_importing: `Importing the received package${transfer.remote_phase ? `: ${transfer.remote_phase}` : ''}${transfer.progress ? ` — ${transfer.progress}%` : ''}.`,
-        };
-        if (loadingCopy) loadingCopy.textContent = copies[transfer.status] || 'The server transfer is in progress.';
-        window.setTimeout(() => { pollTransfer().catch(handleTransferError); }, 1500);
-      };
-      pollTransfer().catch(handleTransferError);
+      hideLoadingOverlay();
+      followServerTransfer({job_id: payload.job_id, status_url: payload.status_url, cancel_url: payload.cancel_url || ''});
     } catch (error) {
-      handleTransferError(error);
+      hideLoadingOverlay();
+      showInfoDialog(error instanceof Error ? error.message : 'The server transfer could not be completed.', {
+        title: 'Server Transfer Error',
+        tone: 'error',
+      });
     }
   });
   form.addEventListener('submit', async (event) => {
@@ -7424,35 +7511,135 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       pollIncomingTransferOffers().finally(() => scheduleIncomingOfferPoll());
     }, delay);
   };
-  const pollAcceptedTransfer = async (offerId) => {
-    const response = await fetch(`/admin/import-export/transfers/offers/${encodeURIComponent(offerId)}`, {
-      credentials: 'same-origin', headers: {Accept: 'application/json'}, cache: 'no-store',
-    });
-    const offer = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(offer.detail || 'The transfer status could not be read.');
-    if (offer.status === 'ready') {
-      hideLoadingOverlay();
-      showInfoDialog(offer.notice || 'The incoming transfer was imported successfully.', {title: 'Incoming Transfer Complete', tone: 'info'});
-      return;
-    }
-    if (offer.status === 'failed' || offer.status === 'rejected' || offer.status === 'expired' || offer.status === 'cancelled') {
-      throw new Error(offer.error || 'The incoming transfer could not be completed.');
-    }
-    setLoadingProgress(offer.progress);
-    if (loadingCopy) {
-      const progress = offer.progress ? ` — ${offer.progress}%` : '';
-      const copies = {
-        accepted: 'Waiting for the source server to start sending the package',
-        receiving: 'Receiving the package from the source server',
-        received: 'Package received. Starting the import',
-        importing: `Importing the received package${offer.phase ? `: ${offer.phase}` : ''}`,
-      };
-      loadingCopy.textContent = `${copies[offer.status] || 'Incoming transfer in progress'}${progress}.`;
-    }
-    window.setTimeout(() => { pollAcceptedTransfer(offerId).catch((error) => {
-      hideLoadingOverlay();
-      showInfoDialog(error instanceof Error ? error.message : 'The incoming transfer could not be completed.', {title: 'Incoming Transfer Error', tone: 'error'});
-    }); }, 1200);
+  const INCOMING_TRANSFER_KEY = 'drivetest-analyzer:incoming-transfer';
+  const readIncomingTransfer = () => {
+    try { return JSON.parse(window.localStorage.getItem(INCOMING_TRANSFER_KEY) || 'null'); } catch (_error) { return null; }
+  };
+  const storeIncomingTransfer = (state) => {
+    try {
+      if (state) window.localStorage.setItem(INCOMING_TRANSFER_KEY, JSON.stringify(state));
+      else window.localStorage.removeItem(INCOMING_TRANSFER_KEY);
+    } catch (_error) { /* Ignore storage failures. */ }
+  };
+  let followingIncomingOfferId = '';
+  // Follows an accepted incoming transfer, which runs on this server as a
+  // background task. While the package is awaited or received its dialog can be
+  // hidden; once the package has arrived, a blocking dialog keeps the
+  // application out of use until the received data has replaced the current data.
+  const followIncomingTransfer = (offerId, options = {}) => {
+    if (!offerId || followingIncomingOfferId === offerId) return;
+    followingIncomingOfferId = offerId;
+    const stored = readIncomingTransfer();
+    const resumed = stored?.offer_id === offerId ? stored : null;
+    let state = {
+      offer_id: offerId,
+      block: options.block ?? resumed?.block ?? true,
+      hidden: resumed ? Boolean(resumed.hidden) : Boolean(options.hidden),
+      title: options.title || resumed?.title || 'Incoming server transfer',
+    };
+    storeIncomingTransfer(state);
+    let dialogShown = false;
+    let blocking = false;
+    let rejectedRequests = 0;
+    const closeDialog = () => {
+      if (dialogShown) hideLoadingOverlay();
+      dialogShown = false;
+      blocking = false;
+    };
+    const finish = () => {
+      if (readIncomingTransfer()?.offer_id === offerId) storeIncomingTransfer(null);
+      closeDialog();
+      followingIncomingOfferId = '';
+    };
+    const hideDialog = () => {
+      state = {...state, hidden: true};
+      storeIncomingTransfer(state);
+      closeDialog();
+    };
+    const poll = async () => {
+      // Another operation may have closed or taken over the shared dialog.
+      if (dialogShown && (loadingOverlay?.hidden || loadingTitle?.textContent !== state.title)) {
+        dialogShown = false;
+        blocking = false;
+      }
+      const latest = readIncomingTransfer();
+      if (latest?.offer_id === offerId) state = {...state, hidden: Boolean(latest.hidden)};
+      let response;
+      try {
+        response = await fetch(`/admin/import-export/transfers/offers/${encodeURIComponent(offerId)}`, {
+          credentials: 'same-origin', headers: {Accept: 'application/json'}, cache: 'no-store',
+        });
+      } catch (_error) {
+        window.setTimeout(() => { void poll(); }, 5000);
+        return;
+      }
+      const responseType = response.headers.get('content-type') || '';
+      if (response.status === 401 || response.status === 403 || response.redirected || !responseType.includes('application/json')) {
+        // A configuration swap during an import can reject a few requests.
+        rejectedRequests += 1;
+        if (rejectedRequests < 40) {
+          window.setTimeout(() => { void poll(); }, 1500);
+          return;
+        }
+        finish();
+        showInfoDialog('Reload the page and log in again to see the result of the incoming transfer.', {title: 'Incoming server transfer', tone: 'info'});
+        return;
+      }
+      rejectedRequests = 0;
+      const offer = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        finish();
+        showInfoDialog(offer.detail || 'The transfer status could not be read.', {title: 'Incoming Transfer Error', tone: 'error'});
+        return;
+      }
+      if (offer.status === 'ready') {
+        finish();
+        showInfoDialog(offer.notice || 'The incoming transfer was imported successfully.', {title: 'Incoming Transfer Complete', tone: 'info'});
+        return;
+      }
+      if (['failed', 'rejected', 'expired', 'cancelled'].includes(offer.status)) {
+        finish();
+        showInfoDialog(offer.error || 'The incoming transfer could not be completed.', {title: 'Incoming Transfer Error', tone: 'error'});
+        return;
+      }
+      const importing = offer.status === 'received' || offer.status === 'importing';
+      if (importing && state.block) {
+        if (!blocking) {
+          showLoadingOverlay(state.title, 'Importing the received package.');
+          dialogShown = true;
+          blocking = true;
+        }
+      } else if (!state.hidden) {
+        // Another operation's dialog is not replaced; the transfer dialog waits for it.
+        if (!dialogShown && loadingOverlay?.hidden) {
+          showLoadingOverlay(state.title, 'Waiting for the source server to start sending the package.');
+          dialogShown = true;
+          if (loadingHide instanceof HTMLButtonElement) {
+            loadingHide.hidden = false;
+            loadingHide.onclick = hideDialog;
+          }
+        }
+      } else if (dialogShown && !blocking) {
+        // Hidden from another tab.
+        closeDialog();
+      }
+      if (dialogShown) {
+        setLoadingProgress(offer.progress);
+        if (loadingCopy) {
+          const progress = offer.progress ? ` — ${offer.progress}%` : '';
+          const copies = {
+            accepted: 'Waiting for the source server to start sending the package',
+            receiving: 'Receiving the package from the source server',
+            received: 'Package received. Starting the import',
+            importing: `Importing the received package${offer.phase ? `: ${offer.phase}` : ''}`,
+            cancelling: 'Cancelling the incoming transfer',
+          };
+          loadingCopy.textContent = `${copies[offer.status] || 'Incoming transfer in progress'}${progress}.`;
+        }
+      }
+      window.setTimeout(() => { void poll(); }, 1200);
+    };
+    void poll();
   };
   const pollIncomingTransferOffers = async (preferredOfferId = '') => {
     if (reviewingOffer || pollingOffers) return;
@@ -7470,6 +7657,10 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       }
       if (!response.ok) return;
       const payload = await response.json().catch(() => ({}));
+      // A running import keeps every open page out of use, not only the page that accepted it.
+      const activeImport = (Array.isArray(payload.active_imports) ? payload.active_imports : [])
+        .find((item) => item?.id && item.kind !== 'auto-calculated-fields');
+      if (activeImport) followIncomingTransfer(String(activeImport.id), {block: true});
       const offers = Array.isArray(payload.offers) ? payload.offers : [];
       const offer = offers.find((candidate) => String(candidate?.id || '') === String(preferredOfferId)) || offers[0] || null;
       if (!offer) { hidePendingOfferReminder(); return; }
@@ -7565,13 +7756,10 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
             'The transfer was accepted. Reception, import and materialization will continue in the background for the selected workspaces.',
             {title: 'Auto-calculated Fields transfer accepted'},
           );
+          followIncomingTransfer(String(offer.id), {block: false, hidden: true});
         } else {
-          showLoadingOverlay('Incoming server transfer', 'Waiting for the source server to start sending the package.');
+          followIncomingTransfer(String(offer.id), {block: true});
         }
-        pollAcceptedTransfer(offer.id).catch((error) => {
-          hideLoadingOverlay();
-          showInfoDialog(error instanceof Error ? error.message : 'The incoming transfer could not be completed.', {title: 'Incoming Transfer Error', tone: 'error'});
-        });
       } else {
         hidePendingOfferReminder();
       }
@@ -7604,10 +7792,8 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || 'The recovered transfer could not be imported.');
-        pollAcceptedTransfer(offerId).catch((error) => {
-          hideLoadingOverlay();
-          showInfoDialog(error instanceof Error ? error.message : 'The recovered transfer could not be imported.', {title: 'Recovered Transfer Error', tone: 'error'});
-        });
+        hideLoadingOverlay();
+        followIncomingTransfer(String(offerId), {block: true, title: 'Importing recovered transfer'});
       } catch (error) {
         hideLoadingOverlay();
         button.disabled = false;
@@ -7641,39 +7827,17 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
   window.addEventListener('online', () => scheduleIncomingOfferPoll(0));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleIncomingOfferPoll(0); });
   window.addEventListener('pagehide', () => window.clearTimeout(incomingOfferTimer));
+  const resumedIncomingTransfer = readIncomingTransfer();
+  if (resumedIncomingTransfer?.offer_id) followIncomingTransfer(String(resumedIncomingTransfer.offer_id));
   scheduleIncomingOfferPoll(0);
 })();
 
-// The transfer itself is server-side, so a page reload should restore its
-// progress dialog instead of making the user guess whether it is still running.
+// The transfer itself is server-side, so a page reload resumes following it:
+// its dialog comes back unless it was hidden, and its result is always shown.
 (() => {
   if (!document.querySelector('[data-server-transfer-listener]')) return;
-  let saved;
-  try { saved = JSON.parse(window.localStorage.getItem('drivetest-analyzer:active-transfer') || 'null'); } catch (_error) { saved = null; }
-  if (!saved?.status_url) return;
-  const poll = async () => {
-    const response = await fetch(saved.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}, cache: 'no-store'});
-    const transfer = await response.json().catch(() => ({}));
-    if (!response.ok || transfer.status === 'failed') {
-      try { window.localStorage.removeItem('drivetest-analyzer:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
-      if (transfer.error) showInfoDialog(transfer.error, {title: 'Server Transfer Error', tone: 'error'});
-      return;
-    }
-    if (transfer.status === 'ready') {
-      try { window.localStorage.removeItem('drivetest-analyzer:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
-      showInfoDialog(transfer.notice || 'The server transfer completed successfully.', {title: 'Server Transfer Complete', tone: 'info'});
-      return;
-    }
-    showLoadingOverlay(
-      'Resuming server transfer',
-      transfer.status === 'remote_importing'
-        ? `Importing the received package${transfer.remote_phase ? `: ${transfer.remote_phase}` : ''}${transfer.progress ? ` — ${transfer.progress}%` : ''}.`
-        : 'The server transfer is still in progress.',
-    );
-    setLoadingProgress(transfer.progress);
-    window.setTimeout(() => { poll().catch(() => {}); }, 1500);
-  };
-  poll().catch(() => {});
+  const saved = readActiveServerTransfer();
+  if (saved?.status_url) followServerTransfer(saved);
 })();
 
 document.querySelectorAll('form[data-loading-label]').forEach((form) => {

@@ -281,11 +281,11 @@ Server transfers use a persisted offer and resumable package reception:
 1. Source requests approval from the destination.
 2. A destination super-admin accepts or rejects it from any page.
 3. Source builds the package with progress.
-4. Destination receives chunks with progress.
-5. Completed reception starts import with progress.
-6. Reloading either browser restores the active transfer state.
+4. Destination receives chunks with progress, each transmission attempt into its own file.
+5. Completed reception starts import with progress, which the destination stores as each phase begins.
+6. Reloading either browser restores the active transfer state; the dialogs can be hidden while the transfer continues as a background task, except on the destination while the package is imported.
 
-Incomplete transfer files are cleaned up. Complete packages that were not imported appear in the Admin recovery table.
+An import that ends without recording its result is reported as failed to both servers. Incomplete transfer files are cleaned up, except the file of a package still being received. Complete packages that were not imported appear in the Admin recovery table.
 
 ## Performance and scale
 

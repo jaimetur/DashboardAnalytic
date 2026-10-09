@@ -3581,6 +3581,221 @@ def test_transfer_owner_can_request_job_cancellation(client) -> None:
         app_module.TRANSFER_JOBS.pop(job_id, None)
 
 
+def test_admin_pages_during_reception_keep_the_package_being_received(client, monkeypatch, tmp_path) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    monkeypatch.setattr(app_module, 'export_package_dir', lambda: tmp_path)
+    secret = 'reception-cleanup-test-secret-long-enough'
+    headers = {'X-Dashboard-Transfer-Secret': secret}
+    offer = client.post(
+        '/api/import-export/transfers/offers',
+        headers=headers,
+        json={'source': 'Test source', 'archive_version': 1, 'kind': 'config', 'content': 'config', 'workspaces': []},
+    )
+    offer_id = offer.json()['offer_id']
+    login_super(client)
+    assert client.post(f'/admin/import-export/transfers/offers/{offer_id}/accept').status_code == 200
+    exported = client.get('/admin/import-export/export?export_target=config')
+    existing_offer_ids = set(app_module.TRANSFER_OFFERS)
+    original_read_manifest = app_module.read_import_manifest
+    seen = {}
+
+    def read_manifest_after_admin_page(source):
+        # An Admin page opened (for example in a duplicated tab) while the package
+        # is being received runs the recovery of interrupted packages.
+        app_module._recover_unimported_transfer_packages()
+        seen['still_present'] = Path(source).is_file()
+        return original_read_manifest(source)
+
+    monkeypatch.setattr(app_module, 'read_import_manifest', read_manifest_after_admin_page)
+    try:
+        uploaded = client.put(
+            f'/api/import-export/transfers/offers/{offer_id}/package',
+            headers={**headers, 'Content-Type': 'application/zip'},
+            content=exported.content,
+        )
+        assert uploaded.status_code == 200
+        assert seen['still_present'] is True
+        recovered = [item for item_id, item in app_module.TRANSFER_OFFERS.items() if item_id not in existing_offer_ids]
+        assert recovered == []
+        payload = {}
+        for _ in range(100):
+            payload = client.get(f'/api/import-export/transfers/offers/{offer_id}', headers=headers).json()
+            if payload['status'] in {'ready', 'failed'}:
+                break
+            time.sleep(0.01)
+        assert payload['status'] == 'ready'
+
+        # An incomplete upload whose reception is still running is kept as well.
+        receiving_path = tmp_path / 'incoming-transfer-receiving-attempt.upload'
+        receiving_path.write_bytes(b'partial transfer')
+        app_module.repository.save_transfer_offer({
+            'id': 'receiving-offer', 'status': 'receiving', 'path': str(receiving_path), 'created_at': 1, 'updated_at': 1,
+        })
+        with app_module.TRANSFER_LOCK:
+            app_module._refresh_persisted_transfer_offers()
+        app_module._recover_unimported_transfer_packages()
+        assert receiving_path.exists()
+    finally:
+        app_module.repository.delete_transfer_offer('receiving-offer')
+        for item_id in set(app_module.TRANSFER_OFFERS) - existing_offer_ids:
+            app_module.TRANSFER_OFFERS.pop(item_id, None)
+
+
+def test_transfer_status_keeps_live_progress_and_closes_abandoned_imports(client, monkeypatch) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    secret = 'abandoned-import-test-secret-long-enough'
+    headers = {'X-Dashboard-Transfer-Secret': secret}
+    offer_id = client.post(
+        '/api/import-export/transfers/offers',
+        headers=headers,
+        json={'source': 'Test source', 'archive_version': 1, 'kind': 'config', 'content': 'config', 'workspaces': []},
+    ).json()['offer_id']
+    with app_module.TRANSFER_LOCK:
+        app_module._refresh_persisted_transfer_offers()
+        offer = app_module.TRANSFER_OFFERS[offer_id]
+        offer.update({'status': 'importing', 'phase': 'validating', 'progress': 0.0})
+        app_module._save_transfer_offer(offer)
+        # The running import reports its progress on the live offer only.
+        offer.update({'phase': 'extracting', 'progress': 42.0})
+    monkeypatch.setattr(app_module, 'ACTIVE_TRANSFER_IMPORTS', {offer_id})
+    live = client.get(f'/api/import-export/transfers/offers/{offer_id}', headers=headers).json()
+    assert live['status'] == 'importing'
+    assert live['phase'] == 'extracting'
+    assert live['progress'] == 42.0
+
+    # Once no thread runs the import, the source is told it failed instead of waiting.
+    monkeypatch.setattr(app_module, 'ACTIVE_TRANSFER_IMPORTS', set())
+    abandoned = client.get(f'/api/import-export/transfers/offers/{offer_id}', headers=headers).json()
+    assert abandoned['status'] == 'failed'
+    assert abandoned['error'] == app_module.UNFINISHED_TRANSFER_IMPORT_ERROR
+    app_module.TRANSFER_OFFERS.pop(offer_id, None)
+    app_module.repository.delete_transfer_offer(offer_id)
+
+
+def test_outgoing_transfer_reports_the_destination_reason_and_can_cancel_during_remote_import(client, monkeypatch) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    state = {'reject_package': True, 'deleted': 0, 'job_id': ''}
+
+    class FakeResponse:
+        def __init__(self, payload, status_code=200):
+            self.payload = payload
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def post(self, *args, **kwargs):
+            return FakeResponse({'offer_id': 'remote-offer'})
+
+        def get(self, url, *args, **kwargs):
+            if state.get('uploaded'):
+                # The source user cancels while the destination is importing.
+                app_module.TRANSFER_JOBS[state['job_id']]['cancel_requested'] = True
+                return FakeResponse({'status': 'importing', 'phase': 'extracting'})
+            return FakeResponse({'status': 'accepted'})
+
+        def put(self, *args, **kwargs):
+            for _chunk in kwargs['content']:
+                pass
+            if state['reject_package']:
+                return FakeResponse({'detail': 'The destination server could not receive the package: disk full'}, 400)
+            state['uploaded'] = True
+            return FakeResponse({'status': 'importing'})
+
+        def delete(self, *args, **kwargs):
+            state['deleted'] += 1
+            return FakeResponse({'cancelled': True})
+
+    def fake_export(target, destination, workspace_ids=None, progress_callback=None, include_generated_outputs=True, include_input_files=True):
+        destination.write_bytes(b'transfer-package')
+        return 'transfer.zip'
+
+    monkeypatch.setattr(app_module.httpx, 'Client', FakeClient)
+    monkeypatch.setattr(app_module, 'sleep', lambda _seconds: None)
+    monkeypatch.setattr(app_module, 'build_export_archive_file', fake_export)
+    user = app_module.SessionUser(username='super', role='super-admin')
+
+    def finished_payload(job_id):
+        payload = {}
+        for _ in range(200):
+            payload = app_module.transfer_job_payload(job_id, user)
+            if payload['status'] in {'ready', 'failed', 'cancelled'}:
+                break
+            time.sleep(0.01)
+        return payload
+
+    rejected = app_module.start_transfer_job('http://destination.example', 8080, 'config', None, user)
+    payload = finished_payload(rejected['id'])
+    assert payload['status'] == 'failed'
+    assert payload['error'] == 'The destination server could not receive the package: disk full'
+
+    state['reject_package'] = False
+    cancelled = app_module.start_transfer_job('http://destination.example', 8080, 'config', None, user)
+    state['job_id'] = cancelled['id']
+    payload = finished_payload(cancelled['id'])
+    assert payload['status'] == 'cancelled'
+    assert state['deleted'] >= 1
+    for job_id in (rejected['id'], cancelled['id']):
+        app_module.TRANSFER_JOBS.pop(job_id, None)
+
+
+def test_accepted_incoming_transfer_runs_as_a_stoppable_background_task(client, monkeypatch) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    secret = 'accepted-background-test-secret-long-enough'
+    headers = {'X-Dashboard-Transfer-Secret': secret}
+    offer_id = client.post(
+        '/api/import-export/transfers/offers',
+        headers=headers,
+        json={'source': 'Test source', 'archive_version': 1, 'kind': 'config', 'content': 'config', 'workspaces': []},
+    ).json()['offer_id']
+    login_super(client)
+    assert client.post(f'/admin/import-export/transfers/offers/{offer_id}/accept').status_code == 200
+    groups = client.get('/api/background-tasks').json()['groups']
+    task = next(task for group in groups for task in group['tasks'] if task['id'] == f'incoming-transfer:{offer_id}')
+    assert task['label'] == 'Receiving server transfer: config'
+    assert task['stop_url'] == '/api/server-background-tasks/stop'
+    assert client.post('/api/server-background-tasks/stop', data={'task_id': f'incoming-transfer:{offer_id}'}).status_code == 200
+    refused = client.put(
+        f'/api/import-export/transfers/offers/{offer_id}/package',
+        headers={**headers, 'Content-Type': 'application/zip'},
+        content=b'package',
+    )
+    assert refused.status_code == 409
+    assert refused.json()['detail'] == 'The destination server cancelled the transfer.'
+    app_module.TRANSFER_OFFERS.pop(offer_id, None)
+    app_module.repository.delete_transfer_offer(offer_id)
+
+
+def test_transfer_dialogs_can_be_hidden_and_block_the_destination_during_import() -> None:
+    root = Path(__file__).parents[1] / 'src' / 'web_interface'
+    script = (root / 'static' / 'js' / 'app.js').read_text(encoding='utf-8')
+    base = (root / 'templates' / 'base.html').read_text(encoding='utf-8')
+
+    assert '<button id="loading-hide" type="button" class="ghost-link loading-cancel-button" hidden>Hide</button>' in base
+    assert 'function followServerTransfer(initialState) {' in script
+    assert "|| (state.hidden_status !== 'remote_importing' && status === 'remote_importing');" in script
+    assert 'const followIncomingTransfer = (offerId, options = {}) => {' in script
+    assert 'if (importing && state.block) {' in script
+    assert "if (activeImport) followIncomingTransfer(String(activeImport.id), {block: true});" in script
+
+
 def test_transfer_url_explicit_port_overrides_prefilled_default_port() -> None:
     import src.DriveTestAnalyzer as app_module
 
