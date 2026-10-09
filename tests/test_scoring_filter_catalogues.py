@@ -63,7 +63,8 @@ def test_scoring_vendor_catalogue_uses_pure_labels_without_scanning_rows(scoring
         item['catalogue'] for item in captured['scoring_datasets']
         if item['file_name'] == 'UK_Q2_2026_NSA_Data.csv'
     )
-    assert catalogue['operators'] == ['3', 'EE', 'O2', 'VF_SA', 'VF_UK']
+    # Operator Maps order (EE, 3, O2), then the Operators missing from the maps.
+    assert catalogue['operators'] == ['EE', '3', 'O2', 'VF_SA', 'VF_UK']
     # Vendor Maps order: vendors, then mixed groups, then Operators without a Vendor in Operator Maps order.
     assert catalogue['vendors'] == ['Ericsson', 'Huawei', 'Mixed_Vendor', 'EE - All', 'O2 - All', 'VF_SA - All']
 

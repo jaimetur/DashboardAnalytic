@@ -6353,18 +6353,18 @@ def test_admin_vendor_mappings_support_aliases_colours_and_reordering(client) ->
     ]
 
     created = client.post('/workspace-config/vendor-mappings/save', data={
-        'canonical_value': 'Nokia', 'aliases': 'Nokia Networks', 'color': '#123456',
+        'canonical_value': 'Ciena', 'aliases': 'Ciena Networks', 'color': '#123456',
     }, follow_redirects=False)
     assert created.status_code == 303
-    assert app_module.repository.list_vendor_mappings()['nokia networks'] == 'Nokia'
+    assert app_module.repository.list_vendor_mappings()['ciena networks'] == 'Ciena'
     assert app_module.repository.list_vendor_mapping_groups()[-1]['color'] == '#123456'
 
     moved = client.post('/workspace-config/vendor-mappings/move', data={
-        'canonical_value': 'Nokia', 'direction': 'up',
+        'canonical_value': 'Ciena', 'direction': 'up',
     }, follow_redirects=False)
     assert moved.status_code == 303
     reordered = app_module.repository.list_vendor_mapping_groups()
-    assert [group['canonical'] for group in reordered][-2:] == ['Nokia', '(blank)']
+    assert [group['canonical'] for group in reordered][-2:] == ['Ciena', '(blank)']
 
     page = client.get('/workspace-config')
     assert 'data-panel-state-key="admin:vendor-mappings"' in page.text
