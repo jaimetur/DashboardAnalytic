@@ -96,6 +96,8 @@ KEY_SCHEME = '3'
 KEY_SCHEME_STATE_KEY = 'nq_calls_key_scheme'
 TRACKING_FORMAT = 'nq-call-tracking'
 TRACKING_FORMAT_VERSION = 3
+CONFIGURATION_FORMAT = 'nq-calls-configuration'
+CONFIGURATION_FORMAT_VERSION = 1
 UNASSIGNED = '__unassigned__'
 MAX_COMMENT_LENGTH = 5000
 PAGE_SIZES = (25, 50, 100, 200)
@@ -3982,13 +3984,36 @@ def export_tracking_document(task_repository: Any) -> bytes:
             f"SELECT call_key, field_key, value, updated_by, updated_at FROM {NQ_FIELD_VALUES_TABLE} "
             "ORDER BY call_key, field_key")]
     document = {
-        'format': TRACKING_FORMAT, 'version': TRACKING_FORMAT_VERSION, 'options': list_options(task_repository),
-        'root_causes': list_root_causes(task_repository), 'fields': list_fields(task_repository),
-        'sections': list_sections(task_repository), 'status_rules': status_rules(task_repository),
-        'table_columns': table_columns(task_repository),
+        'format': TRACKING_FORMAT, 'version': TRACKING_FORMAT_VERSION, **_configuration(task_repository),
         'tracking': tracking, 'comments': comments, 'history': history, 'field_values': values, 'rca_results': rca_results,
     }
     return json.dumps(document, ensure_ascii=False, indent=2).encode('utf-8')
+
+
+def _configuration(task_repository: Any) -> dict[str, Any]:
+    return {
+        'options': list_options(task_repository), 'root_causes': list_root_causes(task_repository),
+        'fields': list_fields(task_repository), 'sections': list_sections(task_repository),
+        'status_rules': status_rules(task_repository), 'table_columns': table_columns(task_repository),
+    }
+
+
+def export_configuration_document(task_repository: Any) -> bytes:
+    """The Analysis Center configuration of a workspace, without the follow-up of its calls."""
+    ensure_nq_tables(task_repository)
+    document = {'format': CONFIGURATION_FORMAT, 'version': CONFIGURATION_FORMAT_VERSION, **_configuration(task_repository)}
+    return json.dumps(document, ensure_ascii=False, indent=2).encode('utf-8')
+
+
+def import_configuration_document(task_repository: Any, payload: bytes | str) -> None:
+    """Merge an Analysis Center configuration like the configuration part of a tracking document."""
+    document = json.loads(payload.decode('utf-8') if isinstance(payload, bytes) else payload)
+    if not isinstance(document, dict) or document.get('format') != CONFIGURATION_FORMAT:
+        raise ValueError('The file is not a Non-Qualified Calls configuration export.')
+    if int(document.get('version') or 0) > CONFIGURATION_FORMAT_VERSION:
+        raise ValueError('The Non-Qualified Calls configuration export was created by a newer version.')
+    ensure_nq_tables(task_repository)
+    _merge_configuration(task_repository, document)
 
 
 def _incoming_root_catalog(document: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -4007,31 +4032,10 @@ def _incoming_root_catalog(document: dict[str, Any]) -> dict[str, list[dict[str,
     return catalog
 
 
-def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
-    """Merge a tracking document; returns the number of calls whose follow-up was added or updated.
-
-    Missing statuses, teams, fields, list values and root cause catalog entries are added, the
-    sections and status rules of the document are taken, newer follow-up replaces older follow-up,
-    and comments, history entries and RCA results are added once, so importing the same document
-    again changes nothing.
-    """
-    document = json.loads(payload.decode('utf-8') if isinstance(payload, bytes) else payload)
-    if not isinstance(document, dict) or document.get('format') != TRACKING_FORMAT:
-        raise ValueError('The file is not a Non-Qualified Calls tracking export.')
-    if int(document.get('version') or 0) > TRACKING_FORMAT_VERSION:
-        raise ValueError('The Non-Qualified Calls tracking export was created by a newer version.')
-    ensure_nq_tables(task_repository)
-
-    def records(name: str) -> list[dict[str, Any]]:
-        items = document.get(name) or []
-        if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
-            raise ValueError(f'The "{name}" section of the tracking export is invalid.')
-        return items
-
+def _merge_configuration(task_repository: Any, document: dict[str, Any]) -> None:
+    """Add the missing statuses, teams, fields, list values and root cause catalog entries of a document and take its
+    sections and status rules (the table columns, suggestion rule and Require setting only where the workspace has none)."""
     options = document.get('options') if isinstance(document.get('options'), dict) else {}
-    tracking, comments, history = records('tracking'), records('comments'), records('history')
-    value_records, rca_records = records('field_values'), records('rca_results')
-    touched: set[str] = set()
     # Missing fields are added (in their section) and the values of the list fields are merged.
     incoming_fields = [item for item in document.get('fields') or [] if isinstance(item, dict) and item.get('key') and item.get('label')]
     if incoming_fields:
@@ -4100,6 +4104,33 @@ def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
             task_repository.set_workspace_state(STATUS_RULES_STATE_KEY, json.dumps(rules, ensure_ascii=False))
         except ValueError:
             pass
+
+
+def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
+    """Merge a tracking document; returns the number of calls whose follow-up was added or updated.
+
+    Missing statuses, teams, fields, list values and root cause catalog entries are added, the
+    sections and status rules of the document are taken, newer follow-up replaces older follow-up,
+    and comments, history entries and RCA results are added once, so importing the same document
+    again changes nothing.
+    """
+    document = json.loads(payload.decode('utf-8') if isinstance(payload, bytes) else payload)
+    if not isinstance(document, dict) or document.get('format') != TRACKING_FORMAT:
+        raise ValueError('The file is not a Non-Qualified Calls tracking export.')
+    if int(document.get('version') or 0) > TRACKING_FORMAT_VERSION:
+        raise ValueError('The Non-Qualified Calls tracking export was created by a newer version.')
+    ensure_nq_tables(task_repository)
+
+    def records(name: str) -> list[dict[str, Any]]:
+        items = document.get(name) or []
+        if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
+            raise ValueError(f'The "{name}" section of the tracking export is invalid.')
+        return items
+
+    tracking, comments, history = records('tracking'), records('comments'), records('history')
+    value_records, rca_records = records('field_values'), records('rca_results')
+    touched: set[str] = set()
+    _merge_configuration(task_repository, document)
     with task_repository.connection() as connection:
         for item in tracking:
             call_key = _text(item.get('call_key'))
@@ -4468,6 +4499,8 @@ def install_non_qualified_calls_routes(core: Any) -> None:
             'tracking_refs': nq_catalog.TRACKING_REFS, 'rca_refs': nq_catalog.RCA_REFS, 'call_fields': list(CATALOG_CALL_FIELDS),
             'sections': list_sections(repository), 'default_sections': nq_catalog.default_sections(),
             'status_rules': status_rules(repository), 'default_status_rules': nq_catalog.default_status_rules(),
+            'default_options': {'statuses': [{'name': name, 'color': color, 'closed': closed} for name, color, closed in DEFAULT_STATUSES],
+                                'teams': [{'name': name, 'color': color, 'members': []} for name, color in DEFAULT_TEAMS]},
             'rule_operators': nq_catalog.RULE_OPERATORS, 'condition_fields': nq_catalog.condition_fields(list_fields(repository)),
             'rca_results': rca_results_summary(repository), 'rca_sources': nq_rca.SOURCE_LABELS,
             'table_columns': table_columns(repository), 'optional_columns': OPTIONAL_COLUMNS,

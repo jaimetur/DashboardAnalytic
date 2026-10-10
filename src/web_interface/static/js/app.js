@@ -5416,7 +5416,7 @@ function setupWorkspaceUserPickers() {
 // Workspace content exported from the active workspace; its Full Workspace package already contains all of it.
 const workspaceElementExportTargets = new Set([
   'dashboards', 'ppt-templates', 'main-cities', 'mappings-reference-data', 'scoring-configuration',
-  'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking',
+  'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'nq-calls-configuration',
 ]);
 
 // The Input and Output folders of a backup only make sense with the workspace database they belong to.
@@ -6829,7 +6829,7 @@ function importPackageContents(payload) {
     'scoring-configuration': 'Scoring & GAP Analysis Configuration',
     'auto-calculated-fields': 'Auto-calculated Fields',
     'query-builder-queries': 'Query Builder Queries', 'reporting-jobs': 'Reporting Jobs',
-    'nq-call-tracking': 'NQ Call Tracking',
+    'nq-call-tracking': 'NQ Call Tracking', 'nq-calls-configuration': 'NQ Calls Configuration',
   };
   const targets = Array.isArray(payload.targets) && payload.targets.length ? payload.targets : [payload.kind];
   const workspaceTargets = new Set([
@@ -7699,6 +7699,8 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         reporting_jobs: 'Reporting Jobs',
         'nq-call-tracking': 'NQ Call Tracking',
         nq_call_tracking: 'NQ Call Tracking',
+        'nq-calls-configuration': 'NQ Calls Configuration',
+        nq_calls_configuration: 'NQ Calls Configuration',
       };
       const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character]));
       const describeTransferItem = (item) => transferContentLabels[String(item)] || String(item).replaceAll('-', ' ').replaceAll('_', ' ');

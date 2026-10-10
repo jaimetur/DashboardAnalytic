@@ -6277,7 +6277,7 @@ ARCHIVE_COMPONENTS = frozenset({
 })
 WORKSPACE_ARCHIVE_COMPONENTS = frozenset({
     'workspace_database', 'input', 'output', 'dashboards', 'report_templates', 'mappings_reference_data',
-    'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking', 'main_cities',
+    'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking', 'nq_calls_configuration', 'main_cities',
     'scoring_configuration',
 })
 ARCHIVE_KIND_COMPONENTS = {
@@ -6294,7 +6294,7 @@ ARCHIVE_KIND_COMPONENTS = {
 }
 WORKSPACE_ELEMENT_EXPORT_TARGETS = frozenset({
     'ppt-templates', 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'query-builder-queries',
-    'reporting-jobs', 'nq-call-tracking', 'main-cities', 'scoring-configuration',
+    'reporting-jobs', 'nq-call-tracking', 'nq-calls-configuration', 'main-cities', 'scoring-configuration',
 })
 STATIC_EXPORT_TARGETS = frozenset({'config', 'config-with-templates', 'full-environment'})
 UNCOMPRESSED_ARCHIVE_SUFFIXES = frozenset({
@@ -6350,6 +6350,7 @@ def archive_workspace_components(manifest: dict[str, Any]) -> list[str]:
         'query-builder-queries': ('query_builder_queries',),
         'reporting-jobs': ('reporting_jobs',),
         'nq-call-tracking': ('nq_call_tracking',),
+        'nq-calls-configuration': ('nq_calls_configuration',),
     }
     return list(fallback.get(str(manifest.get('kind') or ''), ()))
 
@@ -6441,6 +6442,8 @@ def archive_workspace_components_for_target(
         return ['reporting_jobs']
     if target == 'nq-call-tracking':
         return ['nq_call_tracking']
+    if target == 'nq-calls-configuration':
+        return ['nq_calls_configuration']
     if target.startswith('workspace:') or target in {'workspace', 'full-environment'}:
         return full_workspace_archive_components(
             include_input_files=include_input_files or target == 'full-environment',
@@ -6688,7 +6691,7 @@ def create_recurring_database_backup(
         component for component in (
             'workspace_database', 'dashboards', 'input', 'output', 'report_templates',
             'mappings_reference_data', 'main_cities', 'auto_calculated_fields', 'query_builder_queries',
-            'reporting_jobs', 'nq_call_tracking', 'scoring_configuration',
+            'reporting_jobs', 'nq_call_tracking', 'nq_calls_configuration', 'scoring_configuration',
         )
         if component in components
     ]
@@ -6732,6 +6735,8 @@ def create_recurring_database_backup(
             total_bytes += len(_reporting_jobs_payload(workspace))
         if 'nq_call_tracking' in components:
             total_bytes += len(_nq_call_tracking_payload(workspace))
+        if 'nq_calls_configuration' in components:
+            total_bytes += len(_nq_calls_configuration_payload(workspace))
         if 'input' in components:
             total_bytes += source_tree_size(workspace.input_dir)
         if 'output' in components:
@@ -6797,6 +6802,9 @@ def create_recurring_database_backup(
                 if 'nq_call_tracking' in components:
                     report_progress(f'Exporting NQ Call Tracking for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_nq_call_tracking(archive, workspace, archive_workspace_root, archived_bytes)
+                if 'nq_calls_configuration' in components:
+                    report_progress(f'Exporting NQ Calls Configuration for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_workspace_nq_calls_configuration(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'input' in components:
                     report_progress(f'Archiving input files for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_tree(archive, workspace.input_dir, f'{archive_workspace_root}/input', progress_callback=archived_bytes, cancel_callback=ensure_not_cancelled)
@@ -7111,6 +7119,8 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
         components.append('reporting_jobs')
     if any(name.startswith('workspaces/') and '/nq-call-tracking/nq-call-tracking.json' in name for name in names):
         components.append('nq_call_tracking')
+    if any(name.startswith('workspaces/') and '/nq-calls-configuration/nq-calls-configuration.json' in name for name in names):
+        components.append('nq_calls_configuration')
     if any(name.startswith('workspaces/') and '/input/' in name for name in names):
         components.append('input')
     if any(name.startswith('workspaces/') and '/output/' in name for name in names):
@@ -7189,6 +7199,8 @@ def restore_database_backup(
                 total_steps += int(f'{prefix}reporting-jobs/reporting-jobs.json' in name_set)
             if 'nq_call_tracking' in selected:
                 total_steps += int(f'{prefix}nq-call-tracking/nq-call-tracking.json' in name_set)
+            if 'nq_calls_configuration' in selected:
+                total_steps += int(f'{prefix}nq-calls-configuration/nq-calls-configuration.json' in name_set)
             for component in ('input', 'output'):
                 if component in selected:
                     total_steps += sum(name.startswith(f'{prefix}{component}/') for name in names)
@@ -7315,6 +7327,13 @@ def restore_database_backup(
                         progress_callback(f'Restoring NQ Call Tracking for {workspace_name}', completed_steps, total_steps)
                     _restore_workspace_nq_call_tracking(workspace, archive.read(member))
                     advance(f'NQ Call Tracking restored for {workspace_name}')
+            if 'nq_calls_configuration' in selected:
+                member = f'{prefix}nq-calls-configuration/nq-calls-configuration.json'
+                if member in names:
+                    if progress_callback:
+                        progress_callback(f'Restoring NQ Calls Configuration for {workspace_name}', completed_steps, total_steps)
+                    _restore_workspace_nq_calls_configuration(workspace, archive.read(member))
+                    advance(f'NQ Calls Configuration restored for {workspace_name}')
             for component, destination in (('input', workspace.input_dir), ('output', workspace.output_dir)):
                 if component not in selected:
                     continue
@@ -7865,6 +7884,35 @@ def _restore_workspace_nq_call_tracking(workspace: Workspace, payload: bytes) ->
         raise ValueError(f'NQ Call Tracking for "{workspace.name}" is invalid: {exc}') from exc
 
 
+def _nq_calls_configuration_payload(workspace: Workspace) -> bytes:
+    """Portable Non-Qualified Calls Analysis Center configuration of a workspace, without the follow-up of its calls."""
+    from src.modules.non_qualified_calls import export_configuration_document
+
+    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+    return export_configuration_document(task_repository)
+
+
+def _archive_workspace_nq_calls_configuration(
+    archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str,
+    progress_callback: Callable[[int], None] | None = None,
+) -> None:
+    payload = _nq_calls_configuration_payload(workspace)
+    archive.writestr(f'{archive_prefix}/nq-calls-configuration/nq-calls-configuration.json', payload)
+    if progress_callback:
+        progress_callback(len(payload))
+
+
+def _restore_workspace_nq_calls_configuration(workspace: Workspace, payload: bytes) -> None:
+    """Merge the Non-Qualified Calls configuration of a package into a workspace."""
+    from src.modules.non_qualified_calls import import_configuration_document
+
+    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+    try:
+        import_configuration_document(task_repository, payload)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f'NQ Calls Configuration for "{workspace.name}" is invalid: {exc}') from exc
+
+
 _CURRENT_WORKSPACE_SCHEMA: dict[str, set[str]] | None = None
 _CURRENT_WORKSPACE_SCHEMA_LOCK = Lock()
 
@@ -8001,6 +8049,9 @@ def export_archive_filename(target: str | Iterable[str]) -> str:
     if target == 'nq-call-tracking':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_nq-call-tracking_{generated_at}.zip'
+    if target == 'nq-calls-configuration':
+        workspace_name = active_workspace.name if active_workspace else 'workspace'
+        return f'{workspace_name}_nq-calls-configuration_{generated_at}.zip'
     if target == 'config-with-templates':
         return f'drivetest-analyzer-config-with-ppt-templates_{generated_at}.zip'
     if target == 'full-environment':
@@ -8201,6 +8252,18 @@ def _build_single_export_archive_file(
             )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_workspace_nq_call_tracking(archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback)
+        elif target == 'nq-calls-configuration':
+            source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+            source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+            if not source_workspace:
+                raise ValueError('Open a workspace before exporting NQ Calls Configuration.')
+            archive_path = f'workspaces/{source_workspace.name}/nq-calls-configuration/nq-calls-configuration.json'
+            manifest = archive_manifest(
+                'nq-calls-configuration', source_workspace={'id': source_workspace.id, 'name': source_workspace.name},
+                workspace_components=archive_workspace_components_for_target(target), archive_path=archive_path,
+            )
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            _archive_workspace_nq_calls_configuration(archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback)
         elif target.startswith('workspace:'):
             workspace = workspace_registry.get(target.removeprefix('workspace:'))
             if not workspace:
@@ -8522,6 +8585,10 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
         return ('NQ Call Tracking', [name] if name else [])
+    if kind == 'nq-calls-configuration':
+        source = manifest.get('source_workspace')
+        name = str(source.get('name') or '') if isinstance(source, dict) else ''
+        return ('NQ Calls Configuration', [name] if name else [])
     if kind == 'workspace':
         workspace = manifest.get('workspace')
         name = str(workspace.get('name') or '') if isinstance(workspace, dict) else ''
@@ -8560,7 +8627,8 @@ def _recover_unimported_transfer_packages() -> None:
             if kind not in {
                 'config', 'workspace', 'full-environment', 'ppt-templates',
                 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
-                'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'database-backup', 'bundle',
+                'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'nq-calls-configuration',
+                'database-backup', 'bundle',
             }:
                 raise ValueError('Unsupported transfer package.')
         except (OSError, ValueError, zipfile.BadZipFile):
@@ -9582,6 +9650,26 @@ def _apply_import_archive(
             payload = archive.read(member)
             imported_count = sum(_restore_workspace_nq_call_tracking(workspace, payload) for workspace in destinations)
             return f'Imported the follow-up of {imported_count} Non-Qualified Calls into {len(destinations)} workspaces.'
+        if kind == 'nq-calls-configuration':
+            member = str(manifest.get('archive_path') or '')
+            if (
+                member not in archive.namelist()
+                or not re.fullmatch(r'workspaces/[^/]+/nq-calls-configuration/nq-calls-configuration\.json', member)
+            ):
+                raise ValueError('The package does not contain a valid NQ Calls Configuration.')
+            destinations = [workspace_registry.get(workspace_id) for workspace_id in destination_workspace_ids]
+            destinations = [workspace for workspace in destinations if workspace]
+            if not destinations:
+                source = manifest.get('source_workspace')
+                if isinstance(source, dict) and source.get('id'):
+                    candidate = workspace_registry.get(str(source['id']))
+                    destinations = [candidate] if candidate else []
+            if not destinations:
+                raise ValueError('Select at least one destination workspace.')
+            payload = archive.read(member)
+            for workspace in destinations:
+                _restore_workspace_nq_calls_configuration(workspace, payload)
+            return f'Imported the NQ Calls Configuration into {len(destinations)} workspaces.'
         if kind == 'full-environment':
             _safe_extract_archive_prefix(archive, staging_root, 'config', extracted)
             if progress_callback:
@@ -9820,6 +9908,7 @@ def _transfer_content_label(target: str | Iterable[str]) -> str:
         'query-builder-queries': 'Query Builder Queries',
         'reporting-jobs': 'Reporting Jobs',
         'nq-call-tracking': 'NQ Call Tracking',
+        'nq-calls-configuration': 'NQ Calls Configuration',
     }
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
@@ -10365,7 +10454,7 @@ def require_import_export_permission(user: SessionUser, target: str) -> None:
     """Authorize imports; admins may restore templates and fields into accessible workspaces."""
     if user.role == 'super-admin' or target in {
         'ppt-templates', 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
-        'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking',
+        'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'nq-calls-configuration',
     }:
         return
     raise HTTPException(
@@ -10399,7 +10488,7 @@ def require_export_permission(user: SessionUser, target: str) -> None:
     """Authorize exports and transfers without exposing other workspaces."""
     if user.role == 'super-admin':
         return
-    if target in {'auto-calculated-fields', 'ppt-templates', 'dashboards', 'mappings-reference-data', 'main-cities', 'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking'}:
+    if target in {'auto-calculated-fields', 'ppt-templates', 'dashboards', 'mappings-reference-data', 'main-cities', 'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'nq-calls-configuration'}:
         if active_workspace and repository.user_has_workspace_access(user.username, active_workspace.id):
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Open a workspace you can access first.')
@@ -10572,6 +10661,7 @@ def render_admin_template(
         {'value': 'query-builder-queries', 'label': 'Query Builder Queries (from active workspace)', 'disabled': not active_workspace},
         {'value': 'reporting-jobs', 'label': 'Reporting Jobs (from active workspace)', 'disabled': not active_workspace},
         {'value': 'nq-call-tracking', 'label': 'NQ Call Tracking (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'nq-calls-configuration', 'label': 'NQ Calls Configuration (from active workspace)', 'disabled': not active_workspace},
         {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + PPT Templates + Main Cities + Mappings & Reference Data + Scoring & GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + NQ Call Tracking + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
@@ -10592,7 +10682,7 @@ def render_admin_template(
         ('Configuration Content', [option for option in export_options if option['value'] == 'config']),
         ('Current Workspace Content', [
             option for option in export_options
-            if option['value'] in {'dashboards', 'ppt-templates', 'main-cities', 'mappings-reference-data', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking'}
+            if option['value'] in {'dashboards', 'ppt-templates', 'main-cities', 'mappings-reference-data', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'nq-calls-configuration'}
         ]),
         ('Full Workspace', [option for option in export_options if option['value'].startswith('workspace:')]),
         ('Full Environment', [option for option in export_options if option['value'] == 'full-environment']),
@@ -19665,7 +19755,8 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     if kind not in {
             'config', 'workspace', 'full-environment', 'ppt-templates',
             'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
-            'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'database-backup', 'bundle',
+            'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'nq-calls-configuration',
+            'database-backup', 'bundle',
     }:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
     if payload.get('archive_version') != ARCHIVE_VERSION:
@@ -20324,7 +20415,8 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     if kind not in {
         'config', 'workspace', 'full-environment', 'ppt-templates',
         'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
-        'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'database-backup', 'bundle',
+        'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'nq-calls-configuration',
+        'database-backup', 'bundle',
     }:
         raise ValueError('The export package type is not supported.')
     require_import_manifest_permission(user, manifest)

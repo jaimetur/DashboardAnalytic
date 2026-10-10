@@ -2674,7 +2674,7 @@ def test_multi_selection_export_applies_containment_rules_and_builds_importable_
     # Every kind of workspace content is inside the Full Workspace of the active workspace.
     assert app_module.normalize_export_targets([
         'main-cities', 'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking',
-        'workspace:default',
+        'nq-calls-configuration', 'workspace:default',
     ]) == ['workspace:default']
     # Content of the active workspace is kept beside the Full Workspace of another one.
     assert app_module.normalize_export_targets(['dashboards', 'workspace:other']) == ['dashboards', 'workspace:other']

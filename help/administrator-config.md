@@ -92,10 +92,11 @@ Reporting Jobs can only include artifacts of the modules active for their author
 - Query Builder Queries from the active workspace
 - Reporting Jobs from the active workspace
 - NQ Call Tracking from the active workspace (the Non-Qualified Calls Analysis Center: sections, field catalog, statuses, teams, Status Rules, root cause catalog, RCA script results, follow-up, comments and history)
+- NQ Calls Configuration from the active workspace (only the configuration of the Non-Qualified Calls Analysis Center: sections, field catalog with its lists, statuses, teams with their members, Status Rules, root cause catalog with its suggestion rule and table columns, without RCA script results, follow-up, comments or history)
 - An accessible workspace
 - Full Environment with selected workspaces
 
-Admins can export/transfer the active workspace's Dashboards, PPT Templates, Main Cities, Mappings & Reference Data, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries, Reporting Jobs and NQ Call Tracking, plus complete workspaces they can access. Super-admins can also export Application Config and a Full Environment.
+Admins can export/transfer the active workspace's Dashboards, PPT Templates, Main Cities, Mappings & Reference Data, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries, Reporting Jobs, NQ Call Tracking and NQ Calls Configuration, plus complete workspaces they can access. Super-admins can also export Application Config and a Full Environment.
 
 Dashboard, template, mapping and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
 
@@ -180,6 +181,7 @@ In **Backup**, select one or more content types:
 - **Workspace Content: Scoring & GAP Analysis Configuration** stores all saved methodologies, their default selection, KPI definitions and GAP KPI priorities; import and restore recover every Scoring Setup subpanel together.
 - **Workspace Content: Auto-calculated Fields** stores one JSON file containing every selected workspace definition.
 - **Workspace Content: NQ Call Tracking** stores one JSON file with the Non-Qualified Calls Analysis Center (sections, field catalog, statuses, teams, Status Rules, root cause catalog and RCA script results), follow-up, comments and history; restore merges it into the workspace without duplicating comments, history or RCA results.
+- **Workspace Content: NQ Calls Configuration** stores one JSON file with only the configuration of the Non-Qualified Calls Analysis Center (sections, field catalog, statuses, teams, Status Rules, root cause catalog and table columns); restore merges it into the workspace like the configuration part of NQ Call Tracking.
 - **Workspace Content: Input** stores raw dataset files when explicitly selected.
 - **Workspace Content: Output** stores generated Reports, Chart Sets and Dashboard PowerPoint jobs when explicitly selected.
 

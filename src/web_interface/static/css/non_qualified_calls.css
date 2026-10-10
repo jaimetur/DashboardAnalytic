@@ -91,6 +91,7 @@
 .nq-active-filters[hidden] { display: none; }
 .non-qualified-calls .nq-filter-chip { display: inline-flex; align-items: center; gap: .4rem; min-height: 0; padding: .3rem .4rem .3rem .75rem; border: 1px solid var(--nq-color); border-radius: 999px; background: var(--nq-soft); color: var(--nq-dark); font-size: .8rem; font-weight: 750; box-shadow: none; }
 .nq-filter-chip-x { display: inline-grid; place-items: center; width: 1.2rem; height: 1.2rem; border-radius: 50%; background: var(--nq-color); color: #fff; font-size: .8rem; line-height: 1; }
+.non-qualified-calls .nq-filter-chip.is-ignored { border-style: dashed; opacity: .55; }
 .nq-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1rem; margin-bottom: .8rem; }
 .nq-count { flex: 1 1 auto; margin: 0; color: var(--nq-text); font-weight: 750; }
 /* The actions of the selected calls cover the toolbar above the table (placed by the script),
@@ -826,3 +827,8 @@ button.nq-rate-box:hover { transform: translateY(-1px); box-shadow: 0 6px 14px r
 .nq-trigger .nq-rule-number { width: auto; height: auto; padding: .05rem .4rem; border-radius: 999px; font-size: .6rem; letter-spacing: .02em; }
 .nq-menu { overflow-y: auto; overscroll-behavior: contain; }
 .nq-menu.is-up { top: auto; bottom: calc(100% + 6px); }
+/* Default Statuses / Default Teams beside Add; a rule whose status must be chosen stands out. */
+.nq-option-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; }
+.nq-status-rule.is-missing { border-color: #e08a1e; background: #fff8e8; }
+.nq-rule-missing { margin: 0 0 0 2.2rem; color: #9a4a10; font-size: .8rem; font-weight: 750; }
+.nq-rule-missing[hidden] { display: none; }

@@ -419,8 +419,8 @@
     [...select.options].forEach((option) => { option.selected = false; });
     select.dispatchEvent(new Event('change', {bubbles: true}));
   };
+  // The filters applied, as chips that remove them, at the top of every panel; the NQ Rate panel dims those it ignores.
   const renderActiveFilters = (filters) => {
-    const host = $('nq-active-filters');
     const chips = [];
     const flagLabels = {open_only: 'Open calls only', mine: 'Assigned to me', without_comments: 'Without comments'};
     const entries = Object.entries(filters).filter(([field]) => !['fields', 'columns'].includes(field));
@@ -438,15 +438,22 @@
           : field.startsWith('column:') ? (select?.getAttribute('aria-label') || field.slice(7)) : (FIELD_LABELS[field] || field);
         text = `${name}: ${labels.length > 3 ? `${labels.slice(0, 3).join(', ')} +${labels.length - 3}` : labels.join(', ')}`;
       }
-      const chip = node('button', text, 'nq-filter-chip');
-      chip.type = 'button';
-      chip.title = 'Remove this filter';
-      chip.append(node('span', '×', 'nq-filter-chip-x'));
-      chip.addEventListener('click', () => clearFilter(field));
-      chips.push(chip);
+      chips.push({field, text});
     });
-    host.replaceChildren(...chips);
-    host.hidden = !chips.length;
+    root.querySelectorAll('[data-nq-active-filters]').forEach((host) => {
+      const rates = host.dataset.nqActiveFilters === 'rates';
+      host.replaceChildren(...chips.map(({field, text}) => {
+        const chip = node('button', text, 'nq-filter-chip');
+        chip.type = 'button';
+        const ignored = rates && !RATE_FILTER_KEYS.includes(field);
+        chip.classList.toggle('is-ignored', ignored);
+        chip.title = ignored ? 'This panel does not use this filter\nClick to remove it' : 'Remove this filter';
+        chip.append(node('span', '×', 'nq-filter-chip-x'));
+        chip.addEventListener('click', () => clearFilter(field));
+        return chip;
+      }));
+      host.hidden = !chips.length;
+    });
   };
 
   // -- summary ----------------------------------------------------------------
@@ -2235,6 +2242,7 @@
       state.defaultSections = payload.default_sections || [];
       state.statusRules = payload.status_rules || [];
       state.defaultStatusRules = payload.default_status_rules || [];
+      state.defaultOptions = payload.default_options || {statuses: [], teams: []};
       state.ruleOperators = payload.rule_operators || {};
       state.conditionFields = payload.condition_fields || {};
       state.rcaResults = payload.rca_results || {};
@@ -3112,6 +3120,7 @@
     ['statuses', 'teams'].forEach((kind) => {
       optionsDialog.querySelector(`[data-nq-options="${kind}"]`).replaceChildren(...state.options[kind].map((item) => optionRow(kind, item)));
     });
+    $('nq-options-error').style.color = '';
     $('nq-options-error').textContent = '';
     optionsDialog.showModal();
   };
@@ -3374,6 +3383,37 @@
   if (optionsDialog) {
     $('nq-options-open').addEventListener('click', openOptions);
     $('nq-options-cancel').addEventListener('click', () => optionsDialog.close());
+    // The defaults first, in their order and colours (a status with the same name keeps its calls); the other values
+    // stay below them, to remove when no call uses them.
+    optionsDialog.querySelectorAll('[data-nq-option-defaults]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const kind = button.dataset.nqOptionDefaults;
+        const list = optionsDialog.querySelector(`[data-nq-options="${kind}"]`);
+        const rows = [...list.querySelectorAll('.nq-option-row')];
+        const nameOf = (row) => row.querySelector('input[type="text"]').value.trim().toLowerCase();
+        const defaults = state.defaultOptions?.[kind] || [];
+        let added = 0;
+        const ordered = defaults.map((item) => {
+          const existing = rows.find((row) => nameOf(row) === item.name.toLowerCase());
+          if (!existing) {
+            added += 1;
+            return optionRow(kind, item);
+          }
+          existing.querySelector('input[type="text"]').value = item.name;
+          existing.querySelector('input[type="color"]').value = item.color;
+          const closed = existing.querySelector('.nq-option-closed input');
+          if (closed) closed.checked = Boolean(item.closed);
+          return existing;
+        });
+        const others = rows.filter((row) => !ordered.includes(row));
+        list.replaceChildren(...ordered, ...others);
+        const label = kind === 'statuses' ? 'statuses' : 'teams';
+        $('nq-options-error').style.color = 'var(--nq-muted)';
+        $('nq-options-error').textContent = `The default ${label} are first (${added} added).`
+          + (others.length ? ` ${others.length} other ${label} stay below them: remove those no call uses (×), or keep them.` : '')
+          + ' Save to apply.';
+      });
+    });
     optionsDialog.querySelectorAll('[data-nq-option-add]').forEach((button) => {
       button.addEventListener('click', () => {
         const kind = button.dataset.nqOptionAdd;
@@ -3412,6 +3452,7 @@
         await loadState();
         if (payload && state.detail) openDetail(state.detail.call.call_key, {keepTab: true});
       } catch (error) {
+        $('nq-options-error').style.color = '';
         $('nq-options-error').textContent = error.message;
       } finally {
         save.disabled = false;
@@ -4120,11 +4161,15 @@
     $('nq-config-toggle').setAttribute('aria-expanded', 'false');
   };
   if (configMenu) {
-    // The menu opens where it fits: below the button, or above it near the bottom of the window, scrolling inside if needed.
+    // The menu opens where it fits: below the button, or above it near the bottom of the window, scrolling inside if needed,
+    // and moved right when the button is too close to the left edge for it.
     const placeConfigMenu = () => {
       const button = $('nq-config-toggle').getBoundingClientRect();
       configMenu.style.maxHeight = '';
+      configMenu.style.right = '';
       configMenu.classList.remove('is-up');
+      const left = configMenu.getBoundingClientRect().left;
+      if (left < 8) configMenu.style.right = `${left - 8}px`;
       const height = configMenu.scrollHeight;
       const below = window.innerHeight - button.bottom - 16;
       const above = button.top - 16;
@@ -4200,10 +4245,19 @@
   const statusRuleBlock = (rule = {status: state.options.statuses[1]?.name || state.options.statuses[0]?.name || '', conditions: [undefined]}) => {
     const block = node('li', undefined, 'nq-root-domain nq-status-rule');
     const head = node('div', undefined, 'nq-option-row');
-    const status = selectOf('nq-rule-status nq-pill-select', 'Status', state.options.statuses.map((item) => [item.name, item.name]), rule.status);
-    const paint = () => paintPill(status, optionColor('status', status.value));
+    // A default rule whose status was renamed or removed keeps its conditions and asks for the status.
+    const known = state.options.statuses.some((item) => item.name === rule.status);
+    const entries = state.options.statuses.map((item) => [item.name, item.name]);
+    if (!known) entries.unshift(['', 'Choose a status…']);
+    const status = selectOf('nq-rule-status nq-pill-select', 'Status', entries, known ? rule.status : '');
+    const missing = known ? null : node('p', `The default rule sets ${rule.status}, which is not one of the statuses: choose the status it sets.`,
+      'nq-rule-missing');
+    const paint = () => {
+      paintPill(status, optionColor('status', status.value));
+      block.classList.toggle('is-missing', !status.value);
+      if (missing) missing.hidden = Boolean(status.value);
+    };
     status.addEventListener('change', paint);
-    paint();
     head.append(node('span', 'Set the status', 'nq-rule-word'), status, node('span', 'when every condition holds', 'nq-rule-word'));
     iconButtons(head, block, () => block.remove());
     const conditions = node('ul', undefined, 'nq-conditions');
@@ -4211,7 +4265,8 @@
     const add = node('button', 'Add Condition', 'nq-link-action');
     add.type = 'button';
     add.addEventListener('click', () => conditions.append(conditionRow()));
-    block.append(head, conditions, add);
+    block.append(head, ...(missing ? [missing] : []), conditions, add);
+    paint();
     return block;
   };
   const collectStatusRules = () => [...$('nq-status-rules').children].filter((block) => block.matches('.nq-status-rule')).map((block) => ({
@@ -4236,21 +4291,26 @@
       $('nq-status-rules').append(block);
       block.querySelector('select').focus();
     });
-    // The default rules, for the fields and statuses this workspace still has.
+    // Every default rule, with the conditions on the fields this workspace still has; a rule whose status is not one of
+    // the statuses asks for it.
     $('nq-status-rules-default').addEventListener('click', () => {
       const statuses = new Set(state.options.statuses.map((item) => item.name));
-      const rules = (state.defaultStatusRules || []).filter((rule) => statuses.has(rule.status))
+      const rules = (state.defaultStatusRules || [])
         .map((rule) => ({...rule, conditions: rule.conditions.filter((condition) => state.conditionFields[condition.field])}))
         .filter((rule) => rule.conditions.length);
       fillStatusRules(rules);
-      $('nq-status-rules-error').style.color = 'var(--nq-muted)';
-      $('nq-status-rules-error').textContent = 'The default rules are shown: review them and Save.';
+      const missing = [...new Set(rules.filter((rule) => !statuses.has(rule.status)).map((rule) => rule.status))];
+      $('nq-status-rules-error').style.color = missing.length ? '' : 'var(--nq-muted)';
+      $('nq-status-rules-error').textContent = missing.length
+        ? `The default rules are shown. ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not among the statuses: choose the status of the marked rules (or put the default statuses back in Statuses & Teams), then Save.`
+        : 'The default rules are shown: review them and Save.';
     });
     $('nq-status-rules-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       const save = $('nq-status-rules-save');
       save.disabled = true;
       try {
+        if (collectStatusRules().some((rule) => !rule.status)) throw new Error('Choose the status of every rule.');
         await api('/api/non-qualified-calls/status-rules', {method: 'PUT', body: JSON.stringify({rules: collectStatusRules()})});
         statusRulesDialog.close();
         toast('Status Rules saved: the automatic statuses follow them.');

@@ -294,6 +294,60 @@ def test_tracking_travels_with_workspace_packages_and_imports_once(client, tmp_p
     assert len(client.get(f'/api/non-qualified-calls/calls/{key}').json()['comments']) == 1
 
 
+def test_configuration_travels_without_the_follow_up(client, tmp_path):
+    enable_module()
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'voice', voice_rows())
+    login(client)
+    key = query(client)['calls'][0]['call_key']
+    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Closed'}})
+    client.post(f'/api/non-qualified-calls/calls/{key}/comments', json={'body': 'Fixed by the RAN team.'})
+    options = client.get('/api/non-qualified-calls/state').json()['options']
+    statuses = [{**item, 'previous': item['name']} for item in options['statuses']]
+    teams = [{**item, 'previous': item['name'], 'members': []} for item in options['teams']]
+    saved = client.put('/api/non-qualified-calls/options', json={
+        'statuses': [*statuses, {'name': 'Waiting Vendor', 'color': '#123456', 'closed': False, 'previous': ''}], 'teams': teams})
+    assert saved.status_code == 200, saved.text
+    document = json.loads(core._nq_calls_configuration_payload(core.active_workspace))
+    assert document['format'] == 'nq-calls-configuration'
+    assert {'options', 'fields', 'sections', 'status_rules', 'root_causes', 'table_columns'} <= set(document)
+    assert not {'tracking', 'comments', 'history', 'field_values', 'rca_results'} & set(document)
+    assert 'Waiting Vendor' in [item['name'] for item in document['options']['statuses']]
+    assert core.archive_workspace_components_for_target('nq-calls-configuration') == ['nq_calls_configuration']
+    # A tracking document is not a configuration document.
+    with pytest.raises(ValueError):
+        core._restore_workspace_nq_calls_configuration(core.active_workspace, core._nq_call_tracking_payload(core.active_workspace))
+
+    # Admin → Import/Export: the package brings back the configuration and leaves the follow-up as it is.
+    exported = client.get('/admin/import-export/export?export_target=nq-calls-configuration')
+    assert exported.status_code == 200, exported.text
+    with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        assert json.loads(archive.read(manifest['archive_path']))['format'] == 'nq-calls-configuration'
+    assert manifest['kind'] == 'nq-calls-configuration'
+    assert core.archive_workspace_components(manifest) == ['nq_calls_configuration']
+    assert client.put('/api/non-qualified-calls/options', json={'statuses': statuses, 'teams': teams}).status_code == 200
+    with core.repository.connection() as connection:
+        connection.execute(f'DELETE FROM {nq.NQ_CALL_COMMENTS_TABLE}')
+    inspection = client.post('/admin/import-export/inspect',
+                             files={'package': ('nq.zip', io.BytesIO(exported.content), 'application/zip')})
+    assert inspection.status_code == 200, inspection.text
+    job = client.post('/admin/import-export/import/jobs', data={
+        'upload_id': inspection.headers['X-Import-Upload-Id'], 'confirmed_import': 'true', 'workspace_ids': 'default'})
+    assert job.status_code == 200, job.text
+    for _attempt in range(200):
+        status = client.get(job.json()['status_url']).json()
+        if status['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert status['status'] == 'ready', status
+    state = client.get('/api/non-qualified-calls/state').json()
+    assert 'Waiting Vendor' in [item['name'] for item in state['options']['statuses']]
+    # Statuses & Teams can put the defaults back.
+    assert [item['name'] for item in state['default_options']['statuses']][:2] == ['Not Attended', 'Open']
+    detail = client.get(f'/api/non-qualified-calls/calls/{key}').json()
+    assert detail['call']['status'] == 'Closed' and detail['comments'] == []
+
+
 def test_nq_tables_appear_in_database_management(client, tmp_path):
     enable_module()
     login(client)

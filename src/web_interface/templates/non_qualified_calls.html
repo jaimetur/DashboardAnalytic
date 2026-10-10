@@ -77,6 +77,7 @@
   <details class="panel collapsible-panel nq-summary-panel" data-nq-view-panel="dashboards" data-nq-loader="summary" open data-panel-state-key="non-qualified-calls:summary">
     <summary class="collapsible-summary"><div><p class="eyebrow">Executive view</p><h2>Summary</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
+      <div class="nq-active-filters" data-nq-active-filters hidden></div>
       <div class="nq-kpis" id="nq-kpis"></div>
       <p class="nq-hint">Click any bar to drill down into its calls; click it again to remove that filter.</p>
       <div class="nq-breakdowns" id="nq-breakdowns"></div>
@@ -86,6 +87,7 @@
   <details class="panel collapsible-panel nq-rates-panel" data-nq-view-panel="dashboards" data-nq-loader="rates" open data-panel-state-key="non-qualified-calls:rates">
     <summary class="collapsible-summary"><div><p class="eyebrow">Management view</p><h2>NQ Rate by Campaign and Operator</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
+      <div class="nq-active-filters" data-nq-active-filters="rates" hidden></div>
       <div class="nq-progress-head">
         <p class="nq-hint">How many calls of each campaign and operator are Non-Qualified, out of every call of the CDRs. Each call counts once, in the most recent CDR that has it (a Final CDR before the Daily ones). Only the CDRs, Service, Campaign, Operator and NR Mode filters apply. Click a cell to drill down into its calls.</p>
         <div class="nq-rate-tabs" id="nq-rate-tabs" role="tablist" aria-label="Service"></div>
@@ -99,6 +101,7 @@
   <details class="panel collapsible-panel nq-progress-panel" data-nq-view-panel="dashboards" data-nq-loader="progress" open data-panel-state-key="non-qualified-calls:progress">
     <summary class="collapsible-summary"><div><p class="eyebrow">Follow-up</p><h2>Progress View</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
+      <div class="nq-active-filters" data-nq-active-filters hidden></div>
       <div class="nq-progress-head">
         <p class="nq-hint">How the filtered calls are being followed up: their distribution, how many were attended, moved between statuses, closed and reopened in each period, the age of open calls and the workload of teams, assignees and users.</p>
         <label class="nq-page-size">Periods<select id="nq-granularity"><option value="week">Week</option><option value="month" selected>Month</option><option value="quarter">Quarter</option><option value="year">Year</option></select></label>
@@ -122,6 +125,7 @@
   <details class="panel collapsible-panel nq-life-panel" data-nq-view-panel="dashboards" data-nq-loader="lifecycle" open data-panel-state-key="non-qualified-calls:lifecycle">
     <summary class="collapsible-summary"><div><p class="eyebrow">Analysis Center</p><h2>Lifecycle &amp; Phases</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
+      <div class="nq-active-filters" data-nq-active-filters hidden></div>
       <div class="nq-progress-head">
         <p class="nq-hint">Where the filtered calls are in their follow-up: the NQ Call Status pipeline, each status with the Status Rules that set it, whether each status follows the rules or was set by hand, the RCA identification and the values of the phase fields (Analysis, Implementation and Planning), how long calls stay in each status, the most frequent moves and the open calls without changes for a while. Click a status, a value or a card to drill down into its calls.</p>
         {% if nq_can_edit %}<button type="button" class="nq-secondary-action" data-nq-status-rules-open title="How the NQ Call Status is set from the phase fields">Status Rules</button>{% endif %}
@@ -140,6 +144,7 @@
   <details class="panel collapsible-panel nq-root-panel" data-nq-view-panel="dashboards" data-nq-loader="root" open data-panel-state-key="non-qualified-calls:root-causes">
     <summary class="collapsible-summary"><div><p class="eyebrow">Diagnosis</p><h2>Root Cause Analysis</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
+      <div class="nq-active-filters" data-nq-active-filters hidden></div>
       <div class="nq-progress-head">
         <p class="nq-hint">Where the filtered calls fail: their root cause domain and cause, Classic and WhatsApp calls, NSA and SA, each technology and the eNB/gNB of the last cell of the call, with its site, host and vendor from the workspace cell mappings.</p>
         <span class="nq-root-head-actions"><label class="nq-toggle" title="Calls without a root cause count with the one suggested by their CDR failure classification"><input type="checkbox" id="nq-root-suggestions" checked> Count suggested root causes</label>
@@ -159,6 +164,7 @@
   <details class="panel collapsible-panel nq-sources-panel" data-nq-view-panel="dashboards" data-nq-loader="sources" open data-panel-state-key="non-qualified-calls:rca-sources">
     <summary class="collapsible-summary"><div><p class="eyebrow">Analysis Center</p><h2>Root Cause Sources</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
+      <div class="nq-active-filters" data-nq-active-filters hidden></div>
       <div class="nq-progress-head">
         <p class="nq-hint">The three root cause sources of the filtered calls side by side: the RCA script results imported by JOIN_ID, the NetCheck RCA of the CDR and the Root Category and Cause selected by the analysts. See how many calls each one covers, how often they agree and how the analysts' choices relate to each RCA.</p>
         <span class="nq-root-head-actions"><span class="nq-muted" id="nq-sources-results"></span>{% if nq_can_edit %}<button type="button" class="nq-secondary-action" data-nq-rca-open title="Import the results of the RCA script by JOIN_ID">RCA Script Results</button>{% endif %}</span>
@@ -175,7 +181,7 @@
   <details class="panel collapsible-panel nq-calls-panel" data-nq-view-panel="calls" data-nq-loader="calls" open data-panel-state-key="non-qualified-calls:calls">
     <summary class="collapsible-summary"><div><p class="eyebrow">Drill-down</p><h2>Non-Qualified Calls</h2></div>{# Finds calls by their JOIN_ID (one or more, typed or pasted), centred beside the title. #}<label class="nq-join-search" data-nq-join-search><span>Join ID</span><input type="search" data-nq-typed-filter="join_id" placeholder="Find calls by one or more JOIN_IDs…" autocomplete="off" aria-label="Join ID" title="Paste one or more JOIN_IDs, separated by commas, spaces or lines"></label><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
-      <div class="nq-active-filters" id="nq-active-filters" hidden></div>
+      <div class="nq-active-filters" data-nq-active-filters hidden></div>
       <div class="nq-toolbar">
         <p class="nq-count" id="nq-count" role="status">Loading calls…</p>
         <div class="nq-toolbar-actions">
@@ -284,8 +290,8 @@
   <form method="dialog" class="nq-options-form" id="nq-options-form">
     <header><h2 id="nq-options-title">Statuses &amp; Teams</h2><p class="form-note">Shared by every user of this workspace. The NQ Call Status of each call follows the Status Rules (the first status when no rule applies) unless it is set by hand; statuses marked Closed count as closed in the summary. Renaming a value updates every call and the Status Rules; a value in use cannot be removed.</p></header>
     <div class="nq-options-columns">
-      <section><h3>Statuses</h3><ul class="nq-option-list" data-nq-options="statuses"></ul><button type="button" class="nq-secondary-action" data-nq-option-add="statuses">Add Status</button></section>
-      <section><h3>Teams</h3><ul class="nq-option-list" data-nq-options="teams"></ul><button type="button" class="nq-secondary-action" data-nq-option-add="teams">Add Team</button></section>
+      <section><h3>Statuses</h3><ul class="nq-option-list" data-nq-options="statuses"></ul><div class="nq-option-actions"><button type="button" class="nq-secondary-action" data-nq-option-add="statuses">Add Status</button><button type="button" class="nq-secondary-action" data-nq-option-defaults="statuses" title="Put the default statuses back first, in their order and colours; the other statuses stay below them">Default Statuses</button></div></section>
+      <section><h3>Teams</h3><ul class="nq-option-list" data-nq-options="teams"></ul><div class="nq-option-actions"><button type="button" class="nq-secondary-action" data-nq-option-add="teams">Add Team</button><button type="button" class="nq-secondary-action" data-nq-option-defaults="teams" title="Put the default teams back first, in their order and colours; the other teams stay below them">Default Teams</button></div></section>
     </div>
     <p class="nq-options-error" id="nq-options-error" role="alert"></p>
     <footer><button type="button" class="nq-secondary-action" id="nq-options-cancel">Cancel</button><button type="submit" class="nq-primary-action" id="nq-options-save">Save</button></footer>
