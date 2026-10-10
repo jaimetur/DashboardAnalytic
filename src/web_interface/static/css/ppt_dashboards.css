@@ -566,8 +566,9 @@
   .ds-dashboards-table tbody td[colspan] { grid-column: 1 / -1; }
   .ds-dashboards-table tbody td:last-child { border-bottom: 0; }
   .ds-dashboard-name-editor { min-width: 0; width: 100%; }
-  .ds-dashboards-table tbody td:nth-child(4) { grid-column: 1; }
-  .ds-dashboards-table tbody td:nth-child(5) { grid-column: 2; }
+  /* The status and the actions of a Dashboard use the whole width of its card. */
+  .ds-dashboards-table tbody td:nth-child(4), .ds-dashboards-table tbody td:nth-child(5) { grid-column: 1 / -1; }
+  .ds-dashboards-table tbody .ds-dashboard-status { max-width: 100%; white-space: normal; text-align: center; line-height: 1.25; }
   .ds-dashboard-actions {
     display:grid;
     grid-template-columns:repeat(4,minmax(0,1fr));

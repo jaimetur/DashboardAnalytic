@@ -215,7 +215,7 @@
     </summary>
     {% set member_items = [] %}{% for row in users %}{% set _ = member_items.append((row['id'], row['username'])) %}{% endfor %}
     <div class="table-wrap">
-      <table class="principal-table user-groups-table">
+      <table class="principal-table user-groups-table" data-phone-cards>
         <thead><tr><th>Group</th><th>Description</th><th>Members</th><th>Actions</th></tr></thead>
         <tbody>
           {% for group in user_groups %}
@@ -270,7 +270,7 @@
     </summary>
     <form id="workspace-access-form" action="/admin/workspace-access" method="post" autocomplete="off"></form>
     <div class="table-wrap">
-      <table class="principal-table workspace-access-table">
+      <table class="principal-table workspace-access-table" data-phone-cards>
         <thead><tr><th>Workspace</th><th>Access</th></tr></thead>
         <tbody>
           {% for workspace in workspace_access_rows %}
@@ -299,7 +299,7 @@
     <form id="features-activation-form" action="/admin/features" method="post" autocomplete="off"></form>
     {% if user.role != 'super-admin' %}<p class="table-help">As an admin you can grant any feature to super-admins, but you cannot remove a feature from the super-admin role or from super-admin accounts (directly, through a group or with "Nobody" by default).</p>{% endif %}
     <div class="table-wrap">
-      <table class="principal-table features-activation-table">
+      <table class="principal-table features-activation-table" data-phone-cards>
         <thead><tr><th>Feature</th><th>By default</th><th>Allowed</th><th>Forbidden</th></tr></thead>
         <tbody>
           {% for feature in feature_activation %}
@@ -336,7 +336,7 @@
       {% if module_label_settings %}
       <p class="table-help">Each row is a main tab, in the order of the main tabs; the Modules menu, the Help navigation and Features Activation follow the same order. Drag a row by its handle or use the arrows to move it. Choose the title of the tab, its short title for narrow windows, its icon and its colour (the accent of the module palette), and the label shown in its corner with its colour and an optional icon. Leave the label empty to show none; the label text turns white or dark to stay readable on its colour.</p>
       <div class="table-wrap">
-        <table class="module-labels-table" data-module-labels>
+        <table class="module-labels-table" data-module-labels data-phone-cards>
           <thead>
             <tr><th></th><th colspan="4" class="module-labels-group module-labels-group-tab">Tab</th><th colspan="4" class="module-labels-group module-labels-group-label">Label</th><th></th></tr>
             <tr><th>Order</th><th class="module-labels-tab">Module Title</th><th class="module-labels-tab">Short title</th><th class="module-labels-tab">Icon</th><th class="module-labels-tab module-labels-centered">Colour</th><th class="module-labels-label">Text</th><th class="module-labels-label module-labels-centered">Colour</th><th class="module-labels-label">Icon</th><th class="module-labels-label module-labels-centered">Icon colour</th><th>Preview</th></tr>
@@ -869,12 +869,12 @@
           <tbody><tr><td>Select a table to view its rows.</td></tr></tbody>
         </table>
       </div>
-      <div class="database-pagination" data-database-pagination hidden>
-        <button type="button" class="database-pagination-button" data-database-first>First</button>
-        <button type="button" class="database-pagination-button" data-database-previous>Previous</button>
+      <div class="database-pagination app-pager" data-database-pagination hidden>
+        <button type="button" data-database-first aria-label="First page" title="First page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14M18 6l-6 6 6 6M12 6l-6 6 6 6"/></svg></button>
+        <button type="button" data-database-previous aria-label="Previous page" title="Previous page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
         <span data-database-page-label>Page 1</span>
-        <button type="button" class="database-pagination-button" data-database-next>Next</button>
-        <button type="button" class="database-pagination-button" data-database-last>Last</button>
+        <button type="button" data-database-next aria-label="Next page" title="Next page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button type="button" data-database-last aria-label="Last page" title="Last page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5v14M6 6l6 6-6 6M12 6l6 6-6 6"/></svg></button>
       </div>
       <p class="form-note">Tables are shown 100 rows at a time. Saving or deleting a row clears cached analysis so subsequent Dashboard and Reporting requests use the changed values.</p>
       <div class="database-view-actions">

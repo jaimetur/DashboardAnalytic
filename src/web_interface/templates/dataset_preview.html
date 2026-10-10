@@ -147,7 +147,7 @@
     {% if server_paginated_preview %}
     <div class="preview-server-footer">
       <button type="button" class="preview-clear-filters" data-preview-clear-filters disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M8 5V3h8v2m-9 3 .7 12h8.6L17 8M10 11v6m4-6v6"/></svg><span data-preview-clear-label>Clear 0 Filters</span></button>
-      <nav class="preview-pagination" aria-label="Dataset preview pages">
+      <nav class="preview-pagination app-pager" aria-label="Dataset preview pages">
         <button type="button" data-preview-first-page disabled aria-label="First page" title="First page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14M18 6l-6 6 6 6M12 6l-6 6 6 6"/></svg></button>
         <button type="button" data-preview-previous-page disabled aria-label="Previous page" title="Previous page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
         <span data-preview-page-status>Page 1 of {{ ((preview_total_rows - 1) // preview_page_size) + 1 if preview_total_rows else 1 }}</span>

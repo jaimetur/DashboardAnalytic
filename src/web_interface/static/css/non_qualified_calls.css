@@ -173,11 +173,11 @@
 .nq-open-cell { width: 2rem; text-align: center; }
 .non-qualified-calls .nq-open-button { display: inline-grid; place-items: center; width: 1.9rem; height: 1.9rem; min-height: 0; padding: 0; border: 1px solid var(--nq-border); border-radius: 50%; background: #fff; color: var(--nq-color); font-size: 1.2rem; font-weight: 800; box-shadow: none; }
 .nq-table tbody tr:hover .nq-open-button { border-color: var(--nq-color); background: var(--nq-color); color: #fff; }
-.nq-pagination { display: flex; flex-wrap: wrap; justify-content: center; gap: .35rem; margin-top: .9rem; }
-.nq-pagination button { min-width: 2.3rem; min-height: 2.2rem; padding: .3rem .7rem; border: 1px solid var(--nq-border); border-radius: 9px; background: #fff; color: var(--nq-dark); font-weight: 800; box-shadow: none; }
-.nq-pagination button.is-current { border-color: var(--nq-dark); background: var(--nq-color); color: #fff; }
-.nq-pagination button:hover:not(:disabled):not(.is-current) { background: var(--nq-soft); }
-.nq-ellipsis { align-self: center; color: var(--nq-muted); }
+/* The pager of the calls (see .app-pager): the page numbers, or the page among the pages on phones. */
+.nq-pagination { --pager-accent: var(--nq-color); }
+.nq-pagination:empty { display: none; }
+.nq-pagination .nq-page-status { display: none; }
+.nq-ellipsis { align-self: center; padding: 0 .1rem; color: var(--nq-muted); }
 
 /* Call drawer */
 .nq-drawer-backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(40, 8, 20, .28); }
@@ -240,7 +240,7 @@
 /* Statuses and teams dialog */
 .nq-options-dialog { width: min(860px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--nq-border); border-radius: 16px; box-shadow: 0 24px 60px rgba(60, 10, 30, .3); }
 .nq-options-dialog::backdrop { background: rgba(40, 8, 20, .35); }
-.nq-options-form { display: grid; gap: 1rem; padding: 1.3rem; }
+.nq-options-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; padding: 1.3rem; }
 .nq-options-form header h2 { margin: 0 0 .3rem; color: var(--nq-dark); }
 .nq-options-form header p { margin: 0; }
 .nq-options-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; }
@@ -832,3 +832,101 @@ button.nq-rate-box:hover { transform: translateY(-1px); box-shadow: 0 6px 14px r
 .nq-status-rule.is-missing { border-color: #e08a1e; background: #fff8e8; }
 .nq-rule-missing { margin: 0 0 0 2.2rem; color: #9a4a10; font-size: .8rem; font-weight: 750; }
 .nq-rule-missing[hidden] { display: none; }
+
+/* Phones: every panel fits the width of the screen, the filters and indicators go two per row, the bars of tabs
+   scroll sideways and each call of the table is a card with the name of every value (its header stays above the
+   cards as a row of chips that sort and filter). */
+@media (max-width: 640px) {
+  .non-qualified-calls .nq-hero h2 { margin: .5rem 0; font-size: 1.35rem; }
+  .non-qualified-calls .nq-hero .lede { margin: .4rem 0 0; font-size: .8rem; line-height: 1.4; }
+  .nq-sync-bar { gap: .45rem; margin-bottom: .7rem; }
+  .nq-sync-status, .nq-sync-exports { width: 100%; margin-left: 0; }
+  .nq-sync-exports > * { flex: 1 1 0; justify-content: center; }
+  .nq-sync-bar .nq-hero-action { padding: .5rem .65rem; font-size: .8rem; }
+  .nq-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
+  .nq-filter-grid label { gap: .2rem; font-size: .76rem; }
+  .non-qualified-calls .nq-filter-grid .multiselect-trigger { min-height: 2.4rem; padding: .45rem .55rem; font-size: .8rem; }
+  .nq-filter-row { gap: 8px; }
+  .nq-search { flex-basis: 100%; }
+  .nq-view-switch { top: 4px; width: 100%; box-sizing: border-box; flex-wrap: nowrap; }
+  .non-qualified-calls .nq-view-switch button { flex: 1 1 0; justify-content: center; gap: .3rem; min-width: 0; padding: .45rem .35rem; font-size: .8rem; white-space: nowrap; }
+  .nq-view-switch svg { width: .95rem; height: .95rem; }
+  .nq-view-count { padding: 0 .35rem; font-size: .68rem; }
+  .nq-kpis, .nq-summary-panel .nq-kpis, .nq-rate-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .nq-kpi, .nq-rate-card { padding: 10px 11px; }
+  .nq-kpi strong, .nq-rate-card strong { font-size: 1.4rem; }
+  .nq-kpi-label { font-size: .64rem; overflow-wrap: anywhere; }
+  .nq-kpi-note { font-size: .72rem; }
+  .nq-rate-overview .nq-rate-card-total { grid-column: 1 / -1; }
+  .nq-rate-tabs, .nq-section-chips, .nq-drawer .nq-drawer-tabs { display: flex; flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .nq-rate-tabs > *, .nq-section-chips > *, .nq-drawer .nq-drawer-tabs > * { flex: 0 0 auto; }
+  .nq-progress-head { flex-wrap: wrap; gap: .5rem; }
+  .nq-pies { grid-template-columns: minmax(0, 1fr); }
+  .nq-pie { grid-template-columns: 88px minmax(0, 1fr); padding: 10px; }
+  .nq-pie-chart { width: 88px; height: 88px; }
+  .nq-pipeline-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .non-qualified-calls .nq-pipeline-step { min-width: 0; }
+  .nq-pipeline-arrow { display: none; }
+  .nq-phase-cards { gap: 10px; }
+  .nq-progress-section .nq-table-wrap { max-height: 18rem; }
+  .nq-stats-table :is(th, td):first-child, .nq-rate-table :is(th, td):first-child { position: sticky; left: 0; z-index: 1; background: #fff; box-shadow: 1px 0 0 var(--nq-border); }
+  .nq-stats-table thead th:first-child { z-index: 2; background: #f6dbe4; }
+  .nq-rate-table thead th:first-child { z-index: 2; background: var(--nq-soft); }
+  .nq-calls-panel > .collapsible-summary > .nq-join-search { flex: none; width: 100%; margin: 0; }
+  .nq-toolbar { gap: .5rem; }
+  .nq-toolbar-actions { width: 100%; gap: .4rem; }
+  .nq-toolbar-actions > * { flex: 1 1 auto; justify-content: center; }
+  .nq-bulk { left: 4px !important; right: 4px !important; width: auto !important; max-width: none !important; }
+  .nq-calls-panel .nq-table-wrap { overflow: visible; border: 0; border-radius: 0; }
+  #nq-table { display: block; min-width: 0; }
+  #nq-table thead, #nq-table tbody { display: block; }
+  #nq-table thead tr { display: flex; gap: .35rem; overflow-x: auto; padding: 0 0 .55rem; scrollbar-width: thin; }
+  #nq-table thead th { position: static; flex: 0 0 auto; padding: .35rem .55rem; border: 1px solid var(--nq-border); border-radius: 10px; }
+  #nq-table tbody { display: grid; gap: .6rem; }
+  #nq-table tbody tr, #nq-table tbody tr:nth-child(even) { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--nq-border); border-radius: 12px; background: #fff; box-shadow: 0 4px 12px rgba(125, 18, 56, .06); }
+  #nq-table tbody tr.is-selected { border-color: var(--nq-color); background: #fdf0f4; }
+  #nq-table tbody td { display: block; min-width: 0; max-width: none; padding: .4rem .6rem; border-top: 0; border-bottom: 1px solid #f7e6ec; }
+  #nq-table tbody td[data-label]::before { content: attr(data-label); display: block; margin-bottom: .15rem; color: var(--nq-muted); font-size: .6rem; font-weight: 850; letter-spacing: .03em; text-transform: uppercase; }
+  #nq-table tbody td.nq-start-cell { order: -1; grid-column: 1 / -1; padding-right: 2.6rem; background: var(--nq-softer); white-space: normal; }
+  #nq-table tbody td.nq-start-cell::before { display: none; }
+  #nq-table tbody td.nq-start-cell > span { display: inline-block; margin: 0 .45rem 0 0; }
+  #nq-table tbody td.nq-select-cell { position: absolute; top: .45rem; right: .55rem; z-index: 1; width: auto; padding: 0; border: 0; }
+  #nq-table tbody td.nq-select-cell input { width: 1.2rem; height: 1.2rem; }
+  #nq-table tbody td.nq-failure, #nq-table tbody td.nq-comments-cell, #nq-table tbody td.nq-empty { grid-column: 1 / -1; }
+  #nq-table tbody td.nq-comments-cell { width: auto; border-bottom: 0; white-space: normal; }
+  #nq-table .nq-comment-preview { display: grid; min-width: 0; }
+  .non-qualified-calls #nq-table .nq-comment-button { flex: 1 1 auto; width: auto; min-width: 0; max-width: none; }
+  #nq-table .nq-status-updated { white-space: normal; }
+  #nq-table .nq-stacked strong, #nq-table .nq-stacked span, #nq-table .nq-failure strong, #nq-table .nq-failure span { white-space: normal; overflow-wrap: anywhere; }
+  .non-qualified-calls #nq-table :is(.nq-pill-select, .nq-pill-assignee, .nq-root-select) { min-width: 0; max-width: 100%; }
+  #nq-table .nq-root-suggestion { max-width: 100%; }
+  .nq-pagination :is(.nq-page-number, .nq-ellipsis) { display: none; }
+  .nq-pagination .nq-page-status { display: inline; }
+  /* The call fills the screen: its phases go two per row and the floating page controls stay hidden behind it. */
+  .nq-drawer-tracking .nq-phase-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .3rem; }
+  .nq-drawer .nq-phase-step { flex-direction: column; align-items: flex-start; gap: .15rem; }
+  .nq-drawer .nq-phase-step .nq-pill { max-width: 100%; }
+  .nq-drawer-tracking .nq-phase-arrow { display: none; }
+  .nq-drawer-tracking .nq-pill-select { width: 100%; min-width: 0; }
+  .nq-drawer { display: block; overflow-y: auto; overscroll-behavior: contain; }
+  .nq-drawer-head { padding: .9rem .9rem .75rem; }
+  .nq-drawer-tracking { padding: .75rem .9rem; }
+  .nq-drawer .nq-drawer-tabs { position: sticky; top: 0; z-index: 3; padding: .4rem .6rem 0; background: #fff; }
+  .nq-drawer-body { overflow: visible; padding: .8rem .9rem 1rem; }
+  .nq-composer { bottom: -1rem; margin: 0 -.9rem -1rem; padding: .7rem .9rem 1rem; }
+  body:has(.nq-drawer.is-open) :is(.back-to-top, .page-panel-navigator) { display: none; }
+  /* The dialogs of the Analysis Center use the whole screen. */
+  .nq-options-dialog { width: calc(100vw - 12px); max-width: none; max-height: calc(100dvh - 12px); margin: auto; border-radius: 14px; }
+  .nq-options-form { gap: .8rem; padding: .9rem .8rem; }
+  .nq-field-toolbar > * { min-width: 0; }
+  .nq-field-toolbar input[type="search"] { flex-basis: 100%; }
+  .nq-options-form footer { flex-wrap: wrap; }
+  .nq-options-form footer > button { flex: 1 1 auto; }
+  .nq-column-filter { width: min(17rem, calc(100vw - 16px)); }
+  .nq-options-dialog .nq-option-row { flex-wrap: wrap; }
+  .nq-options-dialog :is(.nq-status-rule, .nq-field-def, .nq-root-domain) { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+  .nq-status-rule .nq-rule-status { flex: 1 1 9rem; min-width: 0; }
+  .nq-conditions { margin-left: 0; }
+  .nq-status-rule > .nq-link-action, .nq-rule-missing { margin-left: 0; }
+  .nq-field-def > .nq-option-row .nq-root-name { min-width: 0; }
+}

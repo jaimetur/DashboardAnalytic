@@ -37,6 +37,21 @@
     } catch (_error) { /* Ignore storage failures. */ }
   }
 })();
+// Tables marked data-phone-cards show each row as a card on phones (see app.css): every cell is labelled
+// with the name of its column, again whenever the rows of the table change.
+(() => {
+  const label = (table) => {
+    const names = [...(table.tHead?.rows[0]?.cells || [])].map((cell) => cell.textContent.trim());
+    [...table.tBodies].forEach((body) => [...body.rows].forEach((row) => {
+      if (row.cells.length !== names.length) return;
+      [...row.cells].forEach((cell, index) => { if (names[index]) cell.dataset.label = names[index]; });
+    }));
+  };
+  document.querySelectorAll('table[data-phone-cards]').forEach((table) => {
+    label(table);
+    new MutationObserver(() => label(table)).observe(table, {childList: true, subtree: true});
+  });
+})();
 
 function normalizeVendorFilterValue(value) {
   let configured = {};
@@ -1026,10 +1041,10 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
     let state = states.get(table);
     if (!state) {
       const pager = document.createElement('nav');
-      pager.className = 'mobile-card-pagination';
+      pager.className = 'mobile-card-pagination app-pager';
       pager.hidden = true;
       pager.setAttribute('aria-label', table.matches('.report-charts-grid') ? 'Chart pages' : (table.matches('.workspace-calculated-dimensions-list') ? 'Auto-calculated Fields pages' : 'Card pages'));
-      pager.innerHTML = '<button type="button" data-mobile-card-first aria-label="First page" title="First page">⏮</button><button type="button" data-mobile-card-previous aria-label="Previous page" title="Previous page">⬅</button><span data-mobile-card-page-label>Page 1 of 1</span><button type="button" data-mobile-card-next aria-label="Next page" title="Next page">➡</button><button type="button" data-mobile-card-last aria-label="Last page" title="Last page">⏭</button>';
+      pager.innerHTML = '<button type="button" data-mobile-card-first aria-label="First page" title="First page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14M18 6l-6 6 6 6M12 6l-6 6 6 6"/></svg></button><button type="button" data-mobile-card-previous aria-label="Previous page" title="Previous page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button><span data-mobile-card-page-label>Page 1 of 1</span><button type="button" data-mobile-card-next aria-label="Next page" title="Next page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button><button type="button" data-mobile-card-last aria-label="Last page" title="Last page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5v14M6 6l6 6-6 6M12 6l6 6-6 6"/></svg></button>';
       const placeAfter = table.closest('.table-wrap, .data-table-wrap, .queue-table-wrap, .database-editor-wrap, .catalogue-workspace-table-wrap') || table;
       placeAfter.insertAdjacentElement('afterend', pager);
       state = {page: 0, pager};
@@ -2021,7 +2036,7 @@ window.createUnifiedDatasetViewer = ({host, payload, requestPage, exportControl 
   const clear = element('button', 'preview-clear-filters'); clear.type = 'button'; clear.disabled = true; clear.setAttribute('data-preview-clear-filters', '');
   const clearLabel = element('span', '', 'Clear 0 Filters'); clearLabel.setAttribute('data-preview-clear-label', ''); clear.append(clearLabel);
   clear.prepend(svgIcon(['M4 5h16', 'M8 5V3h8v2m-9 3 .7 12h8.6L17 8', 'M10 11v6m4-6v6']));
-  const pager = element('nav', 'preview-pagination'); pager.setAttribute('aria-label', 'Dataset preview pages');
+  const pager = element('nav', 'preview-pagination app-pager'); pager.setAttribute('aria-label', 'Dataset preview pages');
   const pageButton = (attribute, label, paths) => { const button = element('button'); button.type = 'button'; button.disabled = true; button.setAttribute(attribute, ''); button.setAttribute('aria-label', label); button.title = label; button.append(svgIcon(paths)); return button; };
   const first = pageButton('data-preview-first-page', 'First page', ['M5 5v14', 'M18 6l-6 6 6 6', 'M12 6l-6 6 6 6']); const previous = pageButton('data-preview-previous-page', 'Previous page', ['M15 6l-6 6 6 6']);
   const pageStatus = element('span', '', 'Page 1 of 1'); pageStatus.setAttribute('data-preview-page-status', '');

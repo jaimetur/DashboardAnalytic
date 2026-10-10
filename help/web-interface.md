@@ -141,11 +141,12 @@ While the ready CDRs of the open workspace have Operators, Vendors or Campaigns 
 
 The interface targets compact screens around the iPhone 13 base viewport (`390 × 844`).
 
-- Panels use reduced side margins.
-- Forms and action bars stack vertically.
-- Dataset Management changes to a readable card-like table layout.
+- Panels use reduced side margins and never widen the page: wide content scrolls inside its own container.
+- Forms stack vertically, filters go two per row and action buttons are as wide as their text, sharing a row.
+- Dataset Management, Workspace Management, the Reporting Jobs and their Run History, PPT Dashboards and the Admin tables of users, user groups, workspace access, features activation and interface settings change to cards, each value under the name of its column, shown one card per page.
+- Every pager of the application, on phones and on larger screens, has the same look: a white pill with round arrow buttons (first, previous, next, last) and the page between them.
 - Chart navigation appears below the chart and before Interactive Preview.
-- Wide tables scroll inside their own containers rather than widening the page.
+- Wide data tables scroll inside their own containers rather than widening the page; in the Non-Qualified Calls tables their first column stays in view.
 - Workspace Management remains visible when expanded.
 
 On a phone, use portrait orientation for forms and landscape orientation when inspecting a very wide data table.

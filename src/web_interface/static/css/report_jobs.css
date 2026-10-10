@@ -277,3 +277,5 @@
 .report-jobs a.rj-format { text-decoration: none; }
 .report-jobs a.rj-format:hover, .report-jobs a.rj-format:focus-visible { text-decoration: underline; text-underline-offset: 2px; }
 .report-jobs .rj-duration { color: #5b6377; font-weight: 600; white-space: nowrap; }
+/* Phones: the artifacts of a job use the whole width of its card. */
+@media (max-width: 640px) { #rj-tasks tbody td:nth-child(2) { grid-column: 1 / -1; } }

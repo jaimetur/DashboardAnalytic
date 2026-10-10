@@ -7971,7 +7971,7 @@ def test_cdr_preview_paginates_and_filters_every_column(client, monkeypatch) -> 
     assert 'data-preview-next-page disabled' not in default_preview.text
     assert 'Showing 1-100 of 103 rows' in default_preview.text
     footer = default_preview.text.split('<div class="preview-server-footer">', 1)[1].split('</div>', 1)[0]
-    assert '<nav class="preview-pagination"' in footer
+    assert '<nav class="preview-pagination app-pager"' in footer
     assert footer.count('<svg viewBox="0 0 24 24"') == 5
     assert 'data-preview-first-page disabled aria-label="First page"' in footer
     assert 'data-preview-last-page aria-label="Last page"' in footer

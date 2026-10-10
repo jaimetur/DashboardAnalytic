@@ -8,7 +8,7 @@
   .scoring-hero .lede { max-width: 58rem; margin: .5rem 0; }
   .scoring-controls-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .55rem; }
   .scoring-hero-badge { display: inline-flex; align-items: center; gap: .45rem; padding: .5rem .85rem; border: 0; border-radius: 999px; background: linear-gradient(128deg, #143653, #176e77); color: #fff; font-size: .78rem; font-weight: 800; white-space: nowrap; box-shadow: 0 6px 14px rgba(20, 54, 83, .22); }
-  .scoring-controls { display: grid; gap: 1rem; }
+  .scoring-controls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   .scoring-filter-grid { display: grid; grid-template-columns: minmax(12rem,15rem) minmax(0,1fr); gap: 1rem; align-items: start; }
   .scoring-gap-reference-grid { align-items: center; }
   .scoring-context-filter-grid { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: .65rem; }
@@ -502,6 +502,15 @@
   .scoring-calculation-shortcuts > .scoring-results-config-shortcuts { flex-wrap: wrap; align-items: stretch; justify-content: flex-end; }
   .scoring-calculation-actions .scoring-profile-choice, .scoring-calculation-actions .scoring-actions button, .scoring-calculation-shortcuts a { box-sizing: border-box; min-height: 2.45rem; }
   .scoring-calculation-shortcuts a { align-self: stretch; }
+  /* Phones: the configuration shortcuts and the report actions wrap, under the calculation buttons and above the results. */
+  @media(max-width:640px) {
+    .scoring-results-tools, .scoring-calculation-actions > .scoring-calculation-shortcuts { flex-wrap: wrap; justify-content: stretch; width: 100%; margin-left: 0; overflow-x: visible; }
+    .scoring-results-tools > *, .scoring-export-actions { flex: 1 1 100%; flex-wrap: wrap; }
+    .scoring-results-tools a { flex: 1 1 auto; justify-content: center; white-space: normal; }
+    /* A job uses the whole width of its card: its CDRs and delete button go under the text instead of beside it. */
+    .scoring-job-row .scoring-job-item, .scoring-job-selector > .scoring-job-item { padding-right: .8rem; }
+    .scoring-job-row .scoring-job-item { padding-bottom: 2.6rem; }
+  }
 </style>
 
 <section class="dashboard-stack spacious-stack scoring-stack" data-scoring-workspace data-scoring-workspace-id="{{ active_workspace.id if active_workspace else '' }}" data-configuration-error="{{ scoring_configuration_error or '' }}" data-jobs-url="/api/scoring/jobs" data-selection-url="/api/scoring/selection" data-export-base="/scoring/jobs">

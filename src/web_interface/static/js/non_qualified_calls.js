@@ -1185,6 +1185,9 @@
       body.replaceChildren(row);
       return;
     }
+    // Each cell knows the name of its column: on phones the rows are cards that show it above the value.
+    const labels = [...$('nq-table').tHead.rows[0].cells].map((cell) => [...cell.querySelectorAll('[data-sort]')]
+      .map((item) => item.textContent.trim()).filter(Boolean).join(' · '));
     body.replaceChildren(...result.calls.map((call) => {
       const row = node('tr');
       row.dataset.callKey = call.call_key;
@@ -1279,6 +1282,7 @@
         root, ...fieldColumns().filter((field) => field.section !== 'rca').map((field) => fieldCell(call, field)), status, comments,
       );
       orderRowCells(row);
+      [...row.cells].forEach((cell, index) => { if (labels[index]) cell.dataset.label = labels[index]; });
       row.addEventListener('click', (event) => {
         if (event.target.closest('select, input, a')) return;
         openDetail(call.call_key);
@@ -1298,22 +1302,35 @@
     const host = $('nq-pagination');
     if (result.pages <= 1) { host.replaceChildren(); return; }
     const button = (label, page, disabled = false, current = false) => {
-      const element = node('button', label, current ? 'is-current' : '');
+      const element = node('button', label, current ? 'is-current nq-page-number' : 'nq-page-number');
       element.type = 'button';
       element.disabled = disabled;
       if (current) element.setAttribute('aria-current', 'page');
       element.addEventListener('click', () => { state.page = page; loadCalls(); });
       return element;
     };
+    // First, previous, next and last are arrows, as in every pager of the application.
+    const arrow = (name, path, page, disabled) => {
+      const element = button('', page, disabled);
+      element.className = '';
+      element.setAttribute('aria-label', `${name} page`);
+      element.title = `${name} page`;
+      element.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg>`;
+      return element;
+    };
     const pages = new Set([1, result.pages, result.page - 1, result.page, result.page + 1]);
-    const items = [button('‹ Previous', result.page - 1, result.page <= 1)];
+    const items = [arrow('First', 'M5 5v14M18 6l-6 6 6 6M12 6l-6 6 6 6', 1, result.page <= 1),
+      arrow('Previous', 'M15 6l-6 6 6 6', result.page - 1, result.page <= 1)];
     let previous = 0;
     [...pages].filter((page) => page >= 1 && page <= result.pages).sort((a, b) => a - b).forEach((page) => {
       if (page - previous > 1) items.push(node('span', '…', 'nq-ellipsis'));
       items.push(button(String(page), page, false, page === result.page));
       previous = page;
     });
-    items.push(button('Next ›', result.page + 1, result.page >= result.pages));
+    // On phones the page among the pages takes the place of the page numbers.
+    items.push(node('span', `Page ${number(result.page)} of ${number(result.pages)}`, 'nq-page-status'),
+      arrow('Next', 'M9 6l6 6-6 6', result.page + 1, result.page >= result.pages),
+      arrow('Last', 'M19 5v14M6 6l6 6-6 6M12 6l6 6-6 6', result.pages, result.page >= result.pages));
     host.replaceChildren(...items);
   };
   // The actions of the selected calls cover the toolbar right above the table, so the table
@@ -2407,6 +2424,10 @@
       const active = tab.dataset.nqTab === name;
       tab.classList.toggle('is-active', active);
       tab.setAttribute('aria-selected', String(active));
+      // Where the tabs scroll sideways (phones), the chosen one comes into view.
+      if (active && tab.parentElement.scrollWidth > tab.parentElement.clientWidth) {
+        tab.parentElement.scrollLeft = tab.offsetLeft - (tab.parentElement.clientWidth - tab.offsetWidth) / 2;
+      }
     });
     drawer.querySelectorAll('[data-nq-panel]').forEach((panel) => { panel.hidden = panel.dataset.nqPanel !== name; });
   };
