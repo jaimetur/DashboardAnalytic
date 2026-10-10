@@ -3383,8 +3383,8 @@
   if (optionsDialog) {
     $('nq-options-open').addEventListener('click', openOptions);
     $('nq-options-cancel').addEventListener('click', () => optionsDialog.close());
-    // The defaults first, in their order and colours (a status with the same name keeps its calls); the other values
-    // stay below them, to remove when no call uses them.
+    // Only the defaults, in their order and colours (a value with the same name keeps its calls and team members); the
+    // others are removed on Save, which refuses a team still used or a status still set by hand.
     optionsDialog.querySelectorAll('[data-nq-option-defaults]').forEach((button) => {
       button.addEventListener('click', () => {
         const kind = button.dataset.nqOptionDefaults;
@@ -3405,13 +3405,13 @@
           if (closed) closed.checked = Boolean(item.closed);
           return existing;
         });
-        const others = rows.filter((row) => !ordered.includes(row));
-        list.replaceChildren(...ordered, ...others);
+        const removed = rows.filter((row) => !ordered.includes(row)).map((row) => row.querySelector('input[type="text"]').value.trim());
+        list.replaceChildren(...ordered);
         const label = kind === 'statuses' ? 'statuses' : 'teams';
         $('nq-options-error').style.color = 'var(--nq-muted)';
-        $('nq-options-error').textContent = `The default ${label} are first (${added} added).`
-          + (others.length ? ` ${others.length} other ${label} stay below them: remove those no call uses (×), or keep them.` : '')
-          + ' Save to apply.';
+        $('nq-options-error').textContent = `The default ${label} are back (${added} added`
+          + (removed.length ? `, ${removed.join(', ')} removed` : '') + '). Save to apply'
+          + (kind === 'statuses' ? '; the automatic calls follow the Status Rules again (Default Rules in Status Rules puts the default rules back).' : '.');
       });
     });
     optionsDialog.querySelectorAll('[data-nq-option-add]').forEach((button) => {

@@ -1220,7 +1220,8 @@ def _normalize_option_list(items: Any, kind: str) -> list[dict[str, Any]]:
 def save_options(
     task_repository: Any, statuses: Any, teams: Any, username: str, users: set[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Replace the statuses and teams; renamed values follow on every call, removed ones must be unused.
+    """Replace the statuses and teams; renamed values follow on every call, removed ones must be unused (a status
+    only by the calls that have it set by hand: the automatic ones follow the Status Rules again).
 
     Team members must be users of the workspace when ``users`` is given.
     """
@@ -1253,9 +1254,14 @@ def save_options(
             for old_key, old_name in existing.items():
                 if old_key in kept:
                     continue
+                # A status given by the Status Rules does not keep it: those calls follow the rules again below.
+                by_hand = " AND status_mode = 'manual'" if kind == 'status' else ''
                 used = connection.execute(
-                    f'SELECT COUNT(*) FROM {NQ_CALL_TRACKING_TABLE} WHERE {column} = ? COLLATE NOCASE', (old_name,),
+                    f'SELECT COUNT(*) FROM {NQ_CALL_TRACKING_TABLE} WHERE {column} = ? COLLATE NOCASE{by_hand}', (old_name,),
                 ).fetchone()[0]
+                if used and kind == 'status':
+                    raise ValueError(f'The status "{old_name}" is set by hand on {used} call{"" if used == 1 else "s"}; '
+                                     'rename it or move those calls first.')
                 if used:
                     raise ValueError(f'The {kind} "{old_name}" is in use; rename it or move its calls first.')
             for old_key, new_name in renamed.items():

@@ -128,6 +128,28 @@ def test_status_follows_the_phase_fields_until_it_is_set_by_hand(client, tmp_pat
     assert bad.status_code == 400
 
 
+def test_default_statuses_replace_statuses_the_rules_gave_but_not_those_set_by_hand(client, tmp_path):
+    calls = setup_calls(client, tmp_path)
+    state = client.get('/api/non-qualified-calls/state').json()
+    teams = [{**item, 'previous': item['name'], 'members': []} for item in state['options']['teams']]
+    renamed = [{**item, 'previous': item['name'], 'name': 'Analysis Started' if item['name'] == 'Under Analysis' else item['name']}
+               for item in state['options']['statuses']]
+    assert client.put('/api/non-qualified-calls/options', json={'statuses': renamed, 'teams': teams}).status_code == 200
+    by_rules = patch(client, calls['0xA1'], {'fields': {'analysis_status': 'Ongoing'}})
+    by_hand = patch(client, calls['0xB2'], {'status': 'Analysis Started'})
+    assert (by_rules['status'], by_rules['status_mode'], by_hand['status_mode']) == ('Analysis Started', 'auto', 'manual')
+    current = {item['name'] for item in renamed}
+    defaults = [{**item, 'previous': item['name'] if item['name'] in current else ''} for item in state['default_options']['statuses']]
+    response = client.put('/api/non-qualified-calls/options', json={'statuses': defaults, 'teams': teams})
+    assert response.status_code == 400 and 'set by hand on 1 call' in response.text
+    patch(client, calls['0xB2'], {'status_mode': 'auto'})
+    assert client.put('/api/non-qualified-calls/options', json={'statuses': defaults, 'teams': teams}).status_code == 200
+    statuses = [item['name'] for item in client.get('/api/non-qualified-calls/state').json()['options']['statuses']]
+    assert statuses == [item['name'] for item in state['default_options']['statuses']]
+    # The call the rules had moved follows them again.
+    assert {item['join_id']: item for item in query(client)['calls']}['0xA1']['status'] in statuses
+
+
 def test_root_category_and_cause_are_independent_and_set_the_domain(client, tmp_path):
     call = setup_calls(client, tmp_path)['0xA1']
     updated = patch(client, call, {'root_category': 'Poor Coverage LTE', 'root_cause': 'Tunnel Issue'})
