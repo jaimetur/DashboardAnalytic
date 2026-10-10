@@ -66,6 +66,7 @@ NQ_ROOT_CATALOG_TABLE = 'nq_root_catalog'
 NQ_RCA_RESULTS_TABLE = 'nq_rca_results'
 NQ_CALL_POPULATION_TABLE = 'nq_call_population'
 NQ_CALL_VERSIONS_TABLE = 'nq_call_versions'
+NQ_CALL_LATEST_TABLE = 'nq_call_latest'
 NQ_FIELDS_TABLE = 'nq_analysis_fields'
 NQ_FIELD_VALUES_TABLE = 'nq_analysis_field_values'
 # Database Management titles of the module tables.
@@ -81,6 +82,7 @@ NQ_TABLE_TITLES = {
     NQ_RCA_RESULTS_TABLE: 'NQ RCA Results',
     NQ_CALL_POPULATION_TABLE: 'NQ Call Population',
     NQ_CALL_VERSIONS_TABLE: 'NQ Call Versions',
+    NQ_CALL_LATEST_TABLE: 'NQ Call Latest',
     NQ_FIELDS_TABLE: 'NQ Analysis Fields',
     NQ_FIELD_VALUES_TABLE: 'NQ Analysis Field Values',
 }
@@ -112,6 +114,11 @@ SECTIONS_STATE_KEY = 'nq_calls_sections'
 STATUS_RULES_STATE_KEY = 'nq_calls_status_rules'
 # Set once the Analysis Center catalog, statuses, teams and rules have been added to the workspace.
 ANALYSIS_CENTER_STATE_KEY = 'nq_analysis_center_v1'
+# The second layout of the Analysis Center (section colours and the order of the Analysis fields), applied once.
+ANALYSIS_CENTER_V2_STATE_KEY = 'nq_analysis_center_v2'
+# Set once the tables and columns of this version exist, so the requests check the schema without writing.
+SCHEMA_STATE_KEY = 'nq_calls_schema'
+SCHEMA_VERSION = '2026-10-10.2'
 # Indexed call fields that the suggestion rule can read, with their labels.
 RULE_FIELDS = {
     'failure_classification': 'Failure Classification', 'failure_category': 'Failure Category',
@@ -154,6 +161,13 @@ FIELD_SOURCES: dict[str, tuple[str, ...]] = {
     'cell_id': ('Cell_ID_A', 'Cell_ID', 'Cell_IDs_A', 'LAC_CID_xARFCN_A', 'LAC_CID_xARFCN'),
 }
 CALL_FIELDS = tuple(FIELD_SOURCES)
+# The values a catalog field can read from the call: the indexed fields and the last cell of the Cell ID chain.
+CATALOG_CALL_FIELDS = (*CALL_FIELDS, 'last_cell_id')
+
+
+def last_cell_sql(column: str) -> str:
+    """The last element of a Cell ID chain ("[a]->[b]->[c]" gives "c"): the cell where the call ended."""
+    return f"trim(substr({column}, length(rtrim({column}, replace({column}, '>', ''))) + 1), '[] ')"
 NUMERIC_FIELDS = frozenset({'latitude', 'longitude'})
 # NetCheck's identifier of each voice call and data test, the same in the Daily and Final CDRs.
 JOIN_SOURCES = ('JOIN_ID',)
@@ -188,6 +202,8 @@ _ATTENDED_SQL = "(updated_at <> '' OR comment_count > 0)"
 STATE_SQL = {
     'attended': _ATTENDED_SQL, 'not_attended': f'NOT {_ATTENDED_SQL}', 'with_team': "team <> ''",
     'assigned': "assignee <> ''", 'commented': 'comment_count > 0', 'labelled': "root_domain <> ''",
+    # RCA Identification: a root category or cause is selected.
+    'identified': "(root_category <> '' OR root_cause <> '')", 'not_identified': "(root_category = '' AND root_cause = '')",
 }
 SORT_COLUMNS = {
     'service': 'service', 'start_time': 'start_time', 'operator': 'operator', 'operator_vendor': 'operator_vendor', 'vendor': 'vendor',
@@ -267,6 +283,24 @@ CREATE TABLE IF NOT EXISTS {NQ_CALL_VERSIONS_TABLE} (
     final_covered INTEGER NOT NULL DEFAULT 0,
     changed INTEGER NOT NULL DEFAULT 0,
     cdr_count INTEGER NOT NULL DEFAULT 1
+);
+-- The latest version of every call (the Final CDR first, then the newest data) with its Operator and Vendor
+-- mapped: the part of the calls query that only changes when the CDRs are indexed or the maps change.
+CREATE TABLE IF NOT EXISTS {NQ_CALL_LATEST_TABLE} (
+    dataset_id INTEGER NOT NULL,
+    source_row_id INTEGER NOT NULL,
+    call_key TEXT PRIMARY KEY,
+    service TEXT NOT NULL,
+    nr_mode TEXT NOT NULL DEFAULT '',
+    {', '.join(f"{field} REAL" if field in NUMERIC_FIELDS else f"{field} TEXT NOT NULL DEFAULT ''" for field in CALL_FIELDS)},
+    vendor_operator TEXT NOT NULL DEFAULT '',
+    last_cell_id TEXT NOT NULL DEFAULT '',
+    join_id TEXT NOT NULL DEFAULT '',
+    extra_json TEXT NOT NULL DEFAULT '{{}}',
+    nq_samples INTEGER NOT NULL DEFAULT 1,
+    latest_dataset_id INTEGER NOT NULL DEFAULT 0,
+    cdr_count INTEGER NOT NULL DEFAULT 1,
+    version_state TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS {NQ_FIELDS_TABLE} (
     field_key TEXT PRIMARY KEY,
@@ -405,8 +439,27 @@ def _columns_of(connection: Any, table: str) -> set[str]:
     return {str(row[1]) for row in connection.execute(f'PRAGMA table_info({table})').fetchall()}
 
 
+def _schema_ready(task_repository: Any) -> bool:
+    """Whether every table of this version exists and the upgrades ran: read without taking the write lock."""
+    with task_repository.connection() as connection:
+        tables = {str(row[0]) for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if not set(NQ_TABLE_TITLES) <= tables or 'workspace_state' not in tables:
+            return False
+        keys = (SCHEMA_STATE_KEY, ANALYSIS_CENTER_STATE_KEY, ANALYSIS_CENTER_V2_STATE_KEY)
+        states = {str(row[0]): str(row[1]) for row in connection.execute(
+            f"SELECT key, value FROM workspace_state WHERE key IN ({', '.join('?' for _ in keys)})", keys)}
+    return states.get(SCHEMA_STATE_KEY) == SCHEMA_VERSION and bool(states.get(ANALYSIS_CENTER_STATE_KEY)) \
+        and bool(states.get(ANALYSIS_CENTER_V2_STATE_KEY))
+
+
 def ensure_nq_tables(task_repository: Any) -> None:
-    """Create the module tables, add the columns of later versions and seed the defaults once."""
+    """Create the module tables, add the columns of later versions and seed the defaults once.
+
+    Every request calls it: once the schema of this version is in place it only reads, so the pages never wait
+    for the workspace writer (the indexing or a CDR being processed).
+    """
+    if _schema_ready(task_repository):
+        return
     with task_repository.connection() as connection:
         existed = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (NQ_CALL_OPTIONS_TABLE,),
@@ -441,6 +494,10 @@ def ensure_nq_tables(task_repository: Any) -> None:
                                    ('population_count', 'INTEGER NOT NULL DEFAULT 0')):
             if sources and column not in sources:
                 connection.execute(f'ALTER TABLE {NQ_CALL_SOURCES_TABLE} ADD COLUMN {column} {definition}')
+        latest = _columns_of(connection, NQ_CALL_LATEST_TABLE)
+        if latest and set(LATEST_COLUMNS) - latest:
+            connection.execute(f'DROP TABLE {NQ_CALL_LATEST_TABLE}')
+            connection.execute('DELETE FROM workspace_state WHERE key = ?', (LATEST_STATE_KEY,))
         connection.executescript(SCHEMA)
         if not existed:
             connection.executemany(
@@ -455,6 +512,9 @@ def ensure_nq_tables(task_repository: Any) -> None:
             _write_root_catalog(connection, _initial_root_catalog(connection))
     if not task_repository.get_workspace_state(ANALYSIS_CENTER_STATE_KEY):
         _install_analysis_center(task_repository, fresh=not existed)
+    if not task_repository.get_workspace_state(ANALYSIS_CENTER_V2_STATE_KEY):
+        _upgrade_analysis_center_v2(task_repository)
+    task_repository.set_workspace_state(SCHEMA_STATE_KEY, SCHEMA_VERSION)
 
 
 def _initial_root_catalog(connection: Any) -> dict[str, list[dict[str, Any]]]:
@@ -515,7 +575,7 @@ def _install_analysis_center(task_repository: Any, fresh: bool) -> None:
         else:
             merged.append(default)
     merged += [field for field in current if field['key'] not in used]
-    _store_fields(task_repository, nq_catalog.normalize_fields(merged, by_key, CALL_FIELDS))
+    _store_fields(task_repository, nq_catalog.normalize_fields(merged, by_key, CATALOG_CALL_FIELDS))
     options = list_options(task_repository)
     names = [item['name'] for item in options['statuses']]
     with task_repository.connection() as connection:
@@ -561,6 +621,58 @@ def _install_analysis_center(task_repository: Any, fresh: bool) -> None:
     task_repository.set_workspace_state(STATUS_RULES_STATE_KEY, json.dumps(rules, ensure_ascii=False))
     task_repository.set_workspace_state(ANALYSIS_CENTER_STATE_KEY, '1')
     recompute_statuses(task_repository, 'system')
+
+
+def _upgrade_analysis_center_v2(task_repository: Any) -> None:
+    """The second layout once, for what the workspace kept of the first one: Failure Details (formerly Failure Event)
+    in red and Implementation and Planning in green, the Last Cell ID and Failure Comment of the CDR in Failure
+    Details (Serving Cell when Failure proposing the last cell), and the Analysis fields in the order of the call panel."""
+    try:
+        sections = json.loads(task_repository.get_workspace_state(SECTIONS_STATE_KEY) or '[]')
+    except (TypeError, ValueError):
+        sections = []
+    defaults = {section['key']: section for section in nq_catalog.default_sections()}
+    changed = False
+    for section in sections if isinstance(sections, list) else []:
+        if not isinstance(section, dict) or section.get('key') not in defaults:
+            continue
+        key = section['key']
+        first_color = nq_catalog.FIRST_SECTION_COLORS.get(key)
+        if first_color and str(section.get('color') or '').casefold() == first_color.casefold():
+            section['color'] = defaults[key]['color']
+            changed = True
+        if nq_catalog.FIRST_SECTION_LABELS.get(key) == str(section.get('label') or ''):
+            section['label'] = defaults[key]['label']
+            changed = True
+    if changed:
+        task_repository.set_workspace_state(SECTIONS_STATE_KEY, json.dumps(nq_catalog.normalize_sections(sections)))
+    fields = list_fields(task_repository)
+    keys = [field['key'] for field in fields]
+    first = list(nq_catalog.FIRST_ANALYSIS_ORDER)
+    if [key for key in keys if key in first] == first:
+        order = [field['key'] for field in nq_catalog.default_fields() if field['key'] in first]
+        by_key = {field['key']: field for field in fields}
+        for position, key in zip(sorted(keys.index(key) for key in first), order):
+            fields[position] = by_key[key]
+    # The new fields of the CDR, each after the field it follows by default (or at the end of its section).
+    default_fields = nq_catalog.default_fields()
+    labels = {field['label'].casefold() for field in fields}
+    for index, default in enumerate(default_fields):
+        if default['key'] not in {'last_cell_id', 'failure_comment'} or default['key'] in {field['key'] for field in fields} \
+                or default['label'].casefold() in labels:
+            continue
+        previous = [field['key'] for field in default_fields[:index]]
+        place = max((position for position, field in enumerate(fields) if field['key'] in previous
+                     and field['section'] == default['section']), default=None)
+        if place is None:
+            place = max((position for position, field in enumerate(fields) if field['section'] == default['section']), default=len(fields) - 1)
+        fields.insert(place + 1, default)
+    for field in fields:
+        if field['key'] == 'serving_cell_when_failure' and field.get('suggest_from') == 'cell_id':
+            field['suggest_from'] = 'last_cell_id'
+    _store_fields(task_repository, nq_catalog.normalize_fields(fields, {field['key']: field for field in list_fields(task_repository)},
+                                                               CATALOG_CALL_FIELDS))
+    task_repository.set_workspace_state(ANALYSIS_CENTER_V2_STATE_KEY, '1')
 
 
 # ---------------------------------------------------------------------------
@@ -972,6 +1084,8 @@ def sync_nq_calls(task_repository: Any, *, force: bool = False) -> dict[str, Any
             if moved and hasattr(task_repository, 'try_add_log'):
                 task_repository.try_add_log('system', 'nq_call_keys_upgraded',
                                             f'Non-Qualified Calls follow-up of {moved} calls moved to their JOIN_ID call keys.')
+        # The latest versions of the calls are rebuilt here, in the background, rather than by the next page.
+        refresh_latest_calls(task_repository)
         with task_repository.connection() as connection:
             total = connection.execute(f'SELECT COUNT(DISTINCT call_key) FROM {NQ_CALLS_TABLE}').fetchone()[0]
             synced_at = connection.execute(f'SELECT MAX(synced_at) FROM {NQ_CALL_SOURCES_TABLE}').fetchone()[0]
@@ -1238,7 +1352,7 @@ def save_fields(task_repository: Any, items: Any, username: str) -> list[dict[st
     given |= {str(existing[str(item.get('key'))]['source_ref']) for item in items
               if isinstance(item, dict) and str(item.get('key')) in existing and existing[str(item.get('key'))]['source'] == 'tracking'}
     items = [*items, *(field for field in existing.values() if field['source'] == 'tracking' and field['source_ref'] not in given)]
-    normalized = nq_catalog.normalize_fields(items, existing, CALL_FIELDS)
+    normalized = nq_catalog.normalize_fields(items, existing, CATALOG_CALL_FIELDS)
     kept = {field['key'] for field in normalized}
     with task_repository.connection() as connection:
         def used(key: str, value: str | None = None) -> int:
@@ -1386,7 +1500,7 @@ def field_sql(field: dict[str, Any]) -> str:
         return {'comments': 'comment_count', 'updated_at': "substr(updated_at, 1, 10)"}.get(ref, ref) \
             if ref in nq_catalog.TRACKING_REFS else "''"
     if source == 'cdr':
-        if ref in CALL_FIELDS:
+        if ref in CATALOG_CALL_FIELDS:
             return f"COALESCE(CAST({ref} AS TEXT), '')"
         name = ref[7:].replace('"', '').replace("'", '') if ref.startswith('column:') else ref
         return f"COALESCE(CAST(json_extract(extra_json, '$.\"{name}\"') AS TEXT), '')"
@@ -1484,7 +1598,7 @@ def preview_catalog(task_repository: Any, content: bytes) -> dict[str, Any]:
     incoming = nq_catalog.read_catalog_workbook(content)
     merged = _merged_catalog(task_repository, incoming)
     current_fields = {field['key']: field for field in list_fields(task_repository)}
-    normalized = nq_catalog.normalize_fields(merged['fields'], current_fields, CALL_FIELDS)
+    normalized = nq_catalog.normalize_fields(merged['fields'], current_fields, CATALOG_CALL_FIELDS)
     added = [field['label'] for field in normalized if field['key'] not in current_fields]
     changed = [field['label'] for field in normalized if field['key'] in current_fields and any(
         field[key] != current_fields[field['key']].get(key) for key in ('label', 'section', 'type', 'in_table', 'in_export'))
@@ -1789,12 +1903,25 @@ def recompute_statuses(task_repository: Any, username: str, keys: list[str] | No
 MAPPED_FIELDS = ('operator', 'operator_vendor', 'vendor')
 
 
+_value_maps_cache: dict[tuple[str, str], dict[str, str]] = {}
+_value_maps_guard = Lock()
+
+
 def _value_maps(task_repository: Any) -> dict[str, str]:
     """For each mapped field, a JSON object from the indexed source values to their mapped labels.
 
-    ``vendor_operator`` maps each source Operator_Vendor to its mapped Vendor_Operator.
+    ``vendor_operator`` maps each source Operator_Vendor to its mapped Vendor_Operator. The maps are kept until
+    the indexed calls or the Operator and Vendor Maps change.
     """
-    mapper = ValueMapper.from_repository(task_repository)
+    settings = task_repository.chart_mapping_settings()
+    with task_repository.connection() as connection:
+        stamp = tuple(connection.execute(f'SELECT COUNT(*), MAX(rowid) FROM {NQ_CALLS_TABLE}').fetchone())
+    key = (_workspace_key(task_repository.db_path),
+           hashlib.sha1(json.dumps([stamp, settings], sort_keys=True, default=str).encode()).hexdigest())
+    with _value_maps_guard:
+        if key in _value_maps_cache:
+            return dict(_value_maps_cache[key])
+    mapper = ValueMapper.from_settings(settings)
     maps = {}
     with task_repository.connection() as connection:
         for field in MAPPED_FIELDS:
@@ -1804,7 +1931,21 @@ def _value_maps(task_repository: Any) -> dict[str, str]:
             if field == 'operator_vendor':
                 maps['vendor_operator'] = json.dumps({source: mapper.vendor_operators([label])[0]
                                                       for source, label in mapped.items()})
+    with _value_maps_guard:
+        if len(_value_maps_cache) > 16:
+            _value_maps_cache.clear()
+        _value_maps_cache[key] = dict(maps)
     return maps
+
+
+def _materialized(connection: Any, base: str, params: list[Any], scoped: bool) -> tuple[str, list[Any]]:
+    """The calls of a choice of CDRs read once into a temporary table of the connection, for the several queries of
+    one request (without a choice the latest versions table is already fast)."""
+    if not scoped:
+        return base, params
+    connection.execute('DROP TABLE IF EXISTS temp.nq_scoped_calls')
+    connection.execute(f'CREATE TEMP TABLE nq_scoped_calls AS {base}', params)
+    return 'SELECT * FROM temp.nq_scoped_calls', []
 
 
 def _scope(filters: dict[str, Any] | None) -> list[int]:
@@ -1812,8 +1953,16 @@ def _scope(filters: dict[str, Any] | None) -> list[int]:
     return [int(value) for value in _strings((filters or {}).get('datasets')) if value.lstrip('-').isdigit()]
 
 
-def _base_sql(default: str, task_repository: Any, dataset_ids: list[int] | None = None) -> tuple[str, list[Any]]:
-    """One row per call with its follow-up: the version of the most recent CDR among the chosen ones.
+# The columns of the latest version of each call that only change when the CDRs are indexed or the maps change.
+LATEST_COLUMNS = ('dataset_id', 'source_row_id', 'call_key', 'service', 'nr_mode', *CALL_FIELDS, 'vendor_operator', 'last_cell_id',
+                  'join_id', 'extra_json', 'nq_samples', 'latest_dataset_id', 'cdr_count', 'version_state')
+LATEST_STATE_KEY = 'nq_call_latest_fingerprint'
+_latest_locks: dict[str, Lock] = {}
+_latest_guard = Lock()
+
+
+def _latest_sql(maps: dict[str, str], dataset_ids: list[int] | None = None) -> tuple[str, list[Any]]:
+    """The latest version of every call among the chosen CDRs (every CDR when none is chosen).
 
     A Final CDR comes before the Daily ones, then the CDR with the newest data. ``version_state``
     tells how the other CDRs see the call: ``qualified`` (the latest CDR has it Completed),
@@ -1821,22 +1970,98 @@ def _base_sql(default: str, task_repository: Any, dataset_ids: list[int] | None 
     CDR outside the chosen ones has it) or ``changed`` (its result or failure differs between CDRs).
     Speech calls count their Non-Qualified samples in ``nq_samples``.
     """
-    maps = _value_maps(task_repository)
     columns = ', '.join(
         f'COALESCE((SELECT m.value FROM json_each(?) m WHERE m.key = c.{column}), c.{column}) AS {column}'
         if column in MAPPED_FIELDS else f'c.{column}'
         for column in ('dataset_id', 'source_row_id', 'call_key', 'service', 'nr_mode', *CALL_FIELDS)
     )
-    map_params = [maps[column] for column in ('dataset_id', 'source_row_id', 'call_key', 'service', 'nr_mode', *CALL_FIELDS)
-                  if column in MAPPED_FIELDS]
+    params: list[Any] = [maps[column] for column in ('dataset_id', 'source_row_id', 'call_key', 'service', 'nr_mode', *CALL_FIELDS)
+                         if column in MAPPED_FIELDS]
     # Vendor_Operator: the mapped Operator_Vendor the other way round.
-    columns += ", COALESCE((SELECT m.value FROM json_each(?) m WHERE m.key = c.operator_vendor), '') AS vendor_operator"
-    map_params.append(maps['vendor_operator'])
+    params.append(maps['vendor_operator'])
     scope = list(dict.fromkeys(int(value) for value in dataset_ids or []))
     scope_sql = f"WHERE n.dataset_id IN ({', '.join('?' for _ in scope)})" if scope else ''
     sql = f"""
         SELECT {columns},
+               COALESCE((SELECT m.value FROM json_each(?) m WHERE m.key = c.operator_vendor), '') AS vendor_operator,
+               {last_cell_sql('c.cell_id')} AS last_cell_id,
                c.join_id, c.extra_json, c.nq_samples,
+               COALESCE(v.latest_dataset_id, c.dataset_id) AS latest_dataset_id,
+               COALESCE(v.cdr_count, 1) AS cdr_count,
+               CASE WHEN v.latest_is_nq = 0 THEN 'qualified'
+                    WHEN v.in_final = 0 AND v.final_covered = 1 THEN 'not_in_final'
+                    WHEN v.latest_dataset_id IS NOT NULL AND v.latest_dataset_id <> c.dataset_id THEN 'newer'
+                    WHEN v.changed = 1 THEN 'changed' ELSE '' END AS version_state
+        FROM (
+            SELECT n.*, COUNT(*) OVER (PARTITION BY n.call_key, n.dataset_id) AS nq_samples,
+                   ROW_NUMBER() OVER (PARTITION BY n.call_key
+                                      ORDER BY s.stage_rank DESC, s.data_date DESC, n.dataset_id DESC, n.start_time, n.rowid) AS rn
+            FROM {NQ_CALLS_TABLE} n JOIN {NQ_CALL_SOURCES_TABLE} s ON s.dataset_id = n.dataset_id
+            {scope_sql}
+        ) c
+        LEFT JOIN {NQ_CALL_VERSIONS_TABLE} v ON v.call_key = c.call_key
+        WHERE c.rn = 1
+    """
+    return sql, [*params, *scope]
+
+
+def _latest_fingerprint(connection: Any, maps: dict[str, str]) -> str:
+    """What the latest versions depend on: the indexed CDRs, their calls and the Operator and Vendor maps."""
+    sources = [tuple(row) for row in connection.execute(
+        f'SELECT dataset_id, revision, stage_rank, data_date, synced_at FROM {NQ_CALL_SOURCES_TABLE} ORDER BY dataset_id')]
+    calls = tuple(connection.execute(f'SELECT COUNT(*), MAX(rowid) FROM {NQ_CALLS_TABLE}').fetchone())
+    payload = json.dumps([INDEX_VERSION, sources, calls, maps], sort_keys=True, default=str)
+    return hashlib.sha1(payload.encode()).hexdigest()
+
+
+def refresh_latest_calls(task_repository: Any, *, force: bool = False, maps: dict[str, str] | None = None) -> bool:
+    """Rebuild the latest version of every call when the indexed CDRs or the maps changed; returns whether it did."""
+    maps = maps or _value_maps(task_repository)
+    key = _workspace_key(task_repository.db_path)
+    with _latest_guard:
+        lock = _latest_locks.setdefault(key, Lock())
+    with lock:
+        with task_repository.connection() as connection:
+            fingerprint = _latest_fingerprint(connection, maps)
+            stored = connection.execute('SELECT value FROM workspace_state WHERE key = ?', (LATEST_STATE_KEY,)).fetchone()
+        if not force and stored and str(stored[0]) == fingerprint:
+            return False
+        sql, params = _latest_sql(maps)
+        columns = ', '.join(LATEST_COLUMNS)
+        with task_repository.connection() as connection:
+            connection.execute(f'DELETE FROM {NQ_CALL_LATEST_TABLE}')
+            connection.execute(f'INSERT INTO {NQ_CALL_LATEST_TABLE} ({columns}) SELECT {columns} FROM ({sql})', params)
+            connection.execute('INSERT INTO workspace_state (key, value) VALUES (?, ?) '
+                               'ON CONFLICT(key) DO UPDATE SET value = excluded.value', (LATEST_STATE_KEY, fingerprint))
+    return True
+
+
+def _latest_ready(task_repository: Any, maps: dict[str, str]) -> bool:
+    """Whether the calls are read from the latest versions table: rebuilt first when needed, except while the
+    CDRs are being indexed, when the previous versions stay until the indexing ends."""
+    job = nq_index_job(task_repository.db_path)
+    if job and job['status'] in {'queued', 'processing'}:
+        with task_repository.connection() as connection:
+            return connection.execute('SELECT 1 FROM workspace_state WHERE key = ?', (LATEST_STATE_KEY,)).fetchone() is not None
+    refresh_latest_calls(task_repository, maps=maps)
+    return True
+
+
+def _base_sql(default: str, task_repository: Any, dataset_ids: list[int] | None = None) -> tuple[str, list[Any]]:
+    """One row per call with its follow-up: the version of the most recent CDR among the chosen ones.
+
+    Without a choice of CDRs the latest versions come from the ``nq_call_latest`` table; the follow-up (status,
+    team, assignee, root cause, comments, fields and RCA results) is always read as it is now.
+    """
+    maps = _value_maps(task_repository)
+    scope = list(dict.fromkeys(int(value) for value in dataset_ids or []))
+    if not scope and _latest_ready(task_repository, maps):
+        source, source_params = NQ_CALL_LATEST_TABLE, []
+    else:
+        latest, source_params = _latest_sql(maps, scope)
+        source = f'({latest})'
+    sql = f"""
+        SELECT s.*,
                COALESCE(NULLIF(t.status, ''), ?) AS status,
                COALESCE(t.team, '') AS team,
                COALESCE(t.assignee, '') AS assignee,
@@ -1847,30 +2072,16 @@ def _base_sql(default: str, task_repository: Any, dataset_ids: list[int] | None 
                COALESCE(t.version, 0) AS version,
                COALESCE(t.updated_by, '') AS updated_by,
                COALESCE(t.updated_at, '') AS updated_at,
-               (SELECT COUNT(*) FROM {NQ_CALL_COMMENTS_TABLE} m WHERE m.call_key = c.call_key AND m.deleted_at = '') AS comment_count,
-               COALESCE(v.latest_dataset_id, c.dataset_id) AS latest_dataset_id,
-               COALESCE(v.cdr_count, 1) AS cdr_count,
-               CASE WHEN v.latest_is_nq = 0 THEN 'qualified'
-                    WHEN v.in_final = 0 AND v.final_covered = 1 THEN 'not_in_final'
-                    WHEN v.latest_dataset_id IS NOT NULL AND v.latest_dataset_id <> c.dataset_id THEN 'newer'
-                    WHEN v.changed = 1 THEN 'changed' ELSE '' END AS version_state,
+               (SELECT COUNT(*) FROM {NQ_CALL_COMMENTS_TABLE} m WHERE m.call_key = s.call_key AND m.deleted_at = '') AS comment_count,
                (SELECT json_group_object(f.field_key, f.value) FROM {NQ_FIELD_VALUES_TABLE} f
-                WHERE f.call_key = c.call_key AND f.value <> '') AS field_values_json,
+                WHERE f.call_key = s.call_key AND f.value <> '') AS field_values_json,
                COALESCE((SELECT r.values_json FROM {NQ_RCA_RESULTS_TABLE} r
-                         WHERE c.join_id <> '' AND r.join_id = lower(c.join_id)), '{{}}') AS rca_json
-        FROM (
-            SELECT n.*, COUNT(*) OVER (PARTITION BY n.call_key, n.dataset_id) AS nq_samples,
-                   ROW_NUMBER() OVER (PARTITION BY n.call_key
-                                      ORDER BY s.stage_rank DESC, s.data_date DESC, n.dataset_id DESC, n.start_time, n.rowid) AS rn
-            FROM {NQ_CALLS_TABLE} n JOIN {NQ_CALL_SOURCES_TABLE} s ON s.dataset_id = n.dataset_id
-            {scope_sql}
-        ) c
-        LEFT JOIN {NQ_CALL_TRACKING_TABLE} t ON t.call_key = c.call_key
-        LEFT JOIN {NQ_CALL_VERSIONS_TABLE} v ON v.call_key = c.call_key
-        WHERE c.rn = 1
+                         WHERE s.join_id <> '' AND r.join_id = lower(s.join_id)), '{{}}') AS rca_json
+        FROM {source} s
+        LEFT JOIN {NQ_CALL_TRACKING_TABLE} t ON t.call_key = s.call_key
     """
-    # Placeholders in order: the value maps, the default status (select list), then the CDRs (subquery).
-    return sql, [*map_params, default, *scope]
+    # Placeholders in order: the default status (select list), then those of the latest versions (maps and CDRs).
+    return sql, [default, *source_params]
 
 
 def _sample_sql(default: str, task_repository: Any) -> tuple[str, list[Any]]:
@@ -1884,7 +2095,7 @@ def _sample_sql(default: str, task_repository: Any) -> tuple[str, list[Any]]:
     params = [maps[column] for column in ('dataset_id', 'source_row_id', 'service', 'nr_mode', *CALL_FIELDS) if column in MAPPED_FIELDS]
     sql = f"""
         SELECT {columns}, c.sample_key AS call_key, c.call_key AS parent_key, c.sample_id, c.join_id, c.extra_json,
-               1 AS nq_samples, '' AS vendor_operator,
+               1 AS nq_samples, '' AS vendor_operator, {last_cell_sql('c.cell_id')} AS last_cell_id,
                COALESCE(NULLIF(t.status, ''), ?) AS status, COALESCE(t.team, '') AS team,
                COALESCE(t.assignee, '') AS assignee, COALESCE(t.root_domain, '') AS root_domain,
                COALESCE(t.root_category, '') AS root_category, COALESCE(t.root_cause, '') AS root_cause,
@@ -1993,6 +2204,10 @@ def period_bounds(value: str) -> tuple[str, str] | None:
     return start.strftime('%Y-%m-%d %H:%M:%S'), end.strftime('%Y-%m-%d %H:%M:%S')
 
 
+_key_filters_cache: dict[tuple[str, str], tuple[str, ...]] = {}
+_key_filters_guard = Lock()
+
+
 def _resolve_key_filters(task_repository: Any, filters: dict[str, Any]) -> dict[str, Any]:
     """Turn the filters computed per call (root cause counting suggestions, eNB/gNB) into call keys.
 
@@ -2010,8 +2225,21 @@ def _resolve_key_filters(task_repository: Any, filters: dict[str, Any]) -> dict[
     options = list_options(task_repository)
     taxonomy = list_root_causes(task_repository)
     base, base_params = _base_sql(untracked_status(task_repository, options), task_repository, _scope(filters))
+    # The panels of one filter change ask for the same calls at once: they are found once while nothing changes.
     with task_repository.connection() as connection:
-        calls = connection.execute(f'WITH calls AS ({base}) SELECT * FROM calls', base_params).fetchall()
+        stamp = [tuple(connection.execute(sql).fetchone()) for sql in (
+            f'SELECT COUNT(*), SUM(version), MAX(updated_at) FROM {NQ_CALL_TRACKING_TABLE}',
+            f'SELECT COUNT(*), MAX(id), MAX(edited_at), MAX(deleted_at) FROM {NQ_CALL_COMMENTS_TABLE}')]
+    cache_key = (_workspace_key(task_repository.db_path), hashlib.sha1(json.dumps(
+        [base, base_params, stamp, taxonomy, {field: sorted(values) for field, values in wanted.items()}],
+        sort_keys=True, default=str).encode()).hexdigest())
+    with _key_filters_guard:
+        cached = _key_filters_cache.get(cache_key)
+    if cached is not None:
+        return {**filters, '_call_keys': list(cached)}
+    columns = ', '.join(dict.fromkeys(('call_key', 'root_domain', 'root_cause', 'cell_id', 'operator', *RULE_FIELDS)))
+    with task_repository.connection() as connection:
+        calls = connection.execute(f'WITH calls AS ({base}) SELECT {columns} FROM calls', base_params).fetchall()
         notes = _comment_texts(connection, [str(call['call_key']) for call in calls if not call['root_domain']]) \
             if suggestions_needed else {}
     keys = []
@@ -2033,6 +2261,10 @@ def _resolve_key_filters(task_repository: Any, filters: dict[str, Any]) -> dict[
             if node is None or f"{call['operator'] or ''}||{node[0]} {node[1]}" not in wanted['node']:
                 continue
         keys.append(key)
+    with _key_filters_guard:
+        if len(_key_filters_cache) >= 16:
+            _key_filters_cache.pop(next(iter(_key_filters_cache)))
+        _key_filters_cache[cache_key] = tuple(keys)
     return {**filters, '_call_keys': keys}
 
 
@@ -2193,14 +2425,17 @@ def query_calls(task_repository: Any, request: dict[str, Any], username: str) ->
     closed = [item['name'] for item in options['statuses'] if item['closed']]
     base, base_params = _base_sql(untracked_status(task_repository, options), task_repository, _scope(filters))
     where, params = _filter_sql(filters, username, closed, definitions)
-    filtered = f'WITH calls AS ({base}) SELECT * FROM calls{where}'
-    all_params = [*base_params, *params]
     sort_key = str(request.get('sort') or '')
     sort = _order_sql(sort_key, task_repository)
     direction = 'ASC' if str(request.get('direction') or '').lower() == 'asc' else 'DESC'
     page_size = int(request.get('page_size') or 50)
     page_size = page_size if page_size in PAGE_SIZES else 50
+    # The breakdowns of the Summary are left out while it is not shown.
+    with_breakdowns = request.get('breakdowns', True) is not False
     with task_repository.connection() as connection:
+        base, base_params = _materialized(connection, base, base_params, bool(_scope(filters)))
+        filtered = f'WITH calls AS ({base}) SELECT * FROM calls{where}'
+        all_params = [*base_params, *params]
         total = int(connection.execute(f'SELECT COUNT(*) FROM ({filtered})', all_params).fetchone()[0])
         pages = max(1, math.ceil(total / page_size))
         page = min(max(1, int(request.get('page') or 1)), pages)
@@ -2225,7 +2460,7 @@ def query_calls(task_repository: Any, request: dict[str, Any], username: str) ->
             call['latest_dataset_name'] = names.get(int(call['latest_dataset_id'] or call['dataset_id']), '')
         breakdowns = []
         mapping_settings = task_repository.chart_mapping_settings()
-        for field, label in BREAKDOWNS:
+        for field, label in BREAKDOWNS if with_breakdowns else ():
             values = connection.execute(
                 f'SELECT {field} AS value, COUNT(*) AS count FROM ({filtered}) GROUP BY {field} ORDER BY count DESC, value LIMIT 12',
                 all_params,
@@ -2241,7 +2476,8 @@ def query_calls(task_repository: Any, request: dict[str, Any], username: str) ->
                 items.sort(key=lambda item: campaign_sort_key(item['value']))
             breakdowns.append({'field': field, 'label': label, 'items': items})
         # The catalog fields shown in the Summary, as one more breakdown each.
-        for definition in [field for field in definitions if field['in_summary'] and field['source'] in {'user', 'derived', 'cdr', 'rca'}]:
+        for definition in [field for field in definitions if with_breakdowns and field['in_summary']
+                           and field['source'] in {'user', 'derived', 'cdr', 'rca'}]:
             values = connection.execute(
                 f"SELECT {field_sql(definition)} AS value, COUNT(*) AS count "
                 f"FROM ({filtered}) GROUP BY value ORDER BY count DESC, value LIMIT 12", all_params,
@@ -2337,6 +2573,28 @@ def period_label(moment: datetime, granularity: str) -> str:
     return f'{moment.year}-{moment.month:02d}'
 
 
+KEYED_READ_CHUNK = 500
+# With more calls than this, the history or comments of the calls are read once and kept for the calls in Python.
+KEYED_READ_SCAN = 4000
+
+
+def _rows_of_calls(connection: Any, select: str, keys: list[str], where: str = '', order: str = '') -> list[Any]:
+    """The rows of a follow-up table (history, comments) for some calls: by key for a few calls, or in one read."""
+    condition = f' AND ({where})' if where else ''
+    order_sql = f' ORDER BY {order}' if order else ''
+    if len(keys) > KEYED_READ_SCAN:
+        wanted = set(keys)
+        return [row for row in connection.execute(f'{select} WHERE 1 = 1{condition}{order_sql}') if str(row['call_key']) in wanted]
+    rows: list[Any] = []
+    for start in range(0, len(keys), KEYED_READ_CHUNK):
+        chunk = keys[start:start + KEYED_READ_CHUNK]
+        rows.extend(connection.execute(
+            f"{select} WHERE call_key IN ({', '.join('?' for _ in chunk)}){condition}{order_sql}", chunk).fetchall())
+    if len(keys) > KEYED_READ_CHUNK and order:
+        rows.sort(key=lambda row: tuple(row[name.split()[0]] for name in order.split(', ')))
+    return rows
+
+
 def progress_stats(task_repository: Any, filters: dict[str, Any], username: str, granularity: str = 'month') -> dict[str, Any]:
     """Follow-up progress of the calls matching the filters.
 
@@ -2358,17 +2616,10 @@ def progress_stats(task_repository: Any, filters: dict[str, Any], username: str,
             [*base_params, *params],
         ).fetchall()
         keys = [str(row['call_key']) for row in calls]
-        history: list[Any] = []
-        comments: list[Any] = []
-        for start in range(0, len(keys), 500):
-            chunk = keys[start:start + 500]
-            marks = ', '.join('?' for _ in chunk)
-            history.extend(connection.execute(
-                f'SELECT call_key, field, old_value, new_value, changed_by, changed_at FROM {NQ_CALL_HISTORY_TABLE} '
-                f'WHERE call_key IN ({marks}) ORDER BY changed_at, id', chunk).fetchall())
-            comments.extend(connection.execute(
-                f'SELECT call_key, created_by, created_at, deleted_at FROM {NQ_CALL_COMMENTS_TABLE} '
-                f'WHERE call_key IN ({marks}) ORDER BY created_at, id', chunk).fetchall())
+        history = _rows_of_calls(connection, f'SELECT id, call_key, field, old_value, new_value, changed_by, changed_at '
+                                             f'FROM {NQ_CALL_HISTORY_TABLE}', keys, order='changed_at, id')
+        comments = _rows_of_calls(connection, f'SELECT id, call_key, created_by, created_at, deleted_at FROM {NQ_CALL_COMMENTS_TABLE}',
+                                  keys, order='created_at, id')
 
     def distribution(field: str, empty: str, order: list[str] | None = None) -> list[dict[str, Any]]:
         counts: dict[str, int] = {}
@@ -3046,6 +3297,15 @@ def update_tracking(
                     # Nothing to accept: the call stays as it is.
                     continue
             current['root_domain'] = domain_of(taxonomy, current['root_category'], current['root_cause'])
+            # An assignee chosen alone brings the call to their team (the first one when they are in several),
+            # unless the call already has a team they belong to.
+            if validated.get('assignee') and 'team' not in validated:
+                current_members = members.get(current['team'].casefold())
+                if not current['team'] or (current_members and current['assignee'].casefold() not in current_members):
+                    team = next((item['name'] for item in options['teams']
+                                 if current['assignee'].casefold() in members.get(item['name'].casefold(), set())), '')
+                    if team:
+                        current['team'] = team
             allowed = members.get(current['team'].casefold())
             if allowed and current['assignee'] and current['assignee'].casefold() not in allowed:
                 if 'assignee' in validated:
@@ -3263,7 +3523,7 @@ def lifecycle_stats(task_repository: Any, filters: dict[str, Any], username: str
     phase fields, the time spent in each status, the most frequent moves and the calls without recent changes."""
     rows, context = _filtered_calls(task_repository, filters, username,
                                     'call_key, start_time, status, status_mode, updated_at, comment_count, field_values_json, '
-                                    'service, test_name, session_type, operator, campaign, city')
+                                    'service, test_name, session_type, operator, campaign, city, root_category, root_cause')
     options, definitions = context['options'], context['definitions']
     statuses = options['statuses']
     closed = {item['name'].casefold() for item in statuses if item['closed']}
@@ -3309,12 +3569,9 @@ def lifecycle_stats(task_repository: Any, filters: dict[str, Any], username: str
     moves: Counter = Counter()
     with task_repository.connection() as connection:
         history: dict[str, list[Any]] = {}
-        for start in range(0, len(keys), 500):
-            chunk = keys[start:start + 500]
-            for entry in connection.execute(
-                    f"SELECT call_key, old_value, new_value, changed_at FROM {NQ_CALL_HISTORY_TABLE} "
-                    f"WHERE field IN ('status', 'status_auto') AND call_key IN ({', '.join('?' for _ in chunk)}) ORDER BY changed_at, id", chunk):
-                history.setdefault(str(entry['call_key']), []).append(entry)
+        for entry in _rows_of_calls(connection, f'SELECT id, call_key, old_value, new_value, changed_at FROM {NQ_CALL_HISTORY_TABLE}',
+                                    keys, where="field IN ('status', 'status_auto')", order='changed_at, id'):
+            history.setdefault(str(entry['call_key']), []).append(entry)
     starts = {str(row['call_key']): _parse_time(row['start_time']) for row in rows}
     for key, entries in history.items():
         previous = starts.get(key)
@@ -3329,8 +3586,10 @@ def lifecycle_stats(task_repository: Any, filters: dict[str, Any], username: str
     order = [item['name'] for item in statuses]
     time_in_status.sort(key=lambda item: order.index(item['status']) if item['status'] in order else len(order))
     stalled.sort(key=lambda item: -item['days'])
+    identified = sum(1 for row in rows if row['root_category'] or row['root_cause'])
     return {
         'total': len(rows), 'pipeline': pipeline, 'modes': {'auto': modes.get('auto', 0), 'manual': modes.get('manual', 0)},
+        'rca': {'identified': identified, 'not_identified': len(rows) - identified},
         'phases': phases, 'time_in_status': time_in_status,
         'moves': [{'from': old, 'to': new, 'count': count} for (old, new), count in moves.most_common(12)],
         'stalled_days': STALLED_DAYS, 'stalled_total': len(stalled), 'stalled': stalled[:15],
@@ -3346,6 +3605,8 @@ def rca_insights(task_repository: Any, filters: dict[str, Any], username: str) -
                                      'failure_comment, technology, failure_technology, root_domain, root_category, root_cause')
     taxonomy = list_root_causes(task_repository)
     rule = taxonomy.get('rule') or DEFAULT_ROOT_CAUSE_RULE
+    # NetCheck alone: the CDR fields, never the comments.
+    cdr_rule = {**rule, 'comments': False, 'comment_domain': False}
     colors = {item['name']: item['color'] for item in taxonomy['domains']}
     coverage = Counter()
     agreement = {name: Counter() for name in ('selected_script', 'selected_netcheck', 'script_netcheck')}
@@ -3363,7 +3624,7 @@ def rca_insights(task_repository: Any, filters: dict[str, Any], username: str) -
         netcheck_raw = (str(row['failure_category'] or row['failure_classification'] or ''), str(row['failure_subcategory'] or ''))
         selected = (str(row['root_category'] or ''), str(row['root_cause'] or ''))
         script = nq_rca.map_to_catalog(*script_raw, taxonomy, rule.get('match', 'words')) if any(script_raw) else None
-        netcheck = nq_rca.suggest_from_text(row, taxonomy, {**rule, 'comments': False, 'comment_domain': False}) if any(netcheck_raw) else None
+        netcheck = nq_rca.suggest_from_text(row, taxonomy, cdr_rule) if any(netcheck_raw) else None
         coverage['total'] += 1
         if script is not None:
             coverage['script'] += 1
@@ -3430,30 +3691,48 @@ def rca_insights(task_repository: Any, filters: dict[str, Any], username: str) -
 # Excel export
 # ---------------------------------------------------------------------------
 # The call itself, before the catalog fields: what identifies the call and what the CDR says about it.
+# JOIN_ID, the call key and its CDR first, to find a call at once.
 EXPORT_COLUMNS = (
-    ('Service', 'service_label'), ('Start Time', 'start_time'), ('End Time', 'end_time'), ('Operator', 'operator'),
+    ('JOIN_ID', 'join_id'), ('Call Key', 'call_key'), ('CDR', 'dataset_name'), ('Service', 'service_label'), ('Start Time', 'start_time'), ('End Time', 'end_time'), ('Operator', 'operator'),
     ('Operator_Vendor', 'operator_vendor'), ('Vendor_Operator', 'vendor_operator'), ('Vendor', 'vendor'),
     ('Campaign', 'campaign'), ('NR Mode', 'nr_mode'), ('Region', 'region'), ('Cluster', 'cluster'), ('City', 'city'),
     ('Technology', 'technology'), ('Test Name', 'test_name'), ('Session Type (CDR)', 'session_type'), ('Direction', 'direction'),
     ('Result', 'result'), ('Failure Phase', 'failure_phase'), ('Failure Technology', 'failure_technology'),
-    ('Failure Comment', 'failure_comment'), ('Cell ID', 'cell_id'), ('Latitude', 'latitude'), ('Longitude', 'longitude'),
-    ('JOIN_ID', 'join_id'), ('CDR', 'dataset_name'), ('CDR Version', 'version_label'), ('Latest CDR', 'latest_dataset_name'),
+    ('Cell ID', 'cell_id'), ('Latitude', 'latitude'), ('Longitude', 'longitude'),
+    ('CDR Version', 'version_label'), ('Latest CDR', 'latest_dataset_name'),
     ('NQ Samples', 'nq_samples'),
 )
 CALL_SECTION = {'key': 'call', 'label': 'Call', 'color': '#5E6B75'}
-# Columns of the export that follow a catalog field: (field reference, label, value key).
-EXPORT_COMPANIONS = {
-    'status': [('Status Set', 'status_set')],
-    'root_cause': [('Root Domain', 'root_domain'), ('Recommended Root Category', 'recommended_category'),
-                   ('Recommended Root Cause', 'recommended_cause'), ('Recommendation Sources', 'recommendation_sources')],
-}
+# Columns of the export that follow a follow-up field: (field reference, label, value key).
+EXPORT_COMPANIONS = {'status': [('Status Set', 'status_set')]}
+# Columns that come before the selected root category (or cause): the root cause decision ends the RCA block.
+EXPORT_ROOT_COMPANIONS = [('Root Domain', 'root_domain'), ('Recommended Root Category', 'recommended_category'),
+                          ('Recommended Root Cause', 'recommended_cause'), ('Recommendation Sources', 'recommendation_sources')]
+# Header shades: the status of each block darker than its section, the fields of the analysts and the follow-up light,
+# the values from the CDR, the RCA script or derived lighter.
+KEY_FIELD_TINT = -0.2
+EDITABLE_FIELD_TINT = 0.35
+COMPUTED_FIELD_TINT = 0.65
 
 
 def _tint(color: str, amount: float) -> str:
-    """A lighter shade of a colour (amount 0 keeps it, 1 is white), as RRGGBB."""
+    """A lighter shade of a colour (amount 0 keeps it, 1 is white; below 0 darker), as RRGGBB."""
     value = int(color.lstrip('#'), 16) if nq_catalog.COLOR_PATTERN.fullmatch(color or '') else 0x7B8790
     channels = [(value >> shift) & 255 for shift in (16, 8, 0)]
+    if amount < 0:
+        return ''.join(f'{round(channel * (1 + amount)):02X}' for channel in channels)
     return ''.join(f'{round(channel + (255 - channel) * amount):02X}' for channel in channels)
+
+
+def key_fields(definitions: list[dict[str, Any]]) -> set[str]:
+    """The status field of each block: the NQ Call Status and the first list of Analysis, Implementation and Planning."""
+    keys = {field['key'] for field in definitions if field['source'] == 'tracking' and field['source_ref'] == 'status'}
+    for section in PHASE_SECTIONS:
+        first = next((field for field in definitions if field['section'] == section and field['type'] == 'list'
+                      and field['source'] in {'user', 'derived'}), None)
+        if first:
+            keys.add(first['key'])
+    return keys
 
 
 def _comment_log(rows: list[Any]) -> str:
@@ -3532,11 +3811,18 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
     # (section, label, getter, tint): the call columns, the catalog in its order, the CDR columns and the keys.
     columns: list[tuple[dict[str, str], str, Callable[[dict[str, Any]], Any], float]] = [
         (CALL_SECTION, label, (lambda call, key=key: call.get(key)), 0.75) for label, key in EXPORT_COLUMNS]
-    for field in definitions:
-        if not field.get('in_export', True):
-            continue
+    exported = [field for field in definitions if field.get('in_export', True)]
+    highlighted = key_fields(definitions)
+    # The recommendation goes right before the selected root category (or cause, without the category).
+    selected = next((field['key'] for field in exported if field['source'] == 'tracking'
+                     and field['source_ref'] in {'root_category', 'root_cause'}), None)
+    for field in exported:
         section = sections.get(field['section'], CALL_SECTION)
-        tint = 0.35 if field['source'] in {'user', 'tracking'} else 0.65
+        tint = KEY_FIELD_TINT if field['key'] in highlighted else \
+            EDITABLE_FIELD_TINT if field['source'] in {'user', 'tracking'} else COMPUTED_FIELD_TINT
+        if field['key'] == selected:
+            columns += [(section, label, lambda call, key=key: call.get(key, ''), COMPUTED_FIELD_TINT)
+                        for label, key in EXPORT_ROOT_COMPANIONS]
         if field['source'] == 'tracking' and field['source_ref'] == 'comments':
             columns.append((section, field['label'], lambda call: call.get('comment_log', ''), tint))
         elif field['source'] == 'tracking' and field['source_ref'] == 'updated_at':
@@ -3545,13 +3831,13 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
             columns.append((section, field['label'], lambda call, key=field['key']: call['values'].get(key, ''), tint))
         if field['source'] == 'tracking':
             for label, key in EXPORT_COMPANIONS.get(field['source_ref'], []):
-                columns.append((section, label, lambda call, key=key: call.get(key, ''), 0.8))
+                columns.append((section, label, lambda call, key=key: call.get(key, ''), COMPUTED_FIELD_TINT))
     extra_section = {'key': 'cdr', 'label': 'CDR Columns', 'color': '#5E6B75'}
     columns += [(extra_section, name, (lambda call, name=name: (call.get('extra') or {}).get(name, '')), 0.8)
                 for name in indexed_cdr_columns(task_repository)
                 if not any(field['source'] == 'cdr' and field['source_ref'] == f'column:{name}' for field in definitions)]
     columns += [(CALL_SECTION, 'Updated By', lambda call: call.get('updated_by', ''), 0.75),
-                (CALL_SECTION, 'Call Key', lambda call: call.get('call_key', ''), 0.75)]
+                (CALL_SECTION, 'Updated At', lambda call: str(call.get('updated_at') or '').replace('T', ' ')[:19], 0.75)]
 
     workbook = Workbook()
     thin = Side(style='thin', color='FFFFFF')
@@ -3768,7 +4054,7 @@ def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
                     option for option in item.get('options') or []
                     if isinstance(option, dict) and str(option.get('name') or '').casefold() not in names)]
         if merged != current_fields:
-            _store_fields(task_repository, nq_catalog.normalize_fields(merged, by_key, CALL_FIELDS))
+            _store_fields(task_repository, nq_catalog.normalize_fields(merged, by_key, CATALOG_CALL_FIELDS))
     if isinstance(document.get('sections'), list):
         task_repository.set_workspace_state(SECTIONS_STATE_KEY, json.dumps(nq_catalog.normalize_sections(document['sections'])))
     columns = document.get('table_columns')
@@ -3944,6 +4230,7 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         direction: str = 'desc'
         page: int = 1
         page_size: int = 50
+        breakdowns: bool = True
 
     class TrackingPayload(BaseModel):
         changes: dict[str, Any] = Field(default_factory=dict)
@@ -4178,7 +4465,7 @@ def install_non_qualified_calls_routes(core: Any) -> None:
             'root_causes': list_root_causes(repository), 'root_cause_defaults': nq_catalog.default_root_catalog(),
             'root_cause_rule_fields': RULE_FIELDS, 'default_root_cause_rule': DEFAULT_ROOT_CAUSE_RULE,
             'fields': list_fields(repository), 'field_types': FIELD_TYPES, 'field_sources': nq_catalog.FIELD_SOURCES,
-            'tracking_refs': nq_catalog.TRACKING_REFS, 'rca_refs': nq_catalog.RCA_REFS, 'call_fields': list(CALL_FIELDS),
+            'tracking_refs': nq_catalog.TRACKING_REFS, 'rca_refs': nq_catalog.RCA_REFS, 'call_fields': list(CATALOG_CALL_FIELDS),
             'sections': list_sections(repository), 'default_sections': nq_catalog.default_sections(),
             'status_rules': status_rules(repository), 'default_status_rules': nq_catalog.default_status_rules(),
             'rule_operators': nq_catalog.RULE_OPERATORS, 'condition_fields': nq_catalog.condition_fields(list_fields(repository)),

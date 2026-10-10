@@ -20,6 +20,7 @@ import csv
 import io
 import re
 from collections import Counter
+from threading import Lock
 from typing import Any
 
 from src.modules.nq_catalog import RCA_REFS, keyword_found, normalized_text
@@ -136,9 +137,35 @@ def _first_match(items: list[dict[str, Any]], text: str, match: str, domain: str
     return None
 
 
+# The results of the catalog and the rule of one request, by their text: many calls share the same NetCheck and
+# script values, so each combination is matched once. The catalog and rule objects themselves are the key.
+_MEMO_SIZE = 8
+_memos: list[tuple[Any, Any, dict[Any, Any]]] = []
+_memos_guard = Lock()
+
+
+def _memo(root: Any, rule: Any) -> dict[Any, Any]:
+    with _memos_guard:
+        for entry in _memos:
+            if entry[0] is root and entry[1] is rule:
+                return entry[2]
+        memo: dict[Any, Any] = {}
+        _memos.insert(0, (root, rule, memo))
+        del _memos[_MEMO_SIZE:]
+        return memo
+
+
 def map_to_catalog(category: str, cause: str, root: dict[str, list[dict[str, Any]]], match: str = 'words',
                    extra_text: str = '') -> dict[str, str]:
     """The catalog category and cause a pair of RCA values stands for: same names first, then keywords."""
+    memo = _memo(root, None)
+    key = ('map', category, cause, match, extra_text)
+    if key not in memo:
+        memo[key] = _map_to_catalog(category, cause, root, match, extra_text)
+    return dict(memo[key])
+
+
+def _map_to_catalog(category: str, cause: str, root: dict[str, list[dict[str, Any]]], match: str, extra_text: str) -> dict[str, str]:
     found_category = _by_name(root['categories'], category) or _first_match(
         root['categories'], ' | '.join(normalized_text(value) for value in (category, cause, extra_text) if value), match)
     found_cause = _by_name(root['causes'], cause) or _first_match(root['causes'], normalized_text(cause), match) \
@@ -157,8 +184,6 @@ def suggest_from_text(call: Any, root: dict[str, list[dict[str, Any]]], rule: di
        in the domain found, when the rule keeps them in it.
     3. Without a category and cause, the comments are read the same way.
     """
-    match = rule.get('match', 'words')
-
     def text(fields: list[str]) -> str:
         values = []
         for field in fields:
@@ -171,6 +196,16 @@ def suggest_from_text(call: Any, root: dict[str, list[dict[str, Any]]], rule: di
     domain_text = text(rule.get('domain_fields') or [])
     cause_text = text(rule.get('cause_fields') or [])
     technology = text(['technology', 'failure_technology'])
+    memo = _memo(root, rule)
+    key = ('suggest', domain_text, cause_text, technology, comments)
+    if key not in memo:
+        memo[key] = _suggest(domain_text, cause_text, technology, comments, root, rule)
+    return dict(memo[key]) if memo[key] else None
+
+
+def _suggest(domain_text: str, cause_text: str, technology: str, comments: str, root: dict[str, list[dict[str, Any]]],
+             rule: dict[str, Any]) -> dict[str, str] | None:
+    match = rule.get('match', 'words')
     domain = next((item for item in root['domains'] if keyword_found(item.get('keywords') or [], domain_text, match)), None)
     scope = domain['name'] if domain and rule.get('causes_in_domain', True) else ''
     category_text = ' | '.join(value for value in (domain_text, cause_text, technology) if value)

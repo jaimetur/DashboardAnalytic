@@ -87,7 +87,8 @@ class _CoordinatedConnection(sqlite3.Connection):
         self.set_authorizer(self._authorize_statement)
 
     def _authorize_statement(self, action, _argument_1, _argument_2, _database, _trigger):
-        if action in _SQLITE_WRITE_ACTIONS and not self._workspace_lock_acquired:
+        # Temporary tables live in the connection, not in the workspace file: writing them takes no lock.
+        if action in _SQLITE_WRITE_ACTIONS and _database != 'temp' and not self._workspace_lock_acquired:
             wait_started = monotonic()
             assert self._workspace_lock is not None
             self._workspace_lock.acquire()

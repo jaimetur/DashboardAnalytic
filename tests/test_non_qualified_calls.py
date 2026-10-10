@@ -917,7 +917,7 @@ def test_analysis_fields_are_configured_filled_filtered_required_and_exported(cl
     assert client.put('/api/non-qualified-calls/fields', json={'fields': fields}).status_code == 400
     workbook = load_workbook(io.BytesIO(client.post('/api/non-qualified-calls/export', json={'filters': {}}).content))
     header = list(workbook['NQ Calls'].values)[1]
-    assert 'Final Category' in header and header.index('Final Category') > header.index('Failure Comment')
+    assert 'Final Category' in header and header.index('Final Category') > header.index('Cell ID')
     # The analysis travels with the NQ Call Tracking package.
     document = json.loads(core._nq_call_tracking_payload(core.active_workspace))
     assert {field['label'] for field in document['fields']} >= {'Final Category', 'Findings'}
@@ -959,7 +959,7 @@ def test_cdr_columns_and_optional_columns_of_the_calls_table(client, tmp_path):
     sheet = load_workbook(io.BytesIO(client.post('/api/non-qualified-calls/export', json={'filters': {}}).content))['NQ Calls']
     headers = [cell.value for cell in sheet[2]]
     assert {'Cluster', 'Operator_Vendor', 'Vendor_Operator', 'CDR', 'Cellname_A', 'Call_Status'} <= set(headers)
-    assert headers.index('Call_Status') == headers.index('Cellname_A') + 1 and headers[-1] == 'Call Key'
+    assert headers.index('Call_Status') == headers.index('Cellname_A') + 1 and headers[-1] == 'Updated At'
     rows = [dict(zip(headers, (cell.value for cell in row))) for row in sheet.iter_rows(min_row=3)]
     assert {row['Cellname_A'] for row in rows} == {'LEEDS_3', 'YORK_2'} and all(row['Call_Status'] for row in rows)
     assert client.put('/api/non-qualified-calls/table-columns', json={'builtin': ['unknown'], 'cdr': []}).status_code == 400

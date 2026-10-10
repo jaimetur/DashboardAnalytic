@@ -67,7 +67,14 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel nq-summary-panel" open data-panel-state-key="non-qualified-calls:summary">
+  {# The calls table or the dashboards right below the filters, or the whole page; each browser remembers the choice. #}
+  <nav class="nq-view-switch" id="nq-view-switch" role="tablist" aria-label="View">
+    <button type="button" role="tab" data-nq-view="calls" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Calls <span class="nq-view-count" id="nq-view-count"></span></button>
+    <button type="button" role="tab" data-nq-view="dashboards" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Dashboards</button>
+    <button type="button" role="tab" data-nq-view="all" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>All panels</button>
+  </nav>
+
+  <details class="panel collapsible-panel nq-summary-panel" data-nq-view-panel="dashboards" data-nq-loader="summary" open data-panel-state-key="non-qualified-calls:summary">
     <summary class="collapsible-summary"><div><p class="eyebrow">Executive view</p><h2>Summary</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
       <div class="nq-kpis" id="nq-kpis"></div>
@@ -76,7 +83,7 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel nq-rates-panel" open data-panel-state-key="non-qualified-calls:rates">
+  <details class="panel collapsible-panel nq-rates-panel" data-nq-view-panel="dashboards" data-nq-loader="rates" open data-panel-state-key="non-qualified-calls:rates">
     <summary class="collapsible-summary"><div><p class="eyebrow">Management view</p><h2>NQ Rate by Campaign and Operator</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
       <div class="nq-progress-head">
@@ -89,7 +96,7 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel nq-progress-panel" open data-panel-state-key="non-qualified-calls:progress">
+  <details class="panel collapsible-panel nq-progress-panel" data-nq-view-panel="dashboards" data-nq-loader="progress" open data-panel-state-key="non-qualified-calls:progress">
     <summary class="collapsible-summary"><div><p class="eyebrow">Follow-up</p><h2>Progress View</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
       <div class="nq-progress-head">
@@ -112,15 +119,15 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel nq-life-panel" open data-panel-state-key="non-qualified-calls:lifecycle">
+  <details class="panel collapsible-panel nq-life-panel" data-nq-view-panel="dashboards" data-nq-loader="lifecycle" open data-panel-state-key="non-qualified-calls:lifecycle">
     <summary class="collapsible-summary"><div><p class="eyebrow">Analysis Center</p><h2>Lifecycle &amp; Phases</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
       <div class="nq-progress-head">
-        <p class="nq-hint">Where the filtered calls are in their follow-up: the NQ Call Status pipeline, whether each status follows the Status Rules or was set by hand, the values of the phase fields (Analysis, Implementation and Planning), how long calls stay in each status, the most frequent moves and the open calls without changes for a while. Click a status, a value or a card to drill down into its calls.</p>
+        <p class="nq-hint">Where the filtered calls are in their follow-up: the NQ Call Status pipeline, each status with the Status Rules that set it, whether each status follows the rules or was set by hand, the RCA identification and the values of the phase fields (Analysis, Implementation and Planning), how long calls stay in each status, the most frequent moves and the open calls without changes for a while. Click a status, a value or a card to drill down into its calls.</p>
         {% if nq_can_edit %}<button type="button" class="nq-secondary-action" data-nq-status-rules-open title="How the NQ Call Status is set from the phase fields">Status Rules</button>{% endif %}
       </div>
       <div class="nq-kpis" id="nq-life-kpis"></div>
-      <section class="nq-progress-section"><h3>NQ Call Status Pipeline</h3><div class="nq-pipeline" id="nq-life-pipeline"></div><ol class="nq-rule-list" id="nq-life-rules"></ol></section>
+      <section class="nq-progress-section"><h3>NQ Call Status Pipeline</h3><div class="nq-pipeline" id="nq-life-pipeline"></div></section>
       <div class="nq-phase-cards" id="nq-life-phases"></div>
       <div class="nq-progress-grid">
         <section class="nq-progress-section"><h3>Time in Each Status</h3><div class="nq-table-wrap"><table class="nq-table nq-stats-table" id="nq-life-times"></table></div></section>
@@ -130,7 +137,7 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel nq-root-panel" open data-panel-state-key="non-qualified-calls:root-causes">
+  <details class="panel collapsible-panel nq-root-panel" data-nq-view-panel="dashboards" data-nq-loader="root" open data-panel-state-key="non-qualified-calls:root-causes">
     <summary class="collapsible-summary"><div><p class="eyebrow">Diagnosis</p><h2>Root Cause Analysis</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
       <div class="nq-progress-head">
@@ -149,7 +156,7 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel nq-sources-panel" open data-panel-state-key="non-qualified-calls:rca-sources">
+  <details class="panel collapsible-panel nq-sources-panel" data-nq-view-panel="dashboards" data-nq-loader="sources" open data-panel-state-key="non-qualified-calls:rca-sources">
     <summary class="collapsible-summary"><div><p class="eyebrow">Analysis Center</p><h2>Root Cause Sources</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
       <div class="nq-progress-head">
@@ -165,7 +172,7 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel nq-calls-panel" open data-panel-state-key="non-qualified-calls:calls">
+  <details class="panel collapsible-panel nq-calls-panel" data-nq-view-panel="calls" data-nq-loader="calls" open data-panel-state-key="non-qualified-calls:calls">
     <summary class="collapsible-summary"><div><p class="eyebrow">Drill-down</p><h2>Non-Qualified Calls</h2></div>{# Finds calls by their JOIN_ID (one or more, typed or pasted), centred beside the title. #}<label class="nq-join-search" data-nq-join-search><span>Join ID</span><input type="search" data-nq-typed-filter="join_id" placeholder="Find calls by one or more JOIN_IDs…" autocomplete="off" aria-label="Join ID" title="Paste one or more JOIN_IDs, separated by commas, spaces or lines"></label><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
       <div class="nq-active-filters" id="nq-active-filters" hidden></div>
@@ -200,8 +207,8 @@
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="city" data-filter="city">City</span></span><span class="nq-header-item"><span data-sort="campaign" data-filter="campaign">Campaign</span></span></th>
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="test_name" data-filter="test_name">Test</span></span><span class="nq-header-item"><span data-sort="technology" data-filter="technology">Technology</span></span></th>
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="result" data-filter="result">Result</span></span><span class="nq-header-item"><span data-sort="failure" data-filter="failure_classification">Failure</span></span></th>
-              <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="root_category" data-filter="root_category">Root Category</span></span><span class="nq-header-item"><span data-sort="cause" data-filter="root_cause">Root Cause</span></span></th>
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="team" data-filter="team">Team</span></span><span class="nq-header-item"><span data-sort="assignee" data-filter="assignee">Assignee</span></span></th>
+              <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="root_category" data-filter="root_category">Root Category</span></span><span class="nq-header-item"><span data-sort="cause" data-filter="root_cause">Root Cause</span></span></th>
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="status" data-filter="status">Status</span></span></th>
               <th class="nq-sort-pair"><span class="nq-header-item"><span data-sort="comments">Comments</span></span></th>
             </tr>

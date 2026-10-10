@@ -123,7 +123,7 @@ Server-transfer dialogs can be hidden with **Hide** while the transfer continues
 
 ## Floating background-task cards
 
-Every authenticated page polls active background work and shows compact floating cards until it finishes. Work for the open workspace appears at the lower right. Work for one or more other accessible workspaces appears in differently coloured lower-left cards, grouped by workspace name; changing the active workspace moves each running task to the appropriate side.
+Every authenticated page polls active background work (every 2 seconds while work runs, every 8 seconds otherwise and every 30 seconds in a hidden tab) and shows compact floating cards until it finishes. Work for the open workspace appears at the lower right. Work for one or more other accessible workspaces appears in differently coloured lower-left cards, grouped by workspace name; changing the active workspace moves each running task to the appropriate side.
 
 Each card preserves its expanded or minimized state when moving between modules or reloading the page.
 

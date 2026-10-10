@@ -59,7 +59,12 @@ def test_new_workspaces_get_the_catalog_of_the_meeting_workbook(client, tmp_path
     setup_calls(client, tmp_path)
     state = client.get('/api/non-qualified-calls/state').json()
     fields = state['fields']
-    assert len(fields) == 37
+    # The 37 fields of the meeting workbook, with the Last Cell ID and Failure Comment of the CDR in Failure Details.
+    assert len(fields) == 39
+    assert [field['key'] for field in fields if field['section'] == 'failure_event'][-2:] == ['vendor_when_failure', 'failure_comment']
+    assert next(field for field in fields if field['key'] == 'last_cell_id')['source_ref'] == 'last_cell_id'
+    assert [field['key'] for field in fields if field['section'] == 'analysis'][:3] == ['analysis_status', 'tunnel_failure', 'needed_technology']
+    assert [section['label'] for section in state['sections']][2] == 'Failure Details'
     assert [field['label'] for field in fields[:3]] == ['Auto_RCA_Category_A', 'Auto_RCA_Subcategory_A', 'Auto_RCA_Category_B']
     by_key = {field['key']: field for field in fields}
     assert by_key['rca_suggested_cause']['source'] == 'rca' and by_key['rca_suggested_cause']['in_table']
@@ -230,8 +235,18 @@ def test_excel_export_groups_the_catalog_by_section_with_its_colours(client, tmp
     # The catalog in its order, each field after its section title, with the follow-up companions.
     assert headers.index('Auto_RCA_Category_A') < headers.index('Selected Root Cause') < headers.index('NQ Call Status') \
         < headers.index('Session Type') < headers.index('Findings') < headers.index('Planned Date')
-    assert headers[headers.index('Selected Root Cause') + 1] == 'Root Domain'
+    # JOIN_ID and the call key first; the root cause decision ends the RCA block; the last update last.
+    assert headers[:3] == ['JOIN_ID', 'Call Key', 'CDR'] and headers[-2:] == ['Updated By', 'Updated At']
+    selected = headers.index('Selected Root Category')
+    assert headers[selected - 4:selected] == ['Root Domain', 'Recommended Root Category', 'Recommended Root Cause',
+                                              'Recommendation Sources'] and headers[selected + 1] == 'Selected Root Cause'
     assert headers[headers.index('NQ Call Status') + 1] == 'Status Set'
+    # The status of each block stands out, darker than its section.
+    fill = lambda label: sheet.cell(2, headers.index(label) + 1).fill.fgColor.rgb[-6:]
+    assert fill('NQ Call Status') == nq._tint('#0070C0', nq.KEY_FIELD_TINT) != fill('Status Set')
+    assert fill('Analysis Status') == nq._tint('#7030A0', nq.KEY_FIELD_TINT) != fill('Findings')
+    assert fill('Implementation Status') == nq._tint('#00B050', nq.KEY_FIELD_TINT)
+    assert fill('Planned Status') == nq._tint('#00843D', nq.KEY_FIELD_TINT)
     rca_fill = sheet.cell(1, headers.index('Auto_RCA_Category_A') + 1).fill.fgColor.rgb
     assert rca_fill.endswith('FFC000')
     rows = [dict(zip(headers, (cell.value for cell in row))) for row in sheet.iter_rows(min_row=3)]
@@ -264,7 +279,7 @@ def test_catalog_workbook_round_trip_and_the_meeting_layout(client, tmp_path):
     assert imported.status_code == 200, imported.text
     route = next(field for field in imported.json()['fields'] if field['label'] == 'Drive Route')
     assert [option['name'] for option in route['options']] == ['M25', 'A1'] and route['section'] == 'analysis' and route['in_table']
-    assert len(imported.json()['fields']) == 38
+    assert len(imported.json()['fields']) == 40
     # The workbook of the meeting: sections in the first row, fields in the second, values below.
     meeting = Workbook()
     sheet = meeting.active
@@ -345,7 +360,7 @@ def test_first_version_workspaces_move_to_the_analysis_center(client, tmp_path):
     assert [item['name'] for item in nq.list_options(repository)['statuses']][0] == 'Not Attended'
     # The workspace's field keeps its key and values and takes its place in the catalog.
     findings = next(field for field in nq.list_fields(repository) if field['label'] == 'Findings')
-    assert findings['key'] == 'findings' and findings['section'] == 'analysis' and len(nq.list_fields(repository)) == 37
+    assert findings['key'] == 'findings' and findings['section'] == 'analysis' and len(nq.list_fields(repository)) == 39
 
 
 def test_recommendation_engine_maps_each_source_onto_the_catalog():
@@ -375,3 +390,80 @@ def test_recommendation_engine_maps_each_source_onto_the_catalog():
     assert sources['learned']['count'] == 2 and sources['learned']['category'] == 'DL Interference NR'
     assert nq_catalog.evaluate_status(nq_catalog.default_status_rules(), {'analysis_status': 'Finished'}, 'Not Attended') == 'Closed'
     assert nq_catalog.evaluate_status(nq_catalog.default_status_rules(), {'@attended': 'Yes'}, 'Not Attended') == 'Open'
+
+
+def test_calls_are_read_from_their_latest_versions_kept_up_to_date(client, tmp_path):
+    calls = setup_calls(client, tmp_path)
+    repository = core.repository
+    # The latest version of every call is kept in a table, rebuilt when the indexed CDRs or the maps change.
+    with repository.connection() as connection:
+        latest = {row['call_key']: row for row in connection.execute(f'SELECT * FROM {nq.NQ_CALL_LATEST_TABLE}')}
+    assert {call['call_key'] for call in calls.values()} == set(latest)
+    assert latest[calls['0xA1']['call_key']]['last_cell_id'] == '123456'
+    assert calls['0xA1']['values']['last_cell_id'] == '123456' and calls['0xA1']['values']['failure_comment'] == ''
+    assert not nq.refresh_latest_calls(repository)
+    repository.replace_operator_mapping_group('VF', 'VF Lab', ['Vodafone UK'])
+    operators = {item['operator'] for item in query(client)['calls']}
+    assert 'VF Lab' in operators and 'Vodafone UK' not in operators
+    # The follow-up is read as it is now.
+    updated = patch(client, calls['0xC3'], {'root_category': 'E2E'})
+    assert {item['join_id']: item for item in query(client)['calls']}['0xC3']['root_category'] == updated['root_category'] == 'E2E'
+    # A choice of CDRs reads their own latest versions.
+    dataset = str(query(client)['calls'][0]['dataset_id'])
+    assert query(client, filters={'datasets': [dataset]})['total'] == 3
+    # Without the Summary on screen, its breakdowns are left out.
+    assert query(client, breakdowns=False)['breakdowns'] == [] and query(client)['breakdowns']
+    # Once in place, the schema is checked without writing.
+    assert nq._schema_ready(repository)
+
+
+def test_an_assignee_brings_the_call_to_their_team(client, tmp_path):
+    calls = setup_calls(client, tmp_path)
+    core.repository.create_user('analyst', 'analyst123', 'user-editor')
+    user_id = next(int(row['id']) for row in core.repository.list_users() if row['username'] == 'analyst')
+    core.repository.set_user_workspace_access(user_id, [core.active_workspace.id])
+    state = client.get('/api/non-qualified-calls/state').json()
+    statuses = [{**status, 'previous': status['name']} for status in state['options']['statuses']]
+    members = {'Netcheck': ['analyst'], 'Operations': ['super']}
+    teams = [{**team, 'previous': team['name'], 'members': members.get(team['name'], [])} for team in state['options']['teams']]
+    assert client.put('/api/non-qualified-calls/options', json={'statuses': statuses, 'teams': teams}).status_code == 200
+    assert patch(client, calls['0xA1'], {'assignee': 'analyst'})['team'] == 'Netcheck'
+    # Out of a team with other members, the assignee moves the call to their own team.
+    other = patch(client, calls['0xB2'], {'team': 'Operations'})
+    assert other['team'] == 'Operations' and patch(client, calls['0xB2'], {'assignee': 'analyst'})['team'] == 'Netcheck'
+
+
+def test_first_layout_workspaces_take_the_second_one(client, tmp_path):
+    setup_calls(client, tmp_path)
+    repository = core.repository
+    # A workspace of the first layout: its colours, names, Analysis order, no CDR fields in Failure Event.
+    sections = [{**section, 'color': nq_catalog.FIRST_SECTION_COLORS.get(section['key'], section['color']),
+                 'label': nq_catalog.FIRST_SECTION_LABELS.get(section['key'], section['label'])} for section in nq.list_sections(repository)]
+    repository.set_workspace_state(nq.SECTIONS_STATE_KEY, json.dumps(sections))
+    fields = [field for field in nq.list_fields(repository) if field['key'] not in {'last_cell_id', 'failure_comment'}]
+    by_key = {field['key']: field for field in fields}
+    keys = [field['key'] for field in fields]
+    positions = sorted(keys.index(key) for key in nq_catalog.FIRST_ANALYSIS_ORDER)
+    for position, key in zip(positions, nq_catalog.FIRST_ANALYSIS_ORDER):
+        fields[position] = by_key[key]
+    by_key['serving_cell_when_failure']['suggest_from'] = 'cell_id'
+    nq._store_fields(repository, fields)
+    repository.set_workspace_state(nq.ANALYSIS_CENTER_V2_STATE_KEY, '')
+    nq.ensure_nq_tables(repository)
+    upgraded = {section['key']: section for section in nq.list_sections(repository)}
+    assert upgraded['failure_event'] == {'key': 'failure_event', 'label': 'Failure Details', 'color': '#FF0000'}
+    assert upgraded['implementation']['color'] == '#00B050' and upgraded['planning']['color'] == '#00843D'
+    fields = nq.list_fields(repository)
+    failure = [field['key'] for field in fields if field['section'] == 'failure_event']
+    assert failure.index('last_cell_id') == failure.index('serving_cell_when_failure') - 1 and failure[-1] == 'failure_comment'
+    assert [field['key'] for field in fields if field['section'] == 'analysis'][-2:] == ['proposed_measure', 'findings']
+    assert next(field for field in fields if field['key'] == 'serving_cell_when_failure')['suggest_from'] == 'last_cell_id'
+
+
+def test_lifecycle_counts_the_rca_identification(client, tmp_path):
+    calls = setup_calls(client, tmp_path)
+    patch(client, calls['0xA1'], {'root_category': 'Poor Coverage LTE'})
+    life = client.post('/api/non-qualified-calls/lifecycle', json={'filters': {}}).json()
+    assert life['rca'] == {'identified': 1, 'not_identified': 2}
+    assert [item['join_id'] for item in query(client, filters={'state': ['identified']})['calls']] == ['0xA1']
+    assert query(client, filters={'state': ['not_identified']})['total'] == 2

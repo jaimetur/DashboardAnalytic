@@ -32,7 +32,8 @@
     qualified: 'Completed in a more recent CDR',
   };
   const STATE_LABELS = {closed: 'Closed', attended: 'Attended', not_attended: 'Not attended', with_team: 'With team',
-    assigned: 'Assigned', commented: 'Commented', labelled: 'With a root cause', suggested: 'Suggested root cause'};
+    assigned: 'Assigned', commented: 'Commented', labelled: 'With a root cause', suggested: 'Suggested root cause',
+    identified: 'RCA identified', not_identified: 'RCA not identified'};
   // Filters set by clicking the Progress View and the Root Cause Analysis; they have no select of their own.
   const EXTRA_FILTERS = ['nr_mode', 'call_type', 'period', 'age', 'root_pair', 'effective_domain', 'effective_cause', 'node',
     'state', 'rca_state'];
@@ -62,7 +63,7 @@
     options: {statuses: [], teams: []}, rootCauses: {domains: [], categories: [], causes: [], require_to_close: false}, users: [],
     user: {username: '', can_edit: false, can_moderate: false},
     unassigned: '__unassigned__', datasets: [], mainCities: [], sort: 'start_time', direction: 'desc', page: 1, pageSize: 50,
-    result: null, selected: new Set(), detail: null, requestToken: 0, busy: false, extraFilters: {},
+    result: null, selected: new Set(), detail: null, requestToken: 0, busy: false, extraFilters: {}, stale: new Set(), view: 'calls',
     fields: [], fieldTypes: {}, tableColumns: {builtin: [], cdr: []}, optionalColumns: {}, cdrColumns: [], versionLabels: {},
     rateService: '', sections: [], statusRules: [], conditionFields: {}, ruleOperators: {}, fieldSources: {}, trackingRefs: {},
     rcaRefs: {}, callFields: [], rcaResults: {}, rcaSources: {}, matrixSource: 'script',
@@ -658,35 +659,21 @@
   };
   const statusModeText = (call) => (call.status_mode === 'manual' ? 'Set by hand' : 'Automatic');
   const trackingSelect = (kind, call) => {
-    const select = node('select', undefined, `nq-pill-select nq-pill-${kind}`);
-    select.setAttribute('aria-label', `${HISTORY_LABELS[kind]} of the call`);
-    const entries = kind === 'status' ? state.options.statuses.map((item) => [item.name, item.name])
-      : kind === 'team' ? [['', 'Unassigned'], ...state.options.teams.map((item) => [item.name, item.name])]
-        : [['', 'Unassigned'], ...assignableUsers(call.team).map((name) => [name, name])];
+    const items = kind === 'status' ? state.options.statuses.map((item) => ({value: item.name, label: item.name, color: item.color}))
+      : kind === 'team' ? [{value: '', label: 'Unassigned'}, ...state.options.teams.map((item) => ({value: item.name, label: item.name, color: item.color}))]
+        : [{value: '', label: 'Unassigned'}, ...assignableUsers(call.team).map((name) => ({value: name, label: name}))];
     const current = call[kind] || '';
-    if (current && !entries.some(([value]) => value === current)) entries.push([current, current]);
+    if (current && !items.some((item) => item.value === current)) items.push({value: current, label: current});
     // A status set by hand can go back to the Status Rules.
-    if (kind === 'status' && call.status_mode === 'manual') entries.push([AUTO_STATUS, '↺ Back to automatic']);
-    select.append(...entries.map(([value, label]) => {
-      const option = node('option', label);
-      option.value = value;
-      option.selected = value === current;
-      return option;
-    }));
-    const paint = () => {
-      paintPill(select, kind === 'assignee' ? '' : optionColor(kind, select.value));
-      select.classList.toggle('is-empty', !select.value);
-      select.title = kind === 'status' ? `Status: ${select.value} (${statusModeText(call).toLowerCase()})`
-        : `${HISTORY_LABELS[kind]}: ${select.value || 'Unassigned'}`;
-    };
-    paint();
-    select.addEventListener('change', () => {
-      const changes = select.value === AUTO_STATUS ? {status_mode: 'auto'} : {[kind]: select.value};
-      if (select.value !== AUTO_STATUS) paint();
-      patchCall(call, changes, select, select.value === AUTO_STATUS ? 'The status follows the Status Rules again.' : `${HISTORY_LABELS[kind]} updated.`);
+    if (kind === 'status' && call.status_mode === 'manual') items.push({value: AUTO_STATUS, label: '↺ Back to automatic', action: true});
+    const control = choiceControl({
+      items, value: current, empty: 'Unassigned', label: `${HISTORY_LABELS[kind]} of the call`,
+      title: (value) => (kind === 'status' ? `Status: ${value} (${statusModeText(call).toLowerCase()})` : `${HISTORY_LABELS[kind]}: ${value || 'Unassigned'}`),
+      onChange: (value) => patchCall(call, value === AUTO_STATUS ? {status_mode: 'auto'} : {[kind]: value}, control,
+        value === AUTO_STATUS ? 'The status follows the Status Rules again.' : `${HISTORY_LABELS[kind]} updated.`),
     });
-    select.addEventListener('click', (event) => event.stopPropagation());
-    return select;
+    control.classList.add(`nq-pill-${kind}`);
+    return control;
   };
   // Whether the status follows the Status Rules (Auto) or was chosen by hand.
   const statusModeBadge = (call) => {
@@ -806,6 +793,105 @@
     if (rootPicker && !rootPicker.popover.contains(event.target)) window.requestAnimationFrame(placeRootPicker);
   }, {passive: true, capture: true});
   window.addEventListener('resize', closeRootPicker);
+  // A modern dropdown: the value as a pill in its colour, and every choice in its colour in a popover (with a search
+  // for long lists). Items are {value, label, color, action}; an action (Back to automatic) is not a value.
+  const openChoicePicker = (anchor, items, current, choose, label) => {
+    closeRootPicker();
+    const popover = node('div', undefined, 'nq-column-filter nq-cause-picker nq-choice-picker');
+    popover.setAttribute('role', 'listbox');
+    popover.setAttribute('aria-label', label);
+    popover.addEventListener('click', (event) => event.stopPropagation());
+    const list = node('div', undefined, 'nq-column-filter-list');
+    const options = items.map((item) => {
+      const option = node('button', undefined, `nq-choice-option${item.action ? ' is-action' : ''}`);
+      option.type = 'button';
+      option.setAttribute('role', 'option');
+      const selected = !item.action && item.value === current;
+      option.classList.toggle('is-selected', selected);
+      option.setAttribute('aria-selected', String(selected));
+      const chip = node('span', item.label, 'nq-pill');
+      if (item.color) paintPill(chip, item.color);
+      else if (!item.value || item.action) chip.classList.add('is-empty');
+      option.append(chip);
+      option.addEventListener('click', () => {
+        closeRootPicker();
+        if (!selected) choose(item);
+      });
+      list.append(option);
+      return [option, item.label];
+    });
+    let search = null;
+    if (items.length > 10) {
+      search = node('input');
+      search.type = 'search';
+      search.placeholder = 'Search…';
+      search.addEventListener('input', () => {
+        const query = search.value.trim().toLowerCase();
+        options.forEach(([option, text]) => { option.hidden = Boolean(query) && !text.toLowerCase().includes(query); });
+      });
+      search.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          list.querySelector('.nq-choice-option:not([hidden])')?.click();
+        }
+      });
+      popover.append(search);
+    }
+    popover.append(list);
+    document.body.append(popover);
+    rootPicker = {popover, anchor};
+    placeRootPicker();
+    const selected = list.querySelector('.is-selected');
+    if (selected) list.scrollTop = selected.offsetTop - list.clientHeight / 2;
+    (search || selected || list.querySelector('.nq-choice-option'))?.focus({preventScroll: true});
+  };
+  // The arrows move between the choices of an open picker.
+  document.addEventListener('keydown', (event) => {
+    if (!rootPicker || !['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+    const options = [...rootPicker.popover.querySelectorAll('.nq-choice-option:not([hidden]), .nq-cause-option:not([hidden])')];
+    if (!options.length) return;
+    event.preventDefault();
+    const index = options.indexOf(document.activeElement);
+    const next = event.key === 'ArrowDown' ? Math.min(options.length - 1, index + 1) : Math.max(0, index - 1);
+    options[next].focus();
+  });
+  const choiceControl = ({items, value, empty = '—', label, onChange, title = null}) => {
+    const button = node('button', undefined, 'nq-pill-select nq-cause-picker-button nq-choice');
+    button.type = 'button';
+    button.setAttribute('aria-haspopup', 'listbox');
+    button.setAttribute('aria-label', label);
+    let current = value || '';
+    const paint = () => {
+      const item = items.find((entry) => !entry.action && entry.value === current);
+      button.textContent = item ? item.label : (current || empty);
+      paintPill(button, item?.color || '');
+      button.classList.toggle('is-empty', !current);
+      button.title = title ? title(current) : `${label}: ${current || empty}`;
+    };
+    paint();
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (rootPicker?.anchor === button) { closeRootPicker(); return; }
+      openChoicePicker(button, items, current, (item) => {
+        if (!item.action) {
+          current = item.value;
+          paint();
+        }
+        onChange(item.value, item);
+      }, label);
+    });
+    button.setValue = (chosen) => { current = chosen || ''; paint(); };
+    return button;
+  };
+  // Yes and No in their colours.
+  const YES_NO_COLORS = {Yes: '#245a96', No: '#9aa5ad'};
+  const fieldChoices = (field, value = '') => {
+    const names = field.type === 'yes_no' ? ['Yes', 'No'] : field.options.map((option) => option.name);
+    if (value && !names.includes(value)) names.push(value);
+    return [{value: '', label: '—'}, ...names.map((name) => ({value: name, label: name,
+      color: field.type === 'yes_no' ? YES_NO_COLORS[name] : optionColorOf(field, name)}))];
+  };
   // A picker button for the root category (filled with its domain colour) or cause (outlined).
   const rootPickerButton = (kind, call) => {
     const value = call[kind] || '';
@@ -1022,12 +1108,16 @@
       anchor.after(cell);
       anchor = cell;
     });
-    anchor = after('root_category');
+    // The RCA fields come before the root category and cause they lead to, the other fields after them.
+    const rootHeader = after('root_category');
+    rootHeader.classList.add('nq-section-col');
+    rootHeader.style.setProperty('--nq-section', sectionOf('rca').color);
     const filterable = new Set(filterableFields().map((field) => field.key));
+    anchor = rootHeader;
     fieldColumns().forEach((field) => {
       const cell = headerCell(field.label, `field:${field.key}`, filterable.has(field.key) ? `field:${field.key}` : '', sectionOf(field.section));
-      anchor.after(cell);
-      anchor = cell;
+      if (field.section === 'rca') rootHeader.before(cell);
+      else { anchor.after(cell); anchor = cell; }
     });
     naturalColumns = [...row.cells].map(columnKeyOf).filter(Boolean);
     applyColumnOrder();
@@ -1040,31 +1130,15 @@
     const cell = node('td', undefined, 'nq-tracking-cell nq-field-cell');
     const value = String((field.source === 'user' ? call.fields?.[field.key] : call.values?.[field.key]) ?? '');
     if (['list', 'yes_no'].includes(field.type) && field.source === 'user' && state.user.can_edit) {
-      const select = node('select', undefined, 'nq-pill-select nq-field-select');
-      select.setAttribute('aria-label', `${field.label} of the call`);
-      const choices = field.type === 'yes_no' ? ['Yes', 'No'] : field.options.map((option) => option.name);
-      if (value && !choices.includes(value)) choices.push(value);
-      select.append(node('option', '—'), ...choices.map((choice) => {
-        const option = node('option', choice);
-        option.value = choice;
-        return option;
-      }));
-      select.options[0].value = '';
-      select.value = value;
-      const paint = () => {
-        paintPill(select, optionColorOf(field, select.value));
-        select.classList.toggle('is-empty', !select.value);
-        select.title = `${field.label}: ${select.value || 'empty'}`;
-      };
-      paint();
-      select.addEventListener('click', (event) => event.stopPropagation());
-      select.addEventListener('change', () => { paint(); saveFieldValue(call, field.key, select.value, select); });
-      cell.append(select);
+      const picker = choiceControl({items: fieldChoices(field, value), value, label: `${field.label} of the call`,
+        onChange: (chosen) => saveFieldValue(call, field.key, chosen, picker)});
+      picker.classList.add('nq-field-select');
+      cell.append(picker);
       return cell;
     }
     if (['list', 'yes_no'].includes(field.type) && value) {
       const element = node('span', value, 'nq-pill');
-      paintPill(element, optionColorOf(field, value));
+      paintPill(element, field.type === 'yes_no' ? YES_NO_COLORS[value] || '' : optionColorOf(field, value));
       cell.append(element);
     } else {
       const text = node('span', field.type === 'date' ? value : value || '—', value ? 'nq-field-text' : 'nq-muted');
@@ -1125,8 +1199,10 @@
       }
       // Start time with the service below it.
       const start = node('td', undefined, 'nq-start-cell');
-      start.append(node('span', cdrTime(call.start_time), 'nq-nowrap'),
-        node('span', call.service_label, `nq-service nq-service-${call.service}`));
+      // The minute is enough in the row; the whole time shows on hover.
+      const startTime = node('span', cdrTime(call.start_time).replace(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}):\d{2}$/, '$1'), 'nq-nowrap');
+      startTime.title = cdrTime(call.start_time);
+      start.append(startTime, node('span', call.service_label, `nq-service nq-service-${call.service}`));
       if (call.service === 'speech' && Number(call.nq_samples) > 1) {
         const samples = node('span', `${number(call.nq_samples)} NQ samples`, 'nq-samples-badge');
         samples.title = 'Non-Qualified samples of this Speech call: open the call to follow each one up';
@@ -1192,7 +1268,8 @@
       row.append(
         start, stacked(call.operator, call.vendor), stacked(call.region, call.cluster), stacked(call.city, campaignLabel(call.campaign)),
         stacked(call.test_name, call.technology), failure, ...optionalColumns().map((column) => optionalCell(call, column)),
-        root, ...fieldColumns().map((field) => fieldCell(call, field)), tracking('team', 'assignee'), status, comments,
+        tracking('team', 'assignee'), ...fieldColumns().filter((field) => field.section === 'rca').map((field) => fieldCell(call, field)),
+        root, ...fieldColumns().filter((field) => field.section !== 'rca').map((field) => fieldCell(call, field)), status, comments,
       );
       orderRowCells(row);
       row.addEventListener('click', (event) => {
@@ -1256,7 +1333,8 @@
   const renderBulk = () => {
     const bulk = $('nq-bulk');
     if (!bulk) return;
-    bulk.hidden = !state.selected.size;
+    // The actions of the selected calls go with the table.
+    bulk.hidden = !state.selected.size || Boolean(panelOf('calls')?.hidden);
     placeBulk();
     $('nq-bulk-count').textContent = `${number(state.selected.size)} selected`;
     const pageBox = $('nq-select-page');
@@ -1321,6 +1399,56 @@
     }
   };
 
+  // -- views and panels on screen ---------------------------------------------------------
+  // The panels calculated on their own after each change of the calls (the Summary comes with the calls).
+  const PANEL_LOADERS = {rates: loadRates, progress: loadProgress, lifecycle: loadLifecycle, root: loadRootCauses, sources: loadSources};
+  const panelOf = (name) => root.querySelector(`[data-nq-loader="${name}"]`);
+  const panelShown = (name) => {
+    const panel = panelOf(name);
+    return Boolean(panel && !panel.hidden && panel.open);
+  };
+  // The panels left out of the last filter change, calculated once they are shown.
+  const refreshStale = () => {
+    if (state.stale.has('summary') && panelShown('summary')) { loadCalls({quiet: true}); return; }
+    Object.entries(PANEL_LOADERS).forEach(([name, load]) => {
+      if (state.stale.has(name) && panelShown(name)) {
+        state.stale.delete(name);
+        void load();
+      }
+    });
+  };
+  const VIEW_STORAGE = `nq-view:${$('nq-table').dataset.workspace || ''}`;
+  const VIEWS = ['calls', 'dashboards', 'all'];
+  const applyView = (view) => {
+    state.view = VIEWS.includes(view) ? view : 'calls';
+    root.querySelectorAll('[data-nq-view-panel]').forEach((panel) => {
+      panel.hidden = state.view !== 'all' && panel.dataset.nqViewPanel !== state.view;
+    });
+    $('nq-view-switch').querySelectorAll('[data-nq-view]').forEach((button) => {
+      const active = button.dataset.nqView === state.view;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', String(active));
+    });
+    try {
+      localStorage.setItem(VIEW_STORAGE, state.view);
+    } catch (_error) {
+      // Without browser storage the view lasts until the page is reloaded.
+    }
+    renderBulk();
+  };
+  $('nq-view-switch').querySelectorAll('[data-nq-view]').forEach((button) => button.addEventListener('click', () => {
+    applyView(button.dataset.nqView);
+    refreshStale();
+  }));
+  root.querySelectorAll('[data-nq-loader]').forEach((panel) => panel.addEventListener('toggle', () => { if (panel.open) refreshStale(); }));
+  applyView((() => {
+    try {
+      return localStorage.getItem(VIEW_STORAGE) || 'calls';
+    } catch (_error) {
+      return 'calls';
+    }
+  })());
+
   // -- loading ----------------------------------------------------------------
   // The indexing runs in the background (when the server is idle, the first time, or on Reindex): the badge says
   // so, and the page follows it with a light status request, then reloads its calls.
@@ -1363,9 +1491,11 @@
       root.classList.add('is-loading');
     }
     try {
+      // The breakdowns of the Summary are only asked for while it is shown.
+      const breakdowns = panelShown('summary');
       const result = await api('/api/non-qualified-calls/calls', {
         method: 'POST',
-        body: JSON.stringify({filters, sort: state.sort, direction: state.direction, page: state.page, page_size: state.pageSize}),
+        body: JSON.stringify({filters, sort: state.sort, direction: state.direction, page: state.page, page_size: state.pageSize, breakdowns}),
         // A quiet reload is the page keeping itself current, not someone using the application.
         ...(quiet ? {headers: {'X-Background-Refresh': '1'}} : {}),
       });
@@ -1375,16 +1505,26 @@
       renderSync(result.sync);
       renderActiveFilters(filters);
       renderColumnFilters();
-      renderSummary(result);
+      if (breakdowns) {
+        renderSummary(result);
+        state.stale.delete('summary');
+      } else {
+        state.stale.add('summary');
+      }
       renderRows(result);
       renderSortHeaders();
       renderPagination(result);
       renderBulk();
-      void loadProgress();
-      void loadLifecycle();
-      void loadRootCauses();
-      void loadSources();
-      void loadRates();
+      $('nq-view-count').textContent = number(result.total);
+      // Only the panels on screen (shown and unfolded) are calculated; the others when they are opened.
+      Object.entries(PANEL_LOADERS).forEach(([name, load]) => {
+        if (panelShown(name)) {
+          state.stale.delete(name);
+          void load();
+        } else {
+          state.stale.add(name);
+        }
+      });
       const first = result.total ? (result.page - 1) * result.page_size + 1 : 0;
       const last = Math.min(result.total, result.page * result.page_size);
       $('nq-count').textContent = result.total ? `Showing ${number(first)}–${number(last)} of ${number(result.total)} calls` : 'No calls';
@@ -1781,20 +1921,64 @@
     const verb = condition.op === 'not_in' ? (values.length > 1 ? 'is not one of' : 'is not') : (values.length > 1 ? 'is one of' : 'is');
     return `${label} ${verb} ${values.join(', ')}`;
   };
-  const ruleItems = (rules) => {
-    const items = rules.map((rule, index) => {
-      const item = node('li');
-      item.append(node('span', `${index + 1}`, 'nq-rule-number'), pill('status', rule.status),
-        node('span', ` when ${rule.conditions.map(conditionText).join(' and ')}`));
-      return item;
+  // The calls that meet a Status Rule: each condition becomes the filter of its field.
+  const CONDITION_FILTERS = {'@team': 'team', '@assignee': 'assignee', '@root_category': 'root_category', '@root_cause': 'root_cause'};
+  const applyRuleFilters = (rule, index) => {
+    rule.conditions.forEach((condition) => {
+      if (condition.field === '@attended') {
+        state.extraFilters.state = [condition.values.includes('Yes') === (condition.op === 'in') ? 'attended' : 'not_attended'];
+        return;
+      }
+      const select = root.querySelector(`[data-nq-filter="${CSS.escape(CONDITION_FILTERS[condition.field] || `field:${condition.field}`)}"]`);
+      if (!select) return;
+      const values = new Set(condition.values);
+      [...select.options].forEach((option) => {
+        const empty = option.value === state.unassigned;
+        option.selected = condition.op === 'in' ? values.has(option.value) : condition.op === 'not_in' ? !values.has(option.value)
+          : condition.op === 'empty' ? empty : !empty;
+      });
+      select.dispatchEvent(new Event('multiselect:options-updated'));
     });
-    const fallback = state.options.statuses[0]?.name;
-    if (fallback) {
-      const item = node('li', undefined, 'is-fallback');
-      item.append(node('span', '·', 'nq-rule-number'), pill('status', fallback), node('span', ' when no rule applies'));
-      items.push(item);
-    }
-    return items;
+    toast(`Showing the calls that meet rule ${index + 1}${state.view === 'dashboards' ? ': open Calls to see them' : ''}.`);
+    scheduleLoad();
+  };
+  // What moves a call to a status: each rule as chips, the field name and its values in their colours.
+  const ruleTriggers = (status, rules) => {
+    const host = node('div', undefined, 'nq-triggers');
+    rules.forEach((rule, index) => {
+      if (rule.status !== status) return;
+      const trigger = node('button', undefined, 'nq-trigger');
+      trigger.type = 'button';
+      trigger.title = `Rule ${index + 1} of the Status Rules (tried in this order): ${rule.conditions.map(conditionText).join(' and ')}.\n`
+        + 'Click to show the calls that meet it.';
+      trigger.addEventListener('click', (event) => {
+        event.stopPropagation();
+        applyRuleFilters(rule, index);
+      });
+      trigger.append(node('span', `Rule ${index + 1}`, 'nq-rule-number'));
+      rule.conditions.forEach((condition, position) => {
+        if (position) trigger.append(node('span', '+', 'nq-trigger-and'));
+        const label = state.conditionFields[condition.field]?.label || condition.field;
+        if (condition.field === '@attended') {
+          trigger.append(node('span', condition.values.includes('No') && condition.op === 'in' ? 'Not attended' : 'Attended', 'nq-trigger-field'));
+          return;
+        }
+        trigger.append(node('span', label, 'nq-trigger-field'));
+        if (condition.op === 'empty' || condition.op === 'not_empty') {
+          trigger.append(node('span', condition.op === 'empty' ? 'empty' : 'set', 'nq-trigger-op'));
+          return;
+        }
+        if (condition.op === 'not_in') trigger.append(node('span', 'not', 'nq-trigger-op'));
+        condition.values.forEach((value) => {
+          const chip = node('span', value, 'nq-pill nq-trigger-value');
+          paintPill(chip, conditionColor(condition.field, value));
+          trigger.append(chip);
+        });
+      });
+      host.append(trigger);
+    });
+    if (status === state.options.statuses[0]?.name) host.append(node('div', 'When no rule applies', 'nq-trigger is-fallback'));
+    return host.childElementCount ? host : null;
   };
   // A bar split in the share of each value, in its colour.
   const stackedBar = (items, total) => {
@@ -1837,22 +2021,29 @@
       step.classList.toggle('is-active', (filters.status || []).length === 1 && filters.status[0] === item.status);
       step.append(node('span', item.status, 'nq-pipeline-name'), node('strong', number(item.count)),
         node('span', `${percent(item.count, total)}${item.avg_age_days === null ? '' : ` · ${item.avg_age_days} d old on average`}`, 'nq-kpi-note'));
+      const triggers = ruleTriggers(item.status, life.rules || []);
+      if (triggers) step.append(triggers);
       step.title = `Show only the calls ${item.status}`;
       step.addEventListener('click', () => selectOnly('status', item.status));
       flow.append(step);
     });
     pipeline.append(flow);
-    $('nq-life-rules').replaceChildren(...ruleItems(life.rules || []));
-    // One card per phase field: how its values split the calls.
-    $('nq-life-phases').replaceChildren(...life.phases.map((phase) => {
+    // RCA Identification, then one card per phase field: how its values split the calls.
+    const rcaPhase = life.rca && state.sections.some((section) => section.key === 'rca') ? [{
+      key: '', label: 'RCA Identification', section: 'rca', empty: 0, drill: 'state',
+      items: [{value: 'Identified', count: life.rca.identified, color: '#2e8b57', filter: 'identified'},
+        {value: 'Not identified', count: life.rca.not_identified, color: '#e7dde1', filter: 'not_identified'}],
+    }] : [];
+    $('nq-life-phases').replaceChildren(...[...rcaPhase, ...life.phases].map((phase) => {
       const section = sectionOf(phase.section);
       const card = node('section', undefined, 'nq-phase-card');
       card.style.setProperty('--nq-section', section.color);
       const head = node('header');
       head.append(sectionTag(phase.section), node('h3', phase.label));
-      const items = [...phase.items.map((item) => ({label: item.value, value: item.value, count: item.count, color: item.color})),
-        {label: 'Empty', value: '', count: phase.empty, color: '#e7dde1'}];
-      const field = `field:${phase.key}`;
+      const items = phase.drill ? phase.items.map((item) => ({label: item.value, value: item.filter, count: item.count, color: item.color}))
+        : [...phase.items.map((item) => ({label: item.value, value: item.value, count: item.count, color: item.color})),
+          {label: 'Empty', value: '', count: phase.empty, color: '#e7dde1'}];
+      const field = phase.drill || `field:${phase.key}`;
       const rows = node('div', undefined, 'nq-phase-values');
       items.forEach((item) => {
         const pairs = [[field, item.value || state.unassigned]];
@@ -2213,6 +2404,18 @@
   };
   // One tab per section of the Analysis Center, in its colour, then the call details; the General
   // tab holds the activity of the call and every other section its own panel of fields.
+  // The tabs of a call: the activity (the General section), then one per section, Implementation and Planning together.
+  const TAB_GROUPS = [['general'], ['rca'], ['failure_event'], ['analysis'], ['implementation', 'planning']];
+  // The call details close the tabs, in grey.
+  const CALL_DETAILS_COLOR = '#9aa5ad';
+  const drawerTabs = () => {
+    const known = new Set(state.sections.map((section) => section.key));
+    const grouped = new Set(TAB_GROUPS.flat());
+    return [...TAB_GROUPS, ...state.sections.filter((section) => !grouped.has(section.key)).map((section) => [section.key])]
+      .map((keys) => keys.filter((key) => known.has(key))).filter((keys) => keys.length)
+      .map((keys) => ({key: keys[0], sections: keys.map(sectionOf), color: sectionOf(keys[0]).color,
+        label: keys[0] === 'general' ? 'Activity' : keys.map((key) => sectionOf(key).label).join(' & ')}));
+  };
   const buildDrawerTabs = () => {
     const tabs = $('nq-drawer-tabs');
     const active = tabs.querySelector('.is-active')?.dataset.nqTab || 'general';
@@ -2226,13 +2429,13 @@
       button.addEventListener('click', () => selectTab(key));
       return button;
     };
-    const sections = state.sections.length ? state.sections : [{key: 'general', label: 'General', color: ''}];
-    tabs.replaceChildren(...sections.map((section) => tab(section.key, section.label, section.color)), tab('details', 'Call Details', ''));
-    $('nq-section-panels').replaceChildren(...sections.filter((section) => section.key !== 'general').map((section) => {
+    const groups = state.sections.length ? drawerTabs() : [{key: 'general', label: 'Activity', color: '', sections: []}];
+    tabs.replaceChildren(...groups.map((group) => tab(group.key, group.label, group.color)), tab('details', 'Call Details', CALL_DETAILS_COLOR));
+    $('nq-section-panels').replaceChildren(...groups.filter((group) => group.key !== 'general').map((group) => {
       const panel = node('section', undefined, 'nq-section-panel');
-      panel.dataset.nqPanel = section.key;
+      panel.dataset.nqPanel = group.key;
       panel.hidden = true;
-      panel.style.setProperty('--nq-section', section.color);
+      panel.style.setProperty('--nq-section', group.color);
       panel.append(node('div', undefined, 'nq-section-fields'));
       return panel;
     }));
@@ -2261,7 +2464,7 @@
         const field = state.fields.find((item) => item.key === kind.slice(6));
         const fieldPill = (value) => {
           const element = node('span', value || 'empty', `nq-pill${value ? '' : ' is-empty'}`);
-          if (field) paintPill(element, optionColorOf(field, value));
+          if (field) paintPill(element, field.type === 'yes_no' ? YES_NO_COLORS[value] || '' : optionColorOf(field, value));
           return element;
         };
         text.append(who, ` changed ${historyLabel(kind)} `);
@@ -2385,6 +2588,9 @@
     }
   };
   // The first list field of a phase section (Analysis, Implementation, Planning) tells the phase of the call.
+  // The tab that shows a section.
+  const tabOf = (sectionKey) => drawerTabs().find((group) => group.sections.some((section) => section.key === sectionKey))
+    || {key: 'general', label: 'Activity'};
   const phaseFields = () => PHASE_SECTIONS.map((key) => state.fields.find((field) => field.section === key && field.type === 'list'
     && ['user', 'derived'].includes(field.source))).filter(Boolean);
   const renderTracking = (call) => {
@@ -2405,22 +2611,32 @@
     const title = node('span', 'Root Category · Root Cause');
     if (domain) title.append(' ', domain);
     rootField.append(title, rootCauseControl(call));
-    // The phases of the call, each in the colour of its section; a click opens the section.
+    // The phases of the call, each in the colour of its section; a click opens its tab. The first one, RCA
+    // Identification, is done once a root category or cause is selected.
     const phases = node('div', undefined, 'nq-phase-strip');
-    phaseFields().forEach((phase, index) => {
-      const section = sectionOf(phase.section);
-      if (index) phases.append(node('span', '›', 'nq-phase-arrow'));
-      const value = String(call.values?.[phase.key] || '');
+    const phaseStep = (sectionKey, name, value, color, title, empty = 'Not started') => {
+      const section = sectionOf(sectionKey);
+      if (phases.childElementCount) phases.append(node('span', '›', 'nq-phase-arrow'));
       const step = node('button', undefined, `nq-phase-step${value ? '' : ' is-empty'}`);
       step.type = 'button';
       step.style.setProperty('--nq-section', section.color);
-      const valuePill = node('span', value || 'Not started', 'nq-pill');
-      paintPill(valuePill, optionColorOf(phase, value));
+      const valuePill = node('span', value || empty, 'nq-pill');
+      paintPill(valuePill, color);
       if (!value) valuePill.classList.add('is-empty');
-      step.append(node('span', section.label, 'nq-phase-name'), valuePill);
-      step.title = `${phase.label}: ${value || 'empty'} — open ${section.label}`;
-      step.addEventListener('click', () => selectTab(section.key));
+      step.append(node('span', name, 'nq-phase-name'), valuePill);
+      step.title = `${title}: ${value || empty} — open ${tabOf(sectionKey).label}`;
+      step.addEventListener('click', () => selectTab(tabOf(sectionKey).key));
       phases.append(step);
+    };
+    if (state.sections.some((section) => section.key === 'rca')) {
+      const identified = call.root_category || call.root_cause;
+      const recommended = !identified && recommendationOf(call);
+      phaseStep('rca', 'RCA Identification', identified, optionColor('root_category', call.root_category) || optionColor('root_cause', call.root_cause),
+        'RCA Identification', recommended ? 'Recommended' : 'Not started');
+    }
+    phaseFields().forEach((phase) => {
+      const value = String(call.values?.[phase.key] || '');
+      phaseStep(phase.section, sectionOf(phase.section).label, value, optionColorOf(phase, value), phase.label);
     });
     host.replaceChildren(status, field('team', 'Team'), field('assignee', 'Assignee'), rootField,
       ...(phases.childElementCount ? [phases] : []), updated);
@@ -2456,23 +2672,25 @@
   const fieldInput = (field, value) => {
     let control;
     if (field.type === 'list' || field.type === 'yes_no') {
-      control = node('select');
-      const choices = field.type === 'yes_no' ? ['Yes', 'No'] : field.options.map((option) => option.name);
-      if (value && !choices.includes(value)) choices.push(value);
-      control.append(node('option', '—'), ...choices.map((choice) => {
-        const option = node('option', choice);
-        option.value = choice;
-        return option;
-      }));
-      control.options[0].value = '';
-      control.value = value;
-      const paint = () => paintPill(control, optionColorOf(field, control.value));
-      control.classList.add('nq-pill-select');
-      paint();
-      control.addEventListener('change', paint);
+      // A list is chosen in the coloured picker; its value travels in a hidden input, saved with the others.
+      const wrapper = node('div', undefined, 'nq-choice-field');
+      const input = node('input');
+      input.type = 'hidden';
+      input.value = value;
+      input.dataset.fieldKey = field.key;
+      input.dataset.original = value;
+      const changed = (chosen) => {
+        input.value = chosen;
+        input.dispatchEvent(new Event('change', {bubbles: true}));
+      };
+      const picker = choiceControl({items: fieldChoices(field, value), value, label: field.label, onChange: changed});
+      picker.disabled = !state.user.can_edit;
+      wrapper.append(picker, input);
+      wrapper.setValue = (chosen) => { picker.setValue(chosen); changed(chosen); };
+      return wrapper;
     } else if (field.type === 'long_text') {
       control = node('textarea');
-      control.rows = 3;
+      control.rows = 8;
       control.maxLength = 20000;
       control.value = value;
     } else {
@@ -2494,7 +2712,7 @@
     const text = value === null || value === undefined ? '' : String(value);
     if (['list', 'yes_no'].includes(field.type) && text) {
       const element = node('span', text, 'nq-pill');
-      paintPill(element, optionColorOf(field, text));
+      paintPill(element, field.type === 'yes_no' ? YES_NO_COLORS[text] || '' : optionColorOf(field, text));
       box.append(element);
     } else {
       box.append(node('span', text || '—', text ? '' : 'nq-muted'));
@@ -2540,8 +2758,11 @@
       use.title = `Fill ${field.label} with the ${field.suggest_from} of the CDR; Save keeps it`;
       use.addEventListener('click', (event) => {
         event.preventDefault();
-        control.value = proposal;
-        control.dispatchEvent(new Event('change', {bubbles: true}));
+        if (control.setValue) control.setValue(proposal);
+        else {
+          control.value = proposal;
+          control.dispatchEvent(new Event('change', {bubbles: true}));
+        }
         use.remove();
       });
       wrapper.append(use);
@@ -2647,48 +2868,63 @@
     return card;
   };
   // The fields of every section, each one in its tab; the tabs count the fields filled in.
+  // The fields of every tab; a tab of several sections (Implementation & Planning) shows each one in its own subpanel.
+  // The tabs count the fields filled in.
   const renderSections = (detail) => {
     const call = detail.call;
-    state.sections.forEach((section) => {
-      const host = section.key === 'general' ? $('nq-general-fields')
-        : drawer.querySelector(`[data-nq-panel="${CSS.escape(section.key)}"] .nq-section-fields`);
+    drawerTabs().forEach((group) => {
+      const host = group.key === 'general' ? $('nq-general-fields')
+        : drawer.querySelector(`[data-nq-panel="${CSS.escape(group.key)}"] .nq-section-fields`);
       if (!host) return;
-      const fields = state.fields.filter((field) => field.section === section.key && field.source !== 'tracking');
+      const ofSection = (key) => state.fields.filter((field) => field.section === key && field.source !== 'tracking');
+      const fields = group.sections.flatMap((section) => ofSection(section.key));
       const editable = fields.filter((field) => field.source === 'user');
-      const parts = section.key === 'rca' ? [rootDecisionCard(call)] : [];
+      const parts = group.key === 'rca' ? [rootDecisionCard(call)] : [];
       if (fields.length) {
         const form = node('form', undefined, 'nq-analysis-form nq-section-form');
-        if (section.key === 'rca') form.append(node('h4', 'Values of the RCA sources'));
-        const grid = node('div', undefined, 'nq-analysis-grid');
-        grid.append(...fields.map((field) => fieldBlock(field, call)));
-        form.append(grid);
+        if (group.key === 'rca') form.append(node('h4', 'Values of the RCA sources'));
+        group.sections.forEach((section) => {
+          const sectionFields = ofSection(section.key);
+          if (!sectionFields.length) return;
+          const grid = node('div', undefined, 'nq-analysis-grid');
+          grid.append(...sectionFields.map((field) => fieldBlock(field, call)));
+          if (group.sections.length === 1) { form.append(grid); return; }
+          const subpanel = node('section', undefined, 'nq-subpanel');
+          subpanel.style.setProperty('--nq-section', section.color);
+          subpanel.append(node('h4', section.label), grid);
+          form.append(subpanel);
+        });
         if (editable.length && state.user.can_edit) {
           const actions = node('div', undefined, 'nq-composer-actions');
-          const save = node('button', `Save ${section.label}`, 'nq-primary-action');
+          const save = node('button', `Save ${group.key === 'general' ? 'Fields' : group.label}`, 'nq-primary-action');
           save.type = 'submit';
           actions.append(node('span', '', 'nq-composer-note'), save);
           form.append(actions);
           form.onsubmit = (event) => { event.preventDefault(); saveFields(call, save); };
         }
         parts.push(form);
-      } else if (!['general', 'rca'].includes(section.key)) {
+      } else if (!['general', 'rca'].includes(group.key)) {
         parts.push(node('p', state.user.can_edit ? 'No fields in this section yet: add them in Analysis Center › Fields & Sections.'
           : 'No fields in this section.', 'form-note'));
       }
       host.replaceChildren(...parts);
-      const badge = drawer.querySelector(`[data-nq-tab="${CSS.escape(section.key)}"] .nq-tab-badge`);
+      const badge = drawer.querySelector(`[data-nq-tab="${CSS.escape(group.key)}"] .nq-tab-badge`);
       if (!badge) return;
       let text = '';
+      let title = '';
       let complete = false;
-      if (section.key === 'rca') {
+      if (group.key === 'rca') {
         complete = Boolean(call.root_category || call.root_cause);
         text = complete ? '✓' : recommendationOf(call) ? '★' : '';
+        title = complete ? 'A root category or cause is selected' : 'A recommended root category and cause wait to be accepted';
       } else if (editable.length) {
         const filled = editable.filter((field) => call.fields?.[field.key]).length;
         text = `${filled}/${editable.length}`;
+        title = `${filled} of the ${editable.length} fields the analysts fill in here have a value`;
         complete = filled === editable.length;
       }
       badge.textContent = text;
+      badge.title = title;
       badge.hidden = !text;
       badge.classList.toggle('is-complete', complete);
     });
@@ -3884,12 +4120,28 @@
     $('nq-config-toggle').setAttribute('aria-expanded', 'false');
   };
   if (configMenu) {
+    // The menu opens where it fits: below the button, or above it near the bottom of the window, scrolling inside if needed.
+    const placeConfigMenu = () => {
+      const button = $('nq-config-toggle').getBoundingClientRect();
+      configMenu.style.maxHeight = '';
+      configMenu.classList.remove('is-up');
+      const height = configMenu.scrollHeight;
+      const below = window.innerHeight - button.bottom - 16;
+      const above = button.top - 16;
+      const up = height > below && above > below;
+      configMenu.classList.toggle('is-up', up);
+      configMenu.style.maxHeight = `${Math.max(160, up ? above : below)}px`;
+    };
     $('nq-config-toggle').addEventListener('click', (event) => {
       event.stopPropagation();
       configMenu.hidden = !configMenu.hidden;
       $('nq-config-toggle').setAttribute('aria-expanded', String(!configMenu.hidden));
-      if (!configMenu.hidden) configMenu.querySelector('button')?.focus();
+      if (!configMenu.hidden) {
+        placeConfigMenu();
+        configMenu.querySelector('button')?.focus({preventScroll: true});
+      }
     });
+    window.addEventListener('resize', () => { if (!configMenu.hidden) placeConfigMenu(); });
     // Every entry opens its dialog and closes the menu.
     configMenu.addEventListener('click', () => window.setTimeout(closeConfigMenu));
     document.addEventListener('click', (event) => { if (!configMenu.contains(event.target)) closeConfigMenu(); });

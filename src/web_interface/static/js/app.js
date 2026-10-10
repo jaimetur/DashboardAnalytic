@@ -7505,7 +7505,8 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     pendingOfferReminder.hidden = false;
   };
   const hidePendingOfferReminder = () => { if (pendingOfferReminder) pendingOfferReminder.hidden = true; };
-  const nextIncomingOfferPollDelay = () => document.hidden ? 5000 : 1000;
+  // A transfer offer shows within seconds; hidden tabs ask rarely.
+  const nextIncomingOfferPollDelay = () => document.hidden ? 30000 : 5000;
   const scheduleIncomingOfferPoll = (delay = nextIncomingOfferPollDelay()) => {
     window.clearTimeout(incomingOfferTimer);
     incomingOfferTimer = window.setTimeout(() => {
@@ -10898,11 +10899,19 @@ if (queueNode) {
     }
   };
 
-  poll();
-  pollingInterval = window.setInterval(poll, 2000);
-  window.addEventListener('drivetest-analyzer:refresh-background-tasks', poll);
-  window.addEventListener('focus', poll);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+  // Every 2 s while tasks run; less often while nothing runs or the tab is hidden, so idle pages barely load the server.
+  let pollingTimer = null;
+  const nextPollDelay = () => (document.hidden ? 30000 : (serverGroups.length || transientTasks.size ? 2000 : 8000));
+  const schedulePoll = () => {
+    window.clearTimeout(pollingTimer);
+    if (pollingStopped) return;
+    pollingTimer = window.setTimeout(() => { poll().finally(schedulePoll); }, nextPollDelay());
+  };
+  const pollNow = () => { poll().finally(schedulePoll); };
+  pollNow();
+  window.addEventListener('drivetest-analyzer:refresh-background-tasks', pollNow);
+  window.addEventListener('focus', pollNow);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pollNow(); });
 })();
 
 /* Searchable timezone picker for application configuration. */

@@ -28,6 +28,7 @@ format shared by ``non_qualified_calls``.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from io import BytesIO
 from typing import Any
 
@@ -35,16 +36,23 @@ COLOR_PATTERN = re.compile(r'#[0-9a-fA-F]{6}')
 _KEY = re.compile(r'[^a-z0-9]+')
 
 # -- sections -----------------------------------------------------------------------------------
-# The six sections of the Analysis Center, in the order of the call panel tabs, with the colours
-# of the meeting workbook. Their names and colours are editable; their keys are fixed.
+# The six sections of the Analysis Center, in the order of the call panel tabs. Implementation and Planning
+# share one tab, in green (Planning darker); Failure Event is red. Their names and colours are editable; their keys are fixed.
 SECTIONS = (
     ('general', 'General', '#0070C0'),
     ('rca', 'RCA', '#FFC000'),
-    ('failure_event', 'Failure Event', '#00B050'),
+    ('failure_event', 'Failure Details', '#FF0000'),
     ('analysis', 'Analysis', '#7030A0'),
-    ('implementation', 'Implementation', '#C55A11'),
-    ('planning', 'Planning', '#FF0000'),
+    ('implementation', 'Implementation', '#00B050'),
+    ('planning', 'Planning', '#00843D'),
 )
+# The colours of the first layout, replaced once while unchanged.
+FIRST_SECTION_COLORS = {'failure_event': '#00B050', 'implementation': '#C55A11', 'planning': '#FF0000'}
+# The section names of the first layout, renamed once while unchanged.
+FIRST_SECTION_LABELS = {'failure_event': 'Failure Event'}
+# The order of the Analysis fields in the first layout, replaced once while unchanged.
+FIRST_ANALYSIS_ORDER = ('analysis_status', 'proposed_measure', 'tunnel_failure', 'failure_latitude', 'failure_longitude',
+                        'problem_location', 'solution_location', 'needed_technology', 'findings')
 SECTION_KEYS = tuple(key for key, _label, _color in SECTIONS)
 
 # -- fields --------------------------------------------------------------------------------------
@@ -100,7 +108,9 @@ def _field(key: str, label: str, section: str, field_type: str, source: str = 'u
 
 
 _GREY, _AMBER, _GREEN, _RED, _BLUE, _SLATE = '#9aa5ad', '#e08a1e', '#2e8b57', '#b0234f', '#245a96', '#7b8790'
-# The 37 fields of the meeting workbook, in its order (the order of the table and of the Excel export).
+# The 37 fields of the meeting workbook, in its order (the order of the table and of the Excel export), with the
+# Last Cell ID and Failure Comment of the CDR in Failure Details and the Analysis fields in the order of the call
+# panel: the long texts (Proposed Measure, Findings) last.
 DEFAULT_FIELDS = (
     _field('auto_rca_category_a', 'Auto_RCA_Category_A', 'rca', 'text', 'rca', 'auto_rca_category_a',
            description='Root cause category of the A side found by the RCA script (imported by JOIN_ID).'),
@@ -144,22 +154,26 @@ DEFAULT_FIELDS = (
         _option('UE_A (MO)'), _option('UE_A (MT)'), _option('UE_B (MT)'), _option('UE_B (MO)'))),
     _field('host_network_when_failure', 'Host Network when Failure', 'failure_event', 'list', options=(
         _option('H3G'), _option('Vodafone'), _option('Telefónica')), suggest_from='operator'),
-    _field('serving_cell_when_failure', 'Serving Cell when Failure', 'failure_event', 'text', suggest_from='cell_id'),
+    _field('last_cell_id', 'Last Cell ID', 'failure_event', 'text', 'cdr', 'last_cell_id',
+           description='The last cell of the Cell ID chain of the call in the CDR (the cell where it ended).'),
+    _field('serving_cell_when_failure', 'Serving Cell when Failure', 'failure_event', 'text', suggest_from='last_cell_id'),
     _field('band_when_failure', 'Band when Failure', 'failure_event', 'list', options=tuple(_option(name) for name in (
         'LTE2100', 'LTE1400', 'LTE1800', 'LTE700', 'LTE800', 'LTE800-NBIoT', 'LTE900', 'LTE2300', 'LTE2600TDD', 'LTE2600',
         'LTE2100-NBIoT', 'NR3600', 'NR3400', 'NR2100', 'NR700', 'NR900', 'NR3700', 'GSM900', 'GSM1800'))),
     _field('vendor_when_failure', 'Vendor when Failure', 'failure_event', 'list', options=(
         _option('Ericsson'), _option('Huawei'), _option('NSN'), _option('Samsung')), suggest_from='vendor'),
+    _field('failure_comment', 'Failure Comment', 'failure_event', 'long_text', 'cdr', 'failure_comment',
+           description='The comment NetCheck writes on the failure in the CDR (Failure_Comment).'),
     _field('analysis_status', 'Analysis Status', 'analysis', 'list', options=(
         _option('Pending', _GREY), _option('Ongoing', _AMBER), _option('Finished', _GREEN),
         _option('Rejected', _RED), _option('Invalidated', _SLATE)), in_table=True, in_summary=True),
-    _field('proposed_measure', 'Proposed Measure', 'analysis', 'long_text'),
     _field('tunnel_failure', 'Tunnel Failure', 'analysis', 'yes_no'),
+    _field('needed_technology', 'Needed Technology', 'analysis', 'text'),
     _field('failure_latitude', 'Failure Latitude', 'analysis', 'number', suggest_from='latitude'),
     _field('failure_longitude', 'Failure Longitude', 'analysis', 'number', suggest_from='longitude'),
     _field('problem_location', 'Problem Location', 'analysis', 'text'),
     _field('solution_location', 'Solution Location', 'analysis', 'text'),
-    _field('needed_technology', 'Needed Technology', 'analysis', 'text'),
+    _field('proposed_measure', 'Proposed Measure', 'analysis', 'long_text'),
     _field('findings', 'Findings', 'analysis', 'long_text'),
     _field('implementation_status', 'Implementation Status', 'implementation', 'list', options=(
         _option('Not yet evaluated', _GREY), _option('Under evaluation', _AMBER), _option('Evaluated', _BLUE),
@@ -320,7 +334,12 @@ def default_status_rules() -> list[dict[str, Any]]:
 # -- keywords -----------------------------------------------------------------------------------
 def normalized_text(value: Any) -> str:
     """Lower-case text with underscores and non-breaking spaces as spaces, for keyword matching."""
-    return re.sub(r'\s+', ' ', str(value or '').replace('_', ' ').replace('\xa0', ' ')).strip().casefold()
+    return _normalized(str(value or ''))
+
+
+@lru_cache(maxsize=65536)
+def _normalized(value: str) -> str:
+    return re.sub(r'\s+', ' ', value.replace('_', ' ').replace('\xa0', ' ')).strip().casefold()
 
 
 def keywords(values: Any) -> list[str]:
@@ -337,10 +356,16 @@ def keywords(values: Any) -> list[str]:
     return list(dict.fromkeys(cleaned))[:30]
 
 
+@lru_cache(maxsize=4096)
+def _word_pattern(keyword: str) -> re.Pattern[str]:
+    return re.compile(rf'(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])')
+
+
 def _word(keyword: str, text: str, match: str) -> bool:
-    if match == 'text':
-        return keyword in text
-    return re.search(rf'(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])', text) is not None
+    # Most keywords are not in the text at all: only those that are need the whole-word check.
+    if keyword not in text:
+        return False
+    return match == 'text' or _word_pattern(keyword).search(text) is not None
 
 
 def keyword_found(values: list[str], text: str, match: str = 'words') -> bool:

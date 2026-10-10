@@ -568,7 +568,6 @@ button.nq-rate-box:hover { transform: translateY(-1px); box-shadow: 0 6px 14px r
 .nq-drawer .nq-drawer-tabs button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: .35rem; padding: .5rem .7rem; font-size: .84rem; white-space: nowrap; }
 .nq-drawer .nq-drawer-tabs button.is-active { border-bottom-color: var(--nq-section, var(--nq-color)); }
 .nq-drawer-tab::before { content: ''; width: .5rem; height: .5rem; border-radius: 50%; background: var(--nq-section, transparent); }
-.nq-drawer-tab[data-nq-tab="details"]::before { display: none; }
 .nq-tab-badge { padding: 0 .35rem; border-radius: 999px; background: #f1dfe5; color: var(--nq-muted); font-size: .68rem; font-weight: 850; }
 .nq-tab-badge[hidden] { display: none; }
 .nq-tab-badge.is-complete { background: #e3f1ea; color: #1f6b43; }
@@ -750,3 +749,80 @@ button.nq-rate-box:hover { transform: translateY(-1px); box-shadow: 0 6px 14px r
 .nq-field-def[data-source="derived"] .nq-field-values > .nq-root-causes { grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr)); }
 .nq-field-value .nq-root-name { min-width: 8rem; }
 .non-qualified-calls .nq-hierarchy .nq-bar { grid-template-columns: minmax(0, 55%) minmax(0, 1fr) auto; }
+/* The Status Rules on each status of the pipeline: the field and its values in their colours. */
+.nq-triggers { display: grid; gap: .3rem; margin-top: .45rem; padding-top: .45rem; border-top: 1px dashed var(--nq-border); }
+.nq-trigger { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; font-size: .72rem; }
+.nq-trigger.is-fallback { color: var(--nq-muted); font-style: italic; }
+.nq-trigger .nq-rule-number { width: 1.1rem; height: 1.1rem; font-size: .62rem; }
+.nq-trigger-field { color: var(--nq-muted); font-weight: 800; }
+.nq-trigger-op { color: var(--nq-dark); font-weight: 850; text-transform: uppercase; font-size: .62rem; }
+.nq-trigger-and { color: var(--nq-muted); font-weight: 850; }
+.nq-pill.nq-trigger-value { max-width: 9rem; padding: .05rem .45rem; font-size: .68rem; }
+.nq-rule-number { display: inline-grid; place-items: center; width: 1.3rem; height: 1.3rem; border-radius: 50%; background: #f1dfe5; color: var(--nq-dark); font-size: .7rem; font-weight: 850; }
+/* Implementation & Planning: each section in its own subpanel of the tab. */
+.nq-subpanel { display: grid; gap: .6rem; margin-bottom: .9rem; padding: .7rem .8rem; border: 1px solid var(--nq-border); border-left: 5px solid var(--nq-section); border-radius: 12px; background: #fff; }
+.nq-subpanel h4 { margin: 0; color: var(--nq-section); font-size: .82rem; letter-spacing: .03em; text-transform: uppercase; filter: brightness(.8); }
+/* Every tab of the call is visible: they wrap instead of scrolling. */
+.nq-drawer-tabs { flex-wrap: wrap; overflow-x: visible; row-gap: 0; }
+/* The selects and Yes / No fields of a section are as tall as its text boxes. */
+.nq-drawer .nq-analysis-field :is(select, input:not([type="checkbox"])) { box-sizing: border-box; min-height: 2.75rem; }
+.nq-drawer .nq-analysis-field .nq-pill-select { min-height: 2.75rem; padding-top: .45rem; padding-bottom: .45rem; font-size: .86rem; }
+/* Calls, Dashboards or every panel right below the Filters, always at hand while scrolling. */
+.nq-view-switch { position: sticky; top: 8px; z-index: 26; display: flex; flex-wrap: wrap; gap: .35rem; justify-self: center; width: max-content; max-width: 100%; margin: 0 auto; padding: .3rem; border: 1px solid var(--nq-border); border-radius: 999px; background: rgba(255, 255, 255, .94); box-shadow: 0 10px 26px rgba(60, 10, 30, .14); backdrop-filter: blur(6px); }
+.non-qualified-calls .nq-view-switch button { display: inline-flex; align-items: center; gap: .45rem; min-height: 0; padding: .5rem 1.1rem; border: 0; border-radius: 999px; background: transparent; color: var(--nq-dark); font-size: .9rem; font-weight: 850; box-shadow: none; }
+.non-qualified-calls .nq-view-switch button:hover { background: var(--nq-soft); }
+.non-qualified-calls .nq-view-switch button.is-active { background: linear-gradient(135deg, #7d1238, #c8365f); color: #fff; box-shadow: 0 6px 14px rgba(125, 18, 56, .25); }
+.nq-view-switch svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.nq-view-count { padding: .05rem .5rem; border-radius: 999px; background: rgba(125, 18, 56, .12); font-size: .78rem; }
+.nq-view-switch .is-active .nq-view-count { background: rgba(255, 255, 255, .25); }
+.nq-view-count:empty { display: none; }
+.non-qualified-calls [data-nq-view-panel][hidden] { display: none !important; }
+/* The default columns fit the panel: field values wrap on two lines and the selects are narrower. */
+.nq-table th.nq-dynamic-col span[data-sort] { white-space: normal; }
+.nq-table td.nq-field-cell { max-width: 8.5rem; }
+.nq-table .nq-field-cell .nq-field-text { display: -webkit-box; overflow: hidden; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.25; }
+.non-qualified-calls .nq-table .nq-pill-select, .non-qualified-calls .nq-table .nq-pill-assignee { min-width: 7rem; max-width: 9.5rem; }
+.non-qualified-calls .nq-table .nq-root-select { min-width: 7.5rem; max-width: 9.5rem; }
+.non-qualified-calls .nq-table .nq-comment-button { max-width: 9.5rem; }
+.nq-table th, .nq-table td { padding-left: 5px; padding-right: 5px; }
+.non-qualified-calls .nq-table .nq-comment-button { max-width: 8rem; }
+.nq-table td.nq-stacked { max-width: 6.2rem; }
+@media (max-width: 1599px) {
+  .non-qualified-calls .nq-table .nq-pill-select, .non-qualified-calls .nq-table .nq-pill-assignee { min-width: 6.2rem; }
+  .non-qualified-calls .nq-table .nq-root-select { min-width: 6.8rem; }
+  .nq-table td.nq-failure { max-width: 7.5rem; }
+  .nq-table td.nq-stacked { max-width: 5.6rem; }
+  .nq-table { font-size: .78rem; }
+  .nq-table th { font-size: .66rem; }
+}
+/* Every tab of the call on one line: a wider panel and tighter tabs. */
+.nq-drawer { width: min(880px, 100vw); }
+.nq-drawer .nq-drawer-tabs { gap: .1rem; padding-left: .9rem; padding-right: .9rem; }
+.nq-drawer .nq-drawer-tabs button { padding: .5rem .55rem; }
+/* The phases of the call on one row: a wider panel and compact steps that shrink before wrapping. */
+.nq-drawer { width: min(940px, 100vw); }
+.nq-drawer-tracking .nq-phase-strip { flex-wrap: nowrap; gap: .25rem; min-width: 0; }
+.nq-drawer .nq-phase-step { flex: 0 1 auto; gap: .3rem; min-width: 0; padding: .2rem .3rem .2rem .5rem; }
+.nq-phase-step .nq-pill { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: .74rem; }
+.nq-phase-step .nq-phase-name { white-space: nowrap; font-size: .64rem; }
+.nq-phase-arrow { flex: 0 0 auto; }
+/* Long texts (Proposed Measure, Findings…) are tall from the start, framed like the other fields. */
+.nq-drawer .nq-analysis-field textarea { min-height: 11rem; padding: .6rem .75rem; border: 1px solid var(--nq-border); border-radius: 12px; line-height: 1.4; resize: vertical; }
+.nq-drawer .nq-analysis-field textarea:focus { border-color: var(--nq-color); outline: 3px solid rgba(176, 35, 79, .15); }
+/* The coloured pickers of lists, statuses, teams and assignees: every choice as a pill in its colour. */
+:is(.non-qualified-calls, .nq-drawer) .nq-choice { width: 100%; text-align: left; }
+.nq-choice-field { display: grid; }
+.nq-choice-picker { min-width: 13rem; }
+.nq-choice-picker .nq-column-filter-list { display: grid; gap: .15rem; }
+.nq-choice-picker .nq-choice-option { display: flex; align-items: center; gap: .5rem; width: 100%; min-height: 0; padding: .3rem .45rem; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--nq-text, #3d1824); text-align: left; box-shadow: none; cursor: pointer; }
+.nq-choice-picker .nq-choice-option:hover, .nq-choice-picker .nq-choice-option:focus-visible { border-color: var(--nq-border, #f0c4d3); background: var(--nq-softer, #fff7fa); outline: none; }
+.nq-choice-picker .nq-choice-option.is-selected { border-color: var(--nq-color, #b0234f); background: var(--nq-soft, #fcedf2); }
+.nq-choice-picker .nq-choice-option.is-selected::after { content: '✓'; margin-left: auto; color: var(--nq-color, #b0234f); font-weight: 900; }
+.nq-choice-picker .nq-choice-option .nq-pill { max-width: 18rem; font-size: .82rem; }
+.nq-choice-picker .nq-choice-option.is-action { margin-top: .25rem; border-top: 1px dashed var(--nq-border, #f0c4d3); border-radius: 0 0 10px 10px; }
+/* Each rule of a status is a button that shows its calls. */
+.non-qualified-calls button.nq-trigger { min-height: 0; padding: .2rem .3rem; border: 1px solid transparent; border-radius: 8px; background: transparent; color: inherit; text-align: left; box-shadow: none; cursor: pointer; }
+.non-qualified-calls button.nq-trigger:hover, .non-qualified-calls button.nq-trigger:focus-visible { border-color: var(--nq-border); background: #fff; outline: none; }
+.nq-trigger .nq-rule-number { width: auto; height: auto; padding: .05rem .4rem; border-radius: 999px; font-size: .6rem; letter-spacing: .02em; }
+.nq-menu { overflow-y: auto; overscroll-behavior: contain; }
+.nq-menu.is-up { top: auto; bottom: calc(100% + 6px); }
