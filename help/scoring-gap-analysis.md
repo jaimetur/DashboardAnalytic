@@ -19,6 +19,7 @@ Each job calculates the NetCheck **Best Network** scoring, which rates every KPI
 | Edit formulas and scoring rules | [KPI definitions](#editing-replacing-adding-and-removing-kpis) |
 | Understand methodology JSON | [Portable JSON reference](#portable-json-reference) |
 | Inspect original KPI weights and sources | [Supported KPI allocation](#supported-kpi-allocation) |
+| Understand the Scoring History and fast calculations | [Scoring History](#scoring-history) |
 | Share results or preserve a workspace | [Persistence and exports](#persistence-and-exports) |
 | Resolve missing results | [Troubleshooting](#troubleshooting) |
 
@@ -237,7 +238,7 @@ The sources and licences of the areas shipped with the application, such as the 
 | **Best Network / Most Reliable Network Scoring per Category** | Compare category contributions within each operator/context stack |
 | **Best Network / Most Reliable Network Scoring per Category (Breakdown)** | Compare operators directly within each category |
 | **Maximum score allocation donuts** | Inspect configured environment, service and category maxima and shares |
-| **National & Areas** | When the job includes the National & area summary: the National scoring, the separate cities and each area of the breakdown with each operator's score in the latest campaign or period, its change from the previous one and its GAP to the reference, and a trend chart per area on the same scale, as tall as the table beside them (labels tilted when they do not fit), titled in one colour for National, another for the separate cities and another for the breakdown (a single separate city next to National, several after the breakdown). An area not measured in the latest campaign or period is listed without a score, and its chart shows the earlier ones |
+| **National & Areas** | When the job includes the National & area summary: the National scoring, the separate cities and each area of the breakdown with each operator's score in the latest campaign or period, its change from the previous one and its GAP to the reference, and a trend chart per area on the same scale, as tall as the table beside them (labels tilted when they do not fit), titled in one colour for National, another for the separate cities and another for the breakdown; a double click on a chart or on the table enlarges it alone (a single separate city next to National, several after the breakdown). An area not measured in the latest campaign or period is listed without a score, and its chart shows the earlier ones |
 | **Scoring per City / Cluster / Region** | When City, Cluster or Region is a Split by level with 2 to 12 values: one card per value with each operator's Voice and Data points and its total, labelled with the operator names of the mapping table (hover a bar for its points) |
 | **Scoring Trend** | When Campaign is a Split by level with more than four campaigns: each operator's total points per campaign, one line per operator |
 
@@ -593,6 +594,16 @@ For All Environments, only valid environment contributions common to both sides 
 
 
 
+
+## Scoring History
+
+The **Scoring History** keeps, in the workspace database, the components of every scoring KPI of every ready Data, Voice and Speech CDR, so a calculation does not read the CDR rows again:
+
+- **What it keeps**: the tests of each CDR grouped by day (of their start time), campaign, operator, vendor, environment, Region, Cluster and City (every city, not only the Main Cities), and for each group and KPI of the workspace methodologies what the KPI needs to be calculated again over any set of groups: the sums and counts of its ratios and averages, and a mergeable sketch of the values of its medians and 90th percentiles (approximate, within a quarter of a percent). Scores and points are never stored: they are calculated with the thresholds of the methodology chosen, so any methodology, period (days, weeks, months, quarters, campaigns or years) and area can be scored from the same history.
+- **When it is filled**: as a background task, shown in the floating background tasks card (**Scoring History indexing**), once nobody has used the application for two minutes (the pages refreshing themselves do not count). Each CDR is read once; it is read again only when it is processed again (or its Vendor, Region or Cluster mapping changes) or a methodology adds a KPI it has not indexed.
+- **How a CDR is identified**: by the SHA-256 of its whole source file (about half a second per GB, kept until the file changes) and the signature of its processing, never by its name or ID, so renaming a CDR, reordering the IDs or transferring the workspace keeps its history. The history of a deleted CDR is kept as a record; a CDR processed again replaces the history of its former processing. Each source records its stage (Daily, Weekly or Final), campaigns and days, so a Final CDR can supersede the Daily and Weekly CDRs it contains.
+- **Calculations from the history**: a scoring job whose CDRs are all indexed at their current processing, whose **Split by** uses Operator, Vendor, Region, Cluster, City, Campaign or Dataset Type and whose filters are Region, Cluster, City, Operator, Vendor, Operator_Vendor or Campaign is calculated from the history in seconds, with its National & area summary. Its scores, tables and charts show at once; the **Points Lost Map**, which needs the rows of each test, is prepared next from the CDRs (the results show *Preparing the Points Lost Map…* and update themselves). Any other job reads the CDR rows as before.
+- **Where it is**: the **Scoring History**, **Scoring History Sources** and **Scoring History Files** tables of Database Management. It is part of the workspace database, so it travels with workspace exports, transfers and backups of the Workspace Database; it has no export of its own because the application rebuilds it from the CDRs.
 
 ## Persistence and exports
 

@@ -9,13 +9,13 @@ import json
 import math
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 import pandas as pd
 
 from src.modules.column_names import campaign_sort_key, column_identity, resolve_column_name
 from src.modules.scoring_area_summary import (
-    area_summary_levels, calculate_area_summary, normalize_area_summary_request,
+    area_summary_levels, calculate_area_summary, calculate_area_summary_from_history, normalize_area_summary_request,
 )
 from src.modules.scoring_vendors import scoring_vendor_name, scoring_vendor_operators
 from src.modules.cdr_stage import combined_dataset_ids
@@ -1141,17 +1141,21 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
         )
         if current_fingerprint != job['source_fingerprint']:
             raise ValueError('A selected CDR changed after this job was queued. Create a new scoring job.')
-        update_progress(6, 'Reading processed CDR rows')
         engine = _scoring_engine()
+        context_filters = job.get('resolved_context_filters', job.get('context_filters', {}))
+        result = _history_result(repository, job, configuration, dataset_ids, context_filters, engine, update_progress)
+        if result is not None:
+            _save_scoring_result(repository, job, job_id, dataset_ids, configuration, result, points_loss_pending=True)
+            # The Points Lost Map needs the rows of the tests: it is added once they are read.
+            _complete_points_loss(repository, job, job_id, sources, dataset_ids, configuration, context_filters, engine)
+            return get_scoring_job(repository, job_id, include_result=True)
+        update_progress(6, 'Reading processed CDR rows')
         # The points-lost map also reads the area and coordinate columns.
         required_columns = getattr(engine, 'load_input_columns', None) or getattr(engine, 'required_input_columns')
         # The area summary also reads its breakdown and City columns, and the test start time for its time split.
         for source in sources:
             source['levels'] = [*job['levels'], *area_summary_levels(job['levels'], job.get('area_summary'))]
-        frames = _load_source_frames(
-            repository, sources, update_progress, required_columns,
-            job.get('resolved_context_filters', job.get('context_filters', {})),
-        )
+        frames = _load_source_frames(repository, sources, update_progress, required_columns, context_filters)
         _current_sources, _campaigns, post_load_fingerprint = _source_snapshot(
             repository, dataset_ids, expected_nr_mode=job['nr_mode'],
         )
@@ -1159,23 +1163,7 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
             raise ValueError('A selected CDR changed while its scoring rows were being loaded.')
         update_progress(62, 'Calculating KPIs and interpolated scores')
         calculate = engine.calculate_scoring
-        parameters = inspect.signature(calculate).parameters
-        call_kwargs = {
-            'baseline_operator': job['baseline_operator'],
-            'configuration': configuration,
-        }
-        if 'operator_mappings' in parameters or any(
-            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
-        ):
-            call_kwargs['operator_mappings'] = job.get('operator_mappings', {})
-        if 'baseline_aliases' in parameters or any(
-            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
-        ):
-            call_kwargs['baseline_aliases'] = job.get('baseline_aliases', [])
-        if 'map_areas' in parameters:
-            # The tests are placed in the workspace's Map Areas of their country (the ITL3 areas in the UK).
-            from src.modules.map_areas import area_index
-            call_kwargs['map_areas'] = area_index(repository)
+        call_kwargs = _engine_kwargs(repository, job, configuration, calculate)
         result = calculate(frames, job['levels'], **call_kwargs)
         if not isinstance(result, dict):
             raise TypeError('The scoring engine must return a result object.')
@@ -1184,46 +1172,141 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
                                              update_progress)
             result['warnings'] = [*(result.get('warnings') or []), *summary.pop('warnings')]
             result['area_summary'] = summary
-        _attach_mapping_boundaries(repository, dataset_ids, result)
-        result.setdefault('configuration', configuration)
-        result.setdefault('configuration_hash', configuration_hash(configuration))
-        result.setdefault('gap_direction', 'operator_minus_reference')
-        result.setdefault('baseline_aliases', job.get('baseline_aliases', []))
-        result.setdefault('aggregation_levels', job['levels'])
-        result.setdefault('aggregation_contract_version', job['aggregation_contract_version'])
-        result.setdefault('campaigns', job['campaigns'])
-        _latest_sources, _latest_campaigns, final_fingerprint = _source_snapshot(
-            repository, dataset_ids, expected_nr_mode=job['nr_mode'],
-        )
-        if final_fingerprint != job['source_fingerprint']:
-            raise ValueError('A selected CDR changed while its scoring calculation was running.')
-        result_payload = {
-            'scoring': result.get('scoring', []),
-            'gap': result.get('gap', []),
-            'charts': result.get('charts', []),
-            'warnings': result.get('warnings', []),
-            **{key: value for key, value in result.items() if key not in {'scoring', 'gap', 'charts', 'warnings'}},
-        }
-        encoded_result = json.dumps(
-            _serialize_result_value(result_payload), ensure_ascii=False, separators=(',', ':'), allow_nan=False,
-        )
-        _update_scoring_job(
-            repository, job_id, status='completed', progress=100,
-            message='Scoring tables and GAP analysis are ready', result_json=encoded_result,
-            last_error='', finished_at=local_now_iso(),
-        )
+        _save_scoring_result(repository, job, job_id, dataset_ids, configuration, result)
     except _ScoringJobDeleted:
         return None
     except Exception as exc:
-        _update_scoring_job(
-            repository, job_id, status='failed', progress=100,
-            message='Scoring calculation failed', last_error=str(exc), finished_at=local_now_iso(),
-        )
-        # App Logs show why a calculation failed, with where it happened.
-        if hasattr(repository, 'try_add_log'):
-            import traceback
-            repository.try_add_log(str(job.get('created_by') or 'system'), 'scoring_job_failed', json.dumps({
-                'job_id': job_id, 'error': f'{type(exc).__name__}: {exc}',
-                'location': ''.join(traceback.format_exception(exc)[-3:]).strip()[-1500:],
-            }, ensure_ascii=False))
+        _fail_scoring_job(repository, job, job_id, exc)
     return get_scoring_job(repository, job_id, include_result=True)
+
+
+def _engine_kwargs(repository: Repository, job: dict[str, Any], configuration: dict[str, Any],
+                   calculate: Callable[..., Any]) -> dict[str, Any]:
+    """The options of the engine's calculation: reference, methodology, operator names and Map Areas."""
+    parameters = inspect.signature(calculate).parameters
+    call_kwargs = {
+        'baseline_operator': job['baseline_operator'],
+        'configuration': configuration,
+    }
+    accepts_keywords = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+    if 'operator_mappings' in parameters or accepts_keywords:
+        call_kwargs['operator_mappings'] = job.get('operator_mappings', {})
+    if 'baseline_aliases' in parameters or accepts_keywords:
+        call_kwargs['baseline_aliases'] = job.get('baseline_aliases', [])
+    if 'map_areas' in parameters:
+        # The tests are placed in the workspace's Map Areas of their country (the ITL3 areas in the UK).
+        from src.modules.map_areas import area_index
+        call_kwargs['map_areas'] = area_index(repository)
+    return call_kwargs
+
+
+def _history_result(repository: Repository, job: dict[str, Any], configuration: dict[str, Any], dataset_ids: list[int],
+                    context_filters: dict[str, list[str]], engine: Any, update_progress) -> dict[str, Any] | None:
+    """The scoring (and area summary) of the job from the Scoring History when it holds every selected CDR at its
+    current revision with every KPI of the methodology, and the split and filters are its dimensions; else None."""
+    from src.modules import scoring as scoring_engine
+    from src.modules.scoring_history import HistoryUnavailable, calculate_scoring_from_history, history_covers
+
+    if engine is not scoring_engine or not history_covers(repository, dataset_ids, job['levels'], configuration,
+                                                           context_filters):
+        return None
+    update_progress(20, 'Calculating from the Scoring History')
+    catalogues = repository.cdr_catalogues_by_dataset(dataset_ids)
+    options = {
+        'baseline_operator': job['baseline_operator'], 'configuration': configuration,
+        'baseline_aliases': job.get('baseline_aliases', []), 'operator_mappings': job.get('operator_mappings', {}),
+        'context_filters': context_filters,
+        'vendor_operators': scoring_vendor_operators(catalogues, repository.list_operator_mapping_groups()),
+    }
+    try:
+        result = calculate_scoring_from_history(repository, dataset_ids, job['levels'], **options)
+        if job.get('area_summary'):
+            def calculate(levels: list[str], *, time_split: str | None = None, cities=None) -> dict[str, Any]:
+                return calculate_scoring_from_history(repository, dataset_ids, levels, time_split=time_split,
+                                                      cities=cities, **options)
+            summary = calculate_area_summary_from_history(calculate, job['levels'], job['area_summary'], update_progress)
+            result['warnings'] = [*(result.get('warnings') or []), *summary.pop('warnings')]
+            result['area_summary'] = summary
+    except HistoryUnavailable:
+        return None
+    result['points_loss'] = {'version': 2, 'pending': True}
+    return result
+
+
+def _complete_points_loss(repository: Repository, job: dict[str, Any], job_id: int, sources: list[dict[str, Any]],
+                          dataset_ids: list[int], configuration: dict[str, Any],
+                          context_filters: dict[str, list[str]], engine: Any) -> None:
+    """Read the rows of the tests and add the Points Lost Map to a result calculated from the Scoring History."""
+    try:
+        for source in sources:
+            source['levels'] = list(job['levels'])
+        required_columns = getattr(engine, 'load_input_columns', None) or getattr(engine, 'required_input_columns')
+        frames = _load_source_frames(repository, sources, lambda *_args: None, required_columns, context_filters)
+        calculate = engine.calculate_scoring
+        points_loss = calculate(frames, job['levels'], **_engine_kwargs(repository, job, configuration, calculate))['points_loss']
+        document = {'points_loss': points_loss}
+        _attach_mapping_boundaries(repository, dataset_ids, document)
+    except Exception as exc:  # The scores stay; only the map is missing.
+        document = {'points_loss': {'version': 2, 'error': str(exc)}}
+    with repository.connection() as connection:
+        row = connection.execute('SELECT status, result_json FROM scoring_jobs WHERE id = ?', (int(job_id),)).fetchone()
+    if row is None or row['status'] != 'completed' or not row['result_json']:
+        return
+    result = json.loads(row['result_json'])
+    if not (isinstance(result.get('points_loss'), dict) and result['points_loss'].get('pending')):
+        return
+    result['points_loss'] = _serialize_result_value(document['points_loss'])
+    _update_scoring_job(repository, job_id, result_json=json.dumps(result, ensure_ascii=False, separators=(',', ':'),
+                                                                   allow_nan=False),
+                        message='Scoring tables, GAP analysis and Points Lost Map are ready')
+
+
+def _save_scoring_result(repository: Repository, job: dict[str, Any], job_id: int, dataset_ids: list[int],
+                         configuration: dict[str, Any], result: dict[str, Any], *, points_loss_pending: bool = False) -> None:
+    """Store the result of a calculation once the selected CDRs are checked unchanged."""
+    if not isinstance(result, dict):
+        raise TypeError('The scoring engine must return a result object.')
+    _attach_mapping_boundaries(repository, dataset_ids, result)
+    result.setdefault('configuration', configuration)
+    result.setdefault('configuration_hash', configuration_hash(configuration))
+    result.setdefault('gap_direction', 'operator_minus_reference')
+    result.setdefault('baseline_aliases', job.get('baseline_aliases', []))
+    result.setdefault('aggregation_levels', job['levels'])
+    result.setdefault('aggregation_contract_version', job['aggregation_contract_version'])
+    result.setdefault('campaigns', job['campaigns'])
+    _latest_sources, _latest_campaigns, final_fingerprint = _source_snapshot(
+        repository, dataset_ids, expected_nr_mode=job['nr_mode'],
+    )
+    if final_fingerprint != job['source_fingerprint']:
+        raise ValueError('A selected CDR changed while its scoring calculation was running.')
+    result_payload = {
+        'scoring': result.get('scoring', []),
+        'gap': result.get('gap', []),
+        'charts': result.get('charts', []),
+        'warnings': result.get('warnings', []),
+        **{key: value for key, value in result.items() if key not in {'scoring', 'gap', 'charts', 'warnings'}},
+    }
+    encoded_result = json.dumps(
+        _serialize_result_value(result_payload), ensure_ascii=False, separators=(',', ':'), allow_nan=False,
+    )
+    _update_scoring_job(
+        repository, job_id, status='completed', progress=100,
+        message=('Scoring tables and GAP analysis are ready; preparing the Points Lost Map' if points_loss_pending
+                 else 'Scoring tables and GAP analysis are ready'),
+        result_json=encoded_result, last_error='', finished_at=local_now_iso(),
+    )
+
+
+def _fail_scoring_job(repository: Repository, job: dict[str, Any], job_id: int, exc: Exception) -> None:
+    """Keep a failed calculation with its reason, for review."""
+    _update_scoring_job(
+        repository, job_id, status='failed', progress=100,
+        message='Scoring calculation failed', last_error=str(exc), finished_at=local_now_iso(),
+    )
+    # App Logs show why a calculation failed, with where it happened.
+    if hasattr(repository, 'try_add_log'):
+        import traceback
+        repository.try_add_log(str(job.get('created_by') or 'system'), 'scoring_job_failed', json.dumps({
+            'job_id': job_id, 'error': f'{type(exc).__name__}: {exc}',
+            'location': ''.join(traceback.format_exception(exc)[-3:]).strip()[-1500:],
+        }, ensure_ascii=False))

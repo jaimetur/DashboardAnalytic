@@ -1658,7 +1658,7 @@ def test_charts_maps_and_tables_open_larger_and_charts_zoom():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
     # Every Scoring chart zooms like the maps; the zoom buttons do not open the larger view.
     assert "if (svg) enableMapZoom(card, svg);" in script
-    assert "if (!event.target.closest('.scoring-map-zoom')) openExpandedChart(card);" in script
+    assert "if (event.target.closest('.scoring-map-zoom')) return;" in script and 'else openExpandedChart(card);' in script
     # Maps and the tables of Scoring Tables and GAP Analysis open larger with a double click; charts and maps zoom there.
     assert "root.addEventListener('dblclick', event => {" in script
     assert "openExpandedView(map.querySelector('svg'), ['Points Lost Map', operator]" in script
@@ -1770,4 +1770,12 @@ def test_the_area_charts_take_the_height_of_the_table_and_tilt_crowded_labels():
     chart = _function_source(script, 'makeAreaTrendChart')
     assert "const tilted = campaigns.length > 1 && labelWidth > spacing - 4;" in chart
     assert "transform: `rotate(-40 ${x(index)} ${labelY})`" in chart
+    # Each chart enlarges alone with a double click, not the whole National & Areas card.
+    assert 'figure.expandPart = () => {' in chart
+    card = _function_source(script, 'makeExpandableChartCard')
+    assert "map(element => element.closest?.('.scoring-expandable-part')).find(Boolean);" in card
+    assert 'if (part?.expandPart) part.expandPart();' in card
+    # The table beside the charts enlarges on its own too.
+    assert 'tableWrap.expandPart = () => openExpandedView(' in _function_source(script, 'makeAreaSummaryView')
+    assert "openExpandedView(large, `${scoringLabel()} — ${area.label}`, 'National & Areas trend', figure, 'Area trend');" in chart
 

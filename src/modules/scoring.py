@@ -304,8 +304,6 @@ def calculate_scoring(
     """
     config = _required_configuration(configuration)
     metrics = config['metrics']
-    metric_by_code = {metric['code']: metric for metric in metrics}
-    method_version = method_version_for_configuration(config)
     baseline_aliases = list(dict.fromkeys(
         [str(baseline_operator), *(str(alias).strip() for alias in baseline_aliases if str(alias).strip())]
     ))
@@ -476,6 +474,22 @@ def calculate_scoring(
                                     'unit': metric.get('unit'), 'value': value, 'sample_count': count,
                                     'complete_coverage': value is not None and not missing_environments,
                                     'missing_environments': missing_environments})
+    return finish_scoring(
+        rows, global_kpis, keys=keys, dimensions=dimensions, config=config, baseline_operator=baseline_operator,
+        baseline_aliases=baseline_aliases, warnings=warnings, campaigns=campaign_values.values(),
+        points_loss_document={'version': 2, **geometry.document(), 'map_areas': geometry.map_areas(map_areas),
+                              'shares': loss_shares},
+    )
+
+
+def finish_scoring(
+    rows: list[dict], global_kpis: list[dict], *, keys: list[str], dimensions: list[str], config: dict,
+    baseline_operator: str, baseline_aliases: list[str], warnings: list[str], campaigns: Iterable[str],
+    points_loss_document: dict | None,
+) -> dict:
+    """Score the KPI rows (their values and sample counts at each group) and build the result: totals, GAPs and
+    environment scaling. Shared by the calculation from the CDR rows and the one from the Scoring History."""
+    metric_by_code = {metric['code']: metric for metric in config['metrics']}
     for row in rows:
         if row['value'] is None:
             continue
@@ -502,15 +516,14 @@ def calculate_scoring(
     gap = _gap_rows(rows, keys, baseline_operator, baseline_aliases, warnings)
     gap_totals = _gap_totals(totals, keys, baseline_operator, baseline_aliases)
     return {'scoring': rows, 'global_kpis': global_kpis,
-            'points_loss': {'version': 2, **geometry.document(), 'map_areas': geometry.map_areas(map_areas),
-                            'shares': loss_shares},
+            'points_loss': points_loss_document,
             'totals': totals, 'charts': [dict(row) for row in totals], 'gap': gap,
             'gap_totals': gap_totals, 'warnings': list(dict.fromkeys(warnings)), 'notices': notices,
             'environment_scaling': environment_scaling(totals),
             'aggregation_levels': dimensions,
             'aggregation_contract_version': AGGREGATION_CONTRACT_VERSION,
-            'campaigns': sorted(campaign_values.values(), key=lambda value: (campaign_sort_key(value), value)),
-            'method_version': method_version, 'configuration': config,
+            'campaigns': sorted(campaigns, key=lambda value: (campaign_sort_key(value), value)),
+            'method_version': method_version_for_configuration(config), 'configuration': config,
             'configuration_hash': configuration_hash(config), 'gap_direction': 'operator_minus_reference',
             'baseline_aliases': baseline_aliases}
 

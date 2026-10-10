@@ -10607,6 +10607,9 @@ def render_admin_template(
         'datasets': 'Datasets',
         'generated_jobs': 'Generated jobs',
         'scoring_jobs': 'Scoring And GAP Analysis Jobs',
+        'scoring_history': 'Scoring History',
+        'scoring_history_sources': 'Scoring History Sources',
+        'scoring_history_files': 'Scoring History Files',
         'chart_mapping_groups': 'Chart mapping groups',
         'operator_mappings': 'Operator Mappings',
         'vendor_mappings': 'Vendor Mappings',
@@ -16728,8 +16731,11 @@ def _scoring_job_payload(job: dict[str, Any], operator_groups: list[dict], vendo
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     result['coverage_notes'] = scoring_coverage_notes(result)
     # The points-lost shares and polygons reach the page through the views' insights and the boundaries endpoint.
+    points_loss = result.get('points_loss')
     return {'job': {key: value for key, value in job.items() if key != 'result'},
             **{key: value for key, value in result.items() if key not in {'points_loss', 'area_summary'}},
+            # A result from the Scoring History gets its Points Lost Map once the rows of the tests are read.
+            'points_loss_pending': bool(isinstance(points_loss, dict) and points_loss.get('pending')),
             'views': views, 'scorings': scorings}
 
 
@@ -22612,6 +22618,10 @@ install_network_insights_routes(sys.modules[__name__])
 # its report to Reporting Jobs.
 from src.modules.non_qualified_calls import install_non_qualified_calls_routes
 install_non_qualified_calls_routes(sys.modules[__name__])
+
+# The Scoring History keeps the KPI components of every CDR, indexed when the server is idle.
+from src.modules.scoring_history import install_scoring_history
+install_scoring_history(sys.modules[__name__])
 
 # Reporting schedules jobs that collect CDR Analysis, Network Insights,
 # Dashboard and Scoring artifacts and email them.

@@ -3992,7 +3992,13 @@
     if (svg) enableMapZoom(card, svg);
     else enableContentZoom(card, scroll);
     card.addEventListener('dblclick', event => {
-      if (!event.target.closest('.scoring-map-zoom')) openExpandedChart(card);
+      if (event.target.closest('.scoring-map-zoom')) return;
+      // The zoom captures the pointer, so the part under it (a National & Areas trend or table) is found by its
+      // position: it enlarges alone.
+      const part = document.elementsFromPoint(event.clientX, event.clientY)
+        .map(element => element.closest?.('.scoring-expandable-part')).find(Boolean);
+      if (part?.expandPart) part.expandPart();
+      else openExpandedChart(card);
     });
     card.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') {
@@ -5025,7 +5031,11 @@
       });
     });
     const tableWrap = document.createElement('div');
-    tableWrap.className = 'scoring-insight-table-wrap';
+    tableWrap.className = 'scoring-insight-table-wrap scoring-expandable-part';
+    // The table enlarges on its own with a double click, as each chart does.
+    tableWrap.title = 'Double-click to enlarge this table';
+    tableWrap.expandPart = () => openExpandedView(tableWrap.querySelector('table'), `${scoringLabel()} — National & Areas`,
+      'National & Areas table', tableWrap, 'Table');
     const table = insightTable(headers, rows, {className: 'scoring-area-summary-table'});
     [...table.tBodies[0].rows].forEach((row, index) => { if (rowClasses[index]) row.className = rowClasses[index]; });
     tableWrap.append(table);
@@ -5146,6 +5156,13 @@
       }
     });
     figure.append(caption, svg);
+    // Each chart enlarges on its own with a double click (not the whole National & Areas card).
+    figure.title = 'Double-click to enlarge this chart';
+    figure.classList.add('scoring-expandable-part');
+    figure.expandPart = () => {
+      const large = makeAreaTrendChart(area, campaigns, low, high, step, Math.max(height, 240)).querySelector('svg');
+      openExpandedView(large, `${scoringLabel()} — ${area.label}`, 'National & Areas trend', figure, 'Area trend');
+    };
     return figure;
   }
 
@@ -5460,6 +5477,24 @@
   // side) and the analysis per City, Region or Cluster.
   function renderPointsLossMaps(pane, payload, environment, jobId) {
     if (!environment || !jobId) return;
+    if (payload.points_loss_pending) {
+      // Calculated from the Scoring History: the map follows once the rows of the tests are read.
+      const section = document.createElement('section');
+      section.className = 'scoring-insight-section scoring-result-card scoring-loss-maps-card';
+      const heading = document.createElement('h4');
+      heading.className = 'scoring-table-section-title';
+      heading.textContent = 'Points Lost Map';
+      const waiting = document.createElement('div');
+      waiting.className = 'scoring-calculating is-loading';
+      waiting.setAttribute('role', 'status');
+      waiting.innerHTML = '<p class="scoring-calculating-title">Preparing the Points Lost Map…</p>'
+        + '<div class="scoring-calculating-bar" role="progressbar" aria-label="Preparing the Points Lost Map">'
+        + '<span class="scoring-calculating-fill" style="width: 100%"></span></div>'
+        + '<p class="scoring-calculating-detail">The scores come from the Scoring History; the map reads the rows of the tests.</p>';
+      section.append(heading, waiting);
+      pane.append(section);
+      return;
+    }
     const maps = insightItems(payload, 'points_loss_maps', environment);
     if (!maps.length) return;
     const seriesKey = item => `${item.operator}|${JSON.stringify(item.context)}`;
@@ -6505,6 +6540,8 @@
     setExportLinks('', false);
   }
 
+  let pointsLossTimer = 0;
+
   async function loadJob(job, force = false, updateJobList = true) {
     const id = jobIdOf(job);
     if (!id) return;
@@ -6532,6 +6569,15 @@
         currentResults = payload;
         resultCache.set(id, payload);
         renderResult(payload, record);
+        // A result from the Scoring History is reloaded once its Points Lost Map is ready.
+        window.clearTimeout(pointsLossTimer);
+        if (payload.points_loss_pending) {
+          pointsLossTimer = window.setTimeout(() => {
+            if (selectedJobId !== id) return;
+            resultCache.delete(id);
+            loadJob(selectedJob, true, false);
+          }, 5000);
+        }
       } else if (status === 'failed') {
         currentResults = null;
         currentResultsJobId = null;

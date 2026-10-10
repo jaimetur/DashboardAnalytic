@@ -132,6 +132,34 @@ def calculate_area_summary(calculate: Callable[..., dict], frames: dict[str, pd.
             'time_split': area_summary.get('time_split') or 'Campaign', 'passes': passes, 'warnings': warnings}
 
 
+def calculate_area_summary_from_history(calculate: Callable[..., dict], levels: list[str], area_summary: dict[str, Any],
+                                        progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
+    """The National, chosen-city and breakdown calculations of an area summary from the Scoring History.
+
+    ``calculate(levels, time_split=..., cities=...)`` scores the job's CDRs and filters from the history.
+    """
+    passes = []
+    warnings = []
+    period = normalize_time_split(area_summary.get('time_split'))
+    for index, item in enumerate(_passes(levels, area_summary)):
+        saved = {key: item[key] for key in ('kind', 'field', 'levels', 'reuses_job') if key in item}
+        if 'cities' in item:
+            saved['cities'] = item['cities']
+        if not item['reuses_job']:
+            if progress is not None:
+                progress(88 + index * 2, f"Calculating the {item['kind']} scoring of the area summary")
+            result = calculate(item['levels'], time_split=period, cities=item.get('cities'))
+            rows = result.get('scoring') if isinstance(result, dict) else None
+            if not rows or (item['field'] and not any(row.get(item['field']) not in (None, '') for row in rows)):
+                what = ', '.join(item['cities']) if 'cities' in item else item['kind']
+                warnings.append(f'National & Area Summary: the selected CDRs have no {what} measurements.')
+                continue
+            saved['result'] = {key: result[key] for key in _PASS_RESULT_KEYS if key in result}
+        passes.append(saved)
+    return {'breakdown': area_summary.get('breakdown'), 'cities': list(area_summary.get('cities') or []),
+            'time_split': area_summary.get('time_split') or 'Campaign', 'passes': passes, 'warnings': warnings}
+
+
 def most_reliable_area_summary(summary: Any, transform: Callable[[dict], dict | None]) -> Any:
     """The area summary of the Most Reliable scoring: each calculation transformed like the job's own result."""
     if not isinstance(summary, dict) or not isinstance(summary.get('passes'), list):
